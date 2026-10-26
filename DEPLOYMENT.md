@@ -1,77 +1,71 @@
-# Automatisk filoverførsel fra GitHub til webhotellet
+# FTPS-deploy — kun den offentlige LexGalleri-mappe
 
-Workflowet **Deploy PHP via SFTP** overfører kun seks kodefiler fra `main`, når det startes manuelt. PHP/MySQL-testene på netop den commit skal bestå først. Der bruges SFTP, så SSH-shelladgang er ikke nødvendig. Node og sshpass bruges kun af GitHub-runneren, ikke på webhotellet.
+Adgangsgrænsen er fast: vores FTPS-konto må kun se `/home/lexandkk/public_html/LexGalleri`. Du installerer og opdaterer selv private filer via din egen adgang, som beskrevet i [INSTALLATION.md](INSTALLATION.md).
 
-## Hvad er allerede indstillet?
+## Kontoens rod
 
-- Port: **22**.
-- Offentlig appmappe: **`/home/lexandkk/public_html/LexGalleri`**.
-- Privat appmappe: **`/home/lexandkk/lexgalleri-private`**.
-- Rettigheder på overførte filer: privat **600**, offentlig **644**.
-- Første opsætning, konti, billeder, sessioner og udfyldt konfiguration håndteres stadig af PHP-appen og din private servermappe; de kommer ikke med i deploy.
+Begræns kontoen i webhotellets kontrolpanel, så dens FTP-rod `/` svarer til `/home/lexandkk/public_html/LexGalleri`. Workflowet arbejder kun i denne rod og dens `static/`-mappe. Det får ingen sti til eller adgang til serverens private mappe, og det forsøger ikke at åbne den.
 
-GitHub-adgang til kode er ikke det samme som webhoteladgang. Workflowet får adgang gennem repositoryets Actions secrets/variables. Eksisterende værdier med navnene nedenfor kan genbruges. Secrets i et andet repository bliver ikke automatisk tilgængelige her; en organisationssecret kan deles med LexGalleri, hvis organisationens indstillinger tillader det.
+Kontrollér rodbegrænsningen i kontrolpanelet, før kontoen kobles på GitHub. FTP-protokollens `PWD /` alene beviser ikke, hvilken fysisk servermappe roden er koblet til. Serveren skal håndhæve begrænsningen.
 
-## Forbindelsesoplysninger
+## GitHub-indstillinger — én gang
 
-Åbn repositoryets **Settings → Secrets and variables → Actions**.
+Åbn **Settings → Secrets and variables → Actions** i LexGalleri.
 
-| Navn | Placering | Indhold |
-|---|---|---|
-| `SFTP_PASSWORD` | Secret | SFTP-kontoens adgangskode |
-| `SFTP_HOST` | Variable eller eksisterende secret | Den faktiske SFTP-server fra webhotellets kontrolpanel |
-| `SFTP_USERNAME` | Variable eller eksisterende secret | SFTP-brugernavnet |
-| `SFTP_KNOWN_HOSTS` | Variable eller eksisterende secret | Verificeret SSH-værtsnøgle i OpenSSH known_hosts-format |
-| `SFTP_PORT` | Valgfri variable/secret | Kun nødvendig, hvis porten ikke er 22 |
+Opret under **Variables**:
 
-Der skal ikke oprettes en port-secret, hvis webhotellet bruger standardporten. `e-studio.dk` er oplyst som udbyder; det er ikke i sig selv en bekræftelse på SFTP-værtsnavnet.
-
-En known_hosts-linje har fx formen `sftp.example.dk ssh-ed25519 AAAA...` eller `[sftp.example.dk]:2222 ssh-ed25519 AAAA...` ved en anden port. Brug serverens rigtige nøgle, og kontrollér fingerprint mod webhotellets oplysning eller en allerede verificeret SFTP-forbindelse. Workflowet accepterer ikke ukendte eller ændrede værtsnøgler automatisk. Værtsnøglen er offentlig og kan godt være en variable. Den er forskellig fra din private SSH-login-nøgle; det nuværende workflow bruger adgangskode-login.
-
-Hvis der allerede findes passende secrets under andre navne, kan workflowets mapping ændres i stedet for at oprette dubletter. Del kun navnene på secrets i chatten, aldrig adgangskoderne.
-
-## Kontroller SFTP-stierne én gang
-
-Nogle konti er begrænset til en bestemt mappe (chroot). Det betyder, at SFTP-programmet kan vise andre stier end PHP's filsystemstier. Hvis din SFTP-forbindelse starter direkte i `/home/lexandkk/`, kan de synlige stier fx være `/public_html/LexGalleri` og `/lexgalleri-private`.
-
-Workflowet gætter ikke alternative stier. Hvis de aftalte absolutte stier ikke er dem, du ser via SFTP, opret disse to repository-variables med de verificerede SFTP-stier:
-
-- `SFTP_PUBLIC_PATH`
-- `SFTP_PRIVATE_PATH`
-
-Den private mappe skal fortsat være uden for webroden. PHP-appens konfiguration bruger den virkelige serversti fra INSTALLATION.md; SFTP-stiernes eventuelle chroot ændrer ikke PHP-stien.
-
-## Første installation
-
-Følg [INSTALLATION.md](INSTALLATION.md) for database, private mapper, rettigheder og `config.php`. Deployworkflowet overfører ikke konfigurationen eller et konfigurationseksempel, og det opretter ikke nye loginoplysninger. Første installation kan derfor først fungere, når den private konfiguration er udfyldt.
-
-Kodeoverførslen kan oprette de to appmapper og den offentlige `static/`-mappe, hvis kontoens rettigheder tillader det. Sørg selv for de private mappers ejer/rettigheder som beskrevet i installationsvejledningen. Workflowet sætter selve privatmappen til 700 og de to offentlige kode-mapper til 755. Rettigheder på eksisterende datamapper ændres ikke. Det forudsætter den samme ejer som i installationsvejledningen; brug en tilpasset opsætning, hvis webhotellets PHP kører som en anden bruger.
-
-## Start overførslen
-
-1. Sørg for, at PHP-versionen og deployworkflowet ligger på `main`.
-2. Åbn **Actions → Deploy PHP via SFTP → Run workflow**.
-3. Vælg **main**, og start kørslen. Andre branches bliver sprunget over.
-4. Workflowet kører PHP/MySQL-tests, kontrollerer forbindelsesfelterne og overfører derefter kodefilerne.
-5. Kontrollér galleriets HTTPS-adresse og et ufølsomt testfoto bagefter.
-
-Workflowet er manuelt og starter aldrig på et almindeligt push eller en pull request. Det kræver ikke, at nogen deler adgangskoden i chatten. En administrator af GitHub-repositoryet kan starte det, når forbindelsen er oprettet.
-
-## Hvad bliver overført?
-
-| Fra GitHub | Til serveren |
+| Navn | Værdi |
 |---|---|
-| `private/app.php` | Privat mappe / `app.php` |
-| `private/schema.sql` | Privat mappe / `schema.sql` |
-| `public/static/style.css` | Offentlig mappe / `static/style.css` |
-| `public/static/app.js` | Offentlig mappe / `static/app.js` |
-| `public/.htaccess` | Offentlig mappe / `.htaccess` |
-| `public/index.php` | Offentlig mappe / `index.php` |
+| `FTPS_HOST` | Den rigtige FTPS-server fra dit webhotel |
+| `FTPS_USERNAME` | Kontoen, der er begrænset til LexGalleri-mappen |
+| `FTPS_PORT` | Den oplyste port, ofte 21 |
 
-Ingen rekursiv synkronisering eller sletning bruges. Alle seks filer uploades under midlertidige navne, før nogen aktiv fil erstattes. Derefter erstattes hver fil via SFTP-rename. Serveren skal understøtte rename med erstatning af eksisterende fil (typisk OpenSSH `posix-rename`). Hvis det ikke understøttes, stopper overførslen uden at slette målfilen først.
+Opret under **Secrets**:
 
-Hele installationen på tværs af mapper er ikke én atomisk transaktion: hvis forbindelsen afbrydes under den sidste rename-fase, kan der være en blanding af gamle og nye kodefiler. Kør igen med samme kodeversion, eller gendan kode fra backup. En afbrudt overførsel kan efterlade skjulte midlertidige kodefiler med præfikset `.lexgalleri-`; de kan fjernes manuelt efter kontrol. Der bruges ingen automatisk oprydning, som risikerer at slette billeder eller konfiguration.
+| Navn | Værdi |
+|---|---|
+| `FTPS_PASSWORD` | Denne FTPS-kontos adgangskode |
 
-## Hvad er verificeret?
+Der antages ingen server, bruger eller secret fra LexApp eller andre projekter. Del aldrig adgangskoden i chatten. Der skal ikke oprettes SSH-værtsnøgler til FTPS; workflowet bruger almindelig TLS-certifikat- og værtsnavnekontrol.
 
-Planens fil-liste, rækkefølge, stier og validering testes automatisk. PHP/MySQL-integrationen testes separat. En rigtig SFTP-overførsel og det konkrete webhotel er ikke verificeret, før forbindelsesoplysningerne er tilgængelige og workflowet er kørt med succes. Et grønt testresultat alene er ikke bevis for, at appen er installeret på serveren.
+Secrets i et andet repository bliver ikke automatisk tilgængelige her og kan ikke læses tilbage fra GitHub. En allerede passende organisationssecret kan deles med repositoryet, hvis organisationens indstillinger tillader det. Databaseadgangskoden og opsætningsnøglen skal blive i din private serverkonfiguration.
+
+## Først: kontrollér forbindelsen uden upload
+
+1. Åbn **Actions → Deploy PHP via FTPS → Run workflow**.
+2. Vælg **main**.
+3. Behold **diagnostic_only** slået til.
+4. Start kørslen.
+
+Dette kontrollerer FTPS-login, TLS-certifikat og krypteret listning af den offentlige kontorod. Det overfører ingen filer, opretter ingen mapper og ændrer ingen rettigheder. Det tilgår ikke privatmappen. Hvis certifikat/login fejler, skal den konkrete fejl løses; certifikatkontrollen må ikke slås fra.
+
+## Dernæst: overfør de offentlige filer
+
+Når du har kontrolleret kontoens rod og selv installeret de private filer, kører du samme workflow på `main` med **diagnostic_only slået fra**. PHP/MySQL-testene og deployplantestene på samme commit skal bestå, før overførslen begynder.
+
+Kun følgende fire filer overføres:
+
+| Fra GitHub | Til FTPS-kontoens rod |
+|---|---|
+| `public/static/style.css` | `static/style.css` |
+| `public/static/app.js` | `static/app.js` |
+| `public/.htaccess` | `.htaccess` |
+| `public/index.php` | `index.php` |
+
+Ingen privat PHP-kode, schema.sql, konfiguration, billeder, sessionsfiler eller database kopieres. Der er ingen rekursiv synkronisering, sletning eller oprydning uden for de fire kodefiler. Den offentlige `static/`-mappe kan oprettes med rettigheder 755, og overførte filer får 644. Kontorodens egne rettigheder ændres ikke.
+
+Workflowet er manuelt; det starter ikke ved push eller pull requests. Det kører kun fra `main`, og overførsler køres én ad gangen. Der kræves ingen SSH-shelladgang. Node og lftp bruges kun på GitHub-runneren; webhotellet behøver kun PHP/MySQL.
+
+## FTPS og filaktivering
+
+Der bruges **eksplicit FTPS** (`ftp://` plus `AUTH TLS`) med obligatorisk TLS på kontrol- og datakanaler, verificeret certifikat og kontrolleret værtsnavn. FTP-adgangskoden gives via lftp's miljøvariabel og skrives ikke i kommandolinjeargumenter eller de genererede planer.
+
+Alle fire filer uploades først med midlertidige navne. Derefter aktiveres hver fil med FTP-rename. Serveren skal understøtte rename, der erstatter en eksisterende fil. Hvis den afviser det, stopper overførslen; der bruges ingen fallback, som sletter målfilen først.
+
+De fire rename-operationer er ikke én samlet transaktion. En afbrudt forbindelse kan efterlade en blanding af kodeversioner eller skjulte `.lexgalleri-...`-filer. Genkør samme kodeversion eller gendan de offentlige filer fra backup. Oprydning af eventuelle midlertidige filer sker manuelt efter kontrol. Private data påvirkes ikke af dette workflow.
+
+## Efter overførsel
+
+Åbn din HTTPS-adresse med `/LexGalleri/`, log ind og kontroller et ufølsomt foto. Første opsætning kræver de private filer og databasen fra installationsvejledningen. Et grønt GitHub-testjob eller en vellykket offentlig filoverførsel beviser ikke, at den private installation virker.
+
+Planens fil-liste, adgangsgrænse, TLS-krav og rækkefølge testes automatisk. Rigtig FTPS-login, serverens rettigheder og rename-funktion er endnu ikke afprøvet på webhotellet.
