@@ -1,0 +1,5 @@
+FROM php:8.4-cli
+RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo-dev libpng-dev libwebp-dev libzip-dev && rm -rf /var/lib/apt/lists/* \
+    && docker-php-ext-configure gd --with-jpeg --with-webp \
+    && docker-php-ext-install -j2 pdo_mysql gd exif zip
+WORKDIR /app
