@@ -2,7 +2,7 @@
 
 Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatter den tidligere Python/FastAPI-prototype. Der kræves ingen Python, Node, Composer, Docker eller vedvarende serverproces i drift.
 
-**Start med [INSTALLATION.md](INSTALLATION.md).** Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
+**Start med [INSTALLATION.md](INSTALLATION.md).** [Deploy fra GitHub via SFTP](DEPLOYMENT.md) kan derefter overføre kodefilerne med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
 ## Funktioner
 

@@ -21,6 +21,8 @@ Tabellerne oprettes automatisk ved første admin-opsætning. Brug en tom databas
 
 ## 3. Opret private mapper via SFTP
 
+Filoverførslen kan også køres fra GitHub med [SFTP-deployworkflowet](DEPLOYMENT.md). Database og privat `config.php` skal stadig oprettes ved første installation.
+
 ```text
 /home/lexandkk/
 ├── lexgalleri-private/

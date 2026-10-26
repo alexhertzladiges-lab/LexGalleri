@@ -2,6 +2,7 @@ name: PHP 8.4 and MySQL
 on:
   push:
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -38,3 +39,5 @@ jobs:
           TEST_DB_PASSWORD: test-only-password
         run: php tests/run.php
       - run: node --check public/static/app.js
+      - run: node --test tests/sftp-plan.test.mjs
+      - run: bash -n scripts/deploy-sftp.sh
