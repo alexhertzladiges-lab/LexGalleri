@@ -176,6 +176,7 @@ async def edit(pid:str,r:Request):
  admin(r);photo_access(pid,r);b=await r.json();precision=b.get('precision','unknown');taken=str(b.get('taken',''))
  patterns={'exact':r'\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?','day':r'\d{4}-\d\d-\d\d','month':r'\d{4}-\d\d','year':r'\d{4}','circa':r'\d{4}','unknown':r''}
  if precision not in patterns or not re.fullmatch(patterns[precision],taken):fail(400,'Dato passer ikke til præcisionen')
+ if precision in ('year','circa') and not 1 <= int(taken) <= 9999:fail(400,'Ugyldigt år')
  if precision not in ('unknown','year','circa'):
   try:datetime.fromisoformat(taken+('-01' if precision=='month' else ''))
   except ValueError:fail(400,'Ugyldig dato')
@@ -202,6 +203,8 @@ def users(r:Request):
 async def grants(r:Request):
  admin(r);b=await r.json()
  with db() as c:
+  if not c.execute('SELECT 1 FROM galleries WHERE id=?',(b.get('gallery_id'),)).fetchone():fail(404,'Galleriet findes ikke')
+  if not c.execute('SELECT 1 FROM users WHERE id=?',(b.get('user_id'),)).fetchone():fail(404,'Brugeren findes ikke')
   if b.get('view'):c.execute('INSERT OR REPLACE INTO grants VALUES(?,?,?,?,?)',(b['gallery_id'],b['user_id'],int(bool(b.get('upload'))),int(bool(b.get('download'))),int(bool(b.get('gps')))))
   else:c.execute('DELETE FROM grants WHERE gallery_id=? AND user_id=?',(b['gallery_id'],b['user_id']))
  return {'ok':True}

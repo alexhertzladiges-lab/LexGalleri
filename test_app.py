@@ -48,6 +48,11 @@ class SecurityFlow(unittest.TestCase):
   self.assertEqual(owner.post('/api/admin/themes/'+tid+'/activate').status_code,200)
   self.assertEqual(owner.get('/api/theme').json()['colors']['accent'],'#123456')
   self.assertEqual(owner.patch('/api/photos/'+p,json={'taken':'2026-13-99','precision':'day'}).status_code,400)
+  for precision in ('year','circa'):
+   self.assertEqual(owner.patch('/api/photos/'+p,json={'taken':'0000','precision':precision}).status_code,400)
+   self.assertEqual(owner.patch('/api/photos/'+p,json={'taken':'1984','precision':precision}).status_code,200)
+  self.assertEqual(owner.put('/api/admin/grants',json={'gallery_id':g,'user_id':'missing','view':True}).status_code,404)
+  self.assertEqual(owner.put('/api/admin/grants',json={'gallery_id':'missing','user_id':uid,'view':True}).status_code,404)
   self.assertEqual(owner.post('/api/logout').status_code,200)
   self.assertEqual(owner.get('/api/me').status_code,401)
 if __name__=='__main__':unittest.main()

@@ -2,6 +2,14 @@
 
 En selvstændig første version af et privat familiearkiv. Python 3.12+, FastAPI, SQLite og lokal billedlagring. Dansk brugerflade, tilpasset mobil og pc. Ingen eksterne skrifttyper, billedtjenester eller analytics.
 
+## Hurtig start på Windows
+
+Installér Python 3.12 eller nyere fra python.org (inklusive Python Launcher). Hent repositoryet og dobbeltklik på **Start-LexGalleri.cmd**. Første start opretter et isoleret Python-miljø og installerer pakkerne. Senere starter genbruger det, indtil requirements.txt ændres.
+
+Åbn **http://127.0.0.1:8000** i browseren. Ved første start vises en opsætningsnøgle i terminalen. Brug den til at oprette admin. Hold terminalen åben, mens appen bruges; stop med Ctrl+C. Ingen opsætningsnøgle gemmes i Git eller på disk. `python start.py` giver samme lokale start på macOS/Linux.
+
+Denne start er kun til pc'en selv. Mobiladgang og deling med familien kræver en separat HTTPS-installation; se Drift nedenfor. Den lokale start ændrer ikke produktionsindstillingerne.
+
 ## Start lokalt
 
 ```bash
@@ -66,10 +74,14 @@ python backup.py /sikker/mappe/familiearkiv-backup.zip
 
 Gem ZIP-filen privat og krypteret. Den indeholder alle konti, adgangskodehashes, sessioner, temaer, metadata og billeder. Værktøjet bruger SQLite backup-API og inkluderer kun de filer, som databasesnapshot henviser til. Stop appen, pak en betroet backup ud til en tom datamappe, og start med `ARCHIVE_DATA` pegende på den. Ryd sessions-tabellen ved sikkerhedsgendannelse. Afprøv gendannelse på separat installation før rigtig drift.
 
+## Automatisk kontrol
+
+GitHub Actions kører API-test, Python-syntakskontrol og JavaScript-syntakskontrol på Windows og Linux ved push og pull requests. Ingen produktionsdata bruges.
+
 ## Kontrol
 
 ```bash
-pip install httpx
+pip install -r requirements-dev.txt
 python -m unittest -v test_app.py
 node --check static/app.js
 ```
