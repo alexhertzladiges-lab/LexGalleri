@@ -4,6 +4,8 @@ Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatt
 
 **Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan derefter overføre de fire offentlige kodefiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
+Har du **Lychee 6.6.12**, kan admin importere fra database og lokale originaler uden eksport eller opgradering. Start med [Lychee-importvejledningen](LYCHEE-IMPORT.md); den kræver særskilt privat konfiguration og en migrering i LexGalleris database, før du laver prøvevisningen.
+
 ## Funktioner
 
 - Administrator, gæstekonti og personlige engangsinvitationer, som udløber efter 7 dage.

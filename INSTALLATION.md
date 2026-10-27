@@ -93,6 +93,10 @@ GitHub/vores FTPS-konto opdaterer **kun de fire offentlige filer**. Hvis en ny k
 
 Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**. SQL alene indeholder ingen billeder. Hold appen ude af brug under manuel samlet backup/gendannelse, opbevar kopier privat/krypteret, og afprøv gendannelse separat. Sessionsmappen kan udelades; brugerne skal så logge ind igen efter gendannelse.
 
+## Import fra Lychee 6.6.12
+
+Følg [den særskilte Lychee-importvejledning](LYCHEE-IMPORT.md), hvis du vil kopiere albummer og billeder fra Lychee 6.6.12 på samme server. Lychee skal ikke opgraderes eller eksportere noget. Du installerer selv importørens private filer, kildekonfiguration og SQL-migrering; FTPS-workflowet overfører fortsat kun de offentlige filer.
+
 ## Fejlfinding
 
 - **FTPS-kontoen viser et andet website:** Ret kontoens rod i kontrolpanelet. Workflowet gætter ikke alternative mapper.
@@ -103,4 +107,4 @@ Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**. S
 - **Login forsvinder:** Brug HTTPS og kontrollér PHP-skriveadgang til `sessions/`.
 - **Upload afvises:** Kontrollér PHP-grænser; prøv et mindre billede.
 
-Ingen webhotelinstallation eller rigtig FTPS-login er foretaget fra denne chat. GitHub-kode og beståede tests er ikke i sig selv en installation på serveren.
+En grøn FTPS-kørsel bekræfter overførslen af de offentlige filer. Kontrollér derefter dit eget website; de private filer og databaseoplysninger installerer du særskilt med din egen adgang.
