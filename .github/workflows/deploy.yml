@@ -7,6 +7,11 @@ on:
         type: boolean
         required: true
         default: true
+      test_web3:
+        description: 'Test kun web3.e-studio.dk i diagnose-tilstand; behold ellers den gemte server'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -22,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      FTPS_HOST: ${{ vars.FTPS_HOST }}
+      FTPS_HOST: ${{ inputs.diagnostic_only && inputs.test_web3 && 'web3.e-studio.dk' || vars.FTPS_HOST }}
       FTPS_USERNAME: ${{ vars.FTPS_USERNAME }}
       FTPS_PORT: ${{ vars.FTPS_PORT }}
       FTPS_PASSWORD: ${{ secrets.FTPS_PASSWORD }}
