@@ -10,7 +10,9 @@ return [
     'db_user' => 'DIN_LYCHEE_LAESEBRUGER',
     'db_password' => 'DIN_HEMMELIGE_LYCHEE_DATABASEADGANGSKODE',
     'table_prefix' => '',
-    // The Lychee images disk root, NOT its big/ subfolder. For a standard6.6.12
-    // installation this is public/uploads, but LYCHEE_UPLOADS may override it.
-    'uploads_root' => '/DIN/LYCHEE/public/uploads',
+    // Root of Lychee's local images disk, immediately above original/.
+    // A saved short_path such as original/01/02/FILE.jpg is relative to this root.
+    // Depending on installation this may be uploads or public/uploads; verify it.
+    // Do not use original/, 01/ or another nested folder as the root.
+    'uploads_root' => '/DIN/LYCHEE/uploads',
 ];

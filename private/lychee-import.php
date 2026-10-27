@@ -66,8 +66,10 @@ function lychee_status(?array $c,bool $ready): array {
     return $out;
 }
 function lychee_safe_path(array $c,array $metadata): array {
+    $variants=(int)($metadata['_variant_count']??0);
+    if($variants===0)return ['missing','Databasen har ingen registreret originalvariant',null];
+    if($variants!==1)return ['error','Databasen har flere originalvarianter for samme foto',null];
     if(($metadata['_storage_disk']??'')!=='images')return ['unsupported','Originalen ligger ikke på Lychees lokale images-disk',null];
-    if((int)($metadata['_variant_count']??0)!==1)return ['error','Originalvarianten mangler eller er tvetydig',null];
     $short=$metadata['_short_path']??'';
     if(!is_string($short)||$short===''||strlen($short)>2000||str_contains($short,"\0")||str_contains($short,'\\')||str_starts_with($short,'/')||preg_match('~(^|/)\.{1,2}(/|$)|:~',$short))return ['error','Ugyldig originalsti',null];
     $path=realpath($c['uploads_root'].'/'.$short);
