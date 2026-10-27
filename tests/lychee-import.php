@@ -12,6 +12,8 @@ $privateRoot = $temp . '/private';
 $uploadsRoot = $temp . '/lychee/public/uploads';
 mkdir($privateRoot . '/config', 0700, true);
 mkdir($uploadsRoot . '/big', 0700, true);
+mkdir($uploadsRoot . '/original/01/02', 0700, true);
+mkdir($uploadsRoot . '/original/0a/0b', 0700, true);
 $targetName = 'lexgalleri_test_' . bin2hex(random_bytes(6));
 $sourceName = 'lexgalleri_test_' . bin2hex(random_bytes(6));
 $sourceUser = 'lychee_ro_' . bin2hex(random_bytes(5));
@@ -108,8 +110,8 @@ SQL);
     $q->execute([$emptyAlbum,'Tomt Lychee-album','Tomt men bevaret','2010-01-01 00:00:00','2020-01-01 00:00:00']);
     $q=$pdo->prepare('UPDATE base_albums SET owner_id=8 WHERE id=?');$q->execute([$emptyAlbum]);
     $q = $pdo->prepare('INSERT INTO albums VALUES(?,?)'); $q->execute([$rootAlbum,null]);$q->execute([$childAlbum,$rootAlbum]);$q->execute([$emptyAlbum,null]);
-    $originalHash = li_jpeg($uploadsRoot.'/big/photo1.jpg',20,100,70);
-    copy($uploadsRoot.'/big/photo1.jpg',$uploadsRoot.'/big/photo2.jpg');
+    $originalHash = li_jpeg($uploadsRoot.'/original/01/02/photo1.jpg',20,100,70);
+    copy($uploadsRoot.'/original/01/02/photo1.jpg',$uploadsRoot.'/original/0a/0b/photo2.jpg');
     li_jpeg($uploadsRoot.'/big/photo7.jpg',100,20,70);
     li_jpeg($uploadsRoot.'/big/photo8.jpg',100,70,20);
     li_jpeg($uploadsRoot.'/big/photo10.jpg',20,70,100);
@@ -117,7 +119,7 @@ SQL);
     li_jpeg($temp.'/outside.jpg',200,10,10);
     symlink($temp.'/outside.jpg',$uploadsRoot.'/big/link.jpg');
     file_put_contents($uploadsRoot.'/big/movie.mp4','test-only unsupported video');
-    $paths = [1=>'big/photo1.jpg',2=>'big/photo2.jpg',3=>'big/missing.jpg',4=>'big/movie.mp4',5=>'../outside.jpg',6=>'big/link.jpg',7=>'big/photo7.jpg',8=>'big/photo8.jpg',9=>'big/cloud.jpg',10=>'big/photo10.jpg',11=>'big/photo11.jpg'];
+    $paths = [1=>'original/01/02/photo1.jpg',2=>'original/0a/0b/photo2.jpg',3=>'big/missing.jpg',4=>'big/movie.mp4',5=>'../outside.jpg',6=>'big/link.jpg',7=>'big/photo7.jpg',8=>'big/photo8.jpg',9=>'big/cloud.jpg',10=>'big/photo10.jpg',11=>'big/photo11.jpg',12=>'original/0c/missing-variant.jpg'];
     $sourceHashes = [];
     foreach ([1,2,7,8,10,11] as $n) $sourceHashes[$paths[$n]] = hash_file('sha256',$uploadsRoot.'/'.$paths[$n]);
     $outsideHash = hash_file('sha256',$temp.'/outside.jpg');
@@ -132,10 +134,14 @@ SQL);
         if($n===8)$checksum=str_repeat('2',40);
         if($n===11){$checksum=str_repeat('0',40);$originalChecksum=str_repeat('3',40);}
         $photoInsert->execute([$id,$n===1?'Manuelt rettet titel':'Lychee foto '.$n,'Manuelt rettet billedtekst '.$n,$n===8?8:7,$n===4?'video/mp4':'image/jpeg','familie,sommer','2001-02-03 04:05:06.000000',$n===8?'Europe/Copenhagen':'UTC','1999-01-01 00:00:00','UTC','55.70000000','12.60000000','København',$checksum,$originalChecksum,0,'2010-05-06 07:08:09.000000','2020-06-07 08:09:10.000000',$rootAlbum]);
-        $variantInsert->execute([$id,$path,$n===9?'s3':'images',$exists?filesize($uploadsRoot.'/'.$path):123]);
+        if($n!==12)$variantInsert->execute([$id,$path,$n===9?'s3':'images',$exists?filesize($uploadsRoot.'/'.$path):123]);
         if ($n!==10) $membershipInsert->execute([$id,$childAlbum]); // photo10 is genuinely unsorted.
         if ($n===1) $membershipInsert->execute([$id,$rootAlbum]); // same photo belongs to two albums.
     }
+    // Derivatives may still be registered after all medium/thumb files are lost.
+    // Only the type=0 original should determine readiness or imported contents.
+    $derivativeInsert=$pdo->prepare('INSERT INTO size_variants(photo_id,type,short_path,storage_disk,width,height,filesize,ratio) VALUES(?,?,?,\'images\',120,80,123,1.5)');
+    for($type=1;$type<=8;$type++)$derivativeInsert->execute([li_photo_id(1),$type,'missing-derivatives/'.$type.'/photo1.jpg']);
     $quotedUser=$pdo->quote($sourceUser);$quotedPassword=$pdo->quote($sourcePassword);
     $pdo->exec('CREATE USER '.$quotedUser."@'%' IDENTIFIED BY ".$quotedPassword);
     $pdo->exec('GRANT SELECT ON `'.$sourceName.'`.* TO '.$quotedUser."@'%'");
@@ -198,6 +204,12 @@ PHP;
     $copied=glob($privateRoot.'/originals/*')?:[];
     li_assert(count($copied)===0,'Preview copies no original files');
     li_assert(li_source_snapshot($pdo,$sourceName)===$sourceSnapshot,'Source database unchanged by scan');
+    $q=$pdo->prepare('SELECT status,source_metadata FROM lychee_import_items WHERE source_photo_id=? ORDER BY id');
+    $q->execute([li_photo_id(1)]);$nestedPreview=$q->fetchAll();
+    li_assert(count($nestedPreview)===2&&!array_filter($nestedPreview,fn($row)=>$row['status']!=='pending'),'Nested original remains ready despite eight missing derivatives');
+    li_assert(!is_dir($uploadsRoot.'/missing-derivatives'),'No Lychee derivative files are needed for the fixture');
+    $q->execute([li_photo_id(12)]);$missingVariant=$q->fetch();
+    li_assert(($missingVariant['status']??'')==='missing','Absent original variant is classified as missing rather than unsupported storage');
     $jobId=$status['job']['id'];
     li_assert(li_request($owner,'POST','/admin/lychee-import/start',['job_id'=>$jobId])[0]===409,'Copy requires explicit confirmation');
     $status=li_ok(li_request($owner,'POST','/admin/lychee-import/start',['job_id'=>$jobId,'confirm'=>true]),'Explicitly start copying');
@@ -218,7 +230,7 @@ PHP;
     li_assert((int)($totals['imported']??0)===5,'Both memberships and unsorted photo imported');
     li_assert((int)($totals['duplicate']??0)===1,'Duplicate content within an album is linked without a second target');
     li_assert((int)($totals['unsupported']??0)>=2,'Unsupported video and cloud source reported');
-    li_assert((int)($totals['missing']??0)>=1,'Missing original reported');
+    li_assert((int)($totals['missing']??0)===2,'Missing original file and absent original registration reported separately');
     li_assert((int)($totals['error']??0)>=3,'Traversal, outside-root symlink and two wrong source checksums refused');
     li_assert((int)$pdo->query("SELECT COUNT(*) FROM photos WHERE title='Lychee foto 11'")->fetchColumn()===0,'Two wrong source checksums create no target photo');
     li_assert((int)$pdo->query("SELECT COUNT(*) FROM photos WHERE title='Lychee foto 7'")->fetchColumn()===1,'Current checksum accepted even when original upload checksum differs');
@@ -239,6 +251,11 @@ PHP;
     $imported=$pdo->query('SELECT * FROM photos ORDER BY id')->fetchAll();$targetHashes=[];
     foreach($imported as $p){$path=$privateRoot.'/originals/'.$p['id'].'.bin';li_assert(is_file($path)&&hash_file('sha256',$path)===$p['digest'],'Copied original matches target digest');$targetHashes[]=$p['digest'];li_assert($p['uploader']===$ownerId,'Importing admin is actual target uploader');}
     li_assert(count(array_filter($targetHashes,fn($h)=>$h===$originalHash))===2,'One original retained in each of its two albums');
+    $q=$pdo->prepare('SELECT status,target_photo_id,source_metadata FROM lychee_import_items WHERE source_photo_id=? ORDER BY id');
+    $q->execute([li_photo_id(1)]);$nestedImports=$q->fetchAll();
+    li_assert(count($nestedImports)===2&&!array_filter($nestedImports,fn($row)=>$row['status']!=='imported'||(json_decode($row['source_metadata'],true)['_short_path']??'')!=='original/01/02/photo1.jpg'),'Nested original path is preserved and imported into both source albums');
+    $q->execute([li_photo_id(2)]);$nestedDuplicate=$q->fetch();
+    li_assert(($nestedDuplicate['status']??'')==='duplicate'&&in_array($nestedDuplicate['target_photo_id']??'',array_column($nestedImports,'target_photo_id'),true)&&(json_decode($nestedDuplicate['source_metadata']??'{}',true)['_short_path']??'')==='original/0a/0b/photo2.jpg','Matching bytes in a different nested original folder reuse the same album photo');
     $manual=$pdo->query("SELECT * FROM photos WHERE title='Manuelt rettet titel'")->fetchAll();
     li_assert(count($manual)===2,'Manual source title preserved across memberships');
     foreach($manual as $p){li_assert(str_starts_with($p['taken'],'2001-02-03T04:05:06'),'Database capture date takes priority over file metadata');li_assert(abs((float)$p['lat']-55.7)<0.000001&&abs((float)$p['lon']-12.6)<0.000001,'Database GPS preserved');li_assert($p['place']==='København','Source location preserved');}

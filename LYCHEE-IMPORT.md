@@ -2,6 +2,8 @@
 
 Importøren læser Lychees database og kopierer originalerne direkte på dit webhotel. Du behøver ingen eksport fra Lychee, og Lychee bliver ikke opgraderet. Den understøttede kilde er **præcis Lychee 6.6.12**, med databaseversionsværdien `060612`.
 
+En fungerende Lychee-installation er ikke nødvendig: databasen og de bevarede originalmapper er nok. Manglende programfiler og gamle visningsbilleder eller miniaturer forhindrer ikke importen. LexGalleri læser kun originalvarianter og laver nye visningsbilleder og miniaturer.
+
 Du installerer selv de private filer og indtaster databaseoplysningerne i en privat konfigurationsfil. GitHub/vores FTPS-konto får fortsat kun adgang til LexGalleris offentlige mappe. Importen køres af dig, mens du er logget ind som admin i LexGalleri.
 
 ## 1. Tag backup og kontrollér pladsen
@@ -16,15 +18,21 @@ Undgå ændringer i Lychee under scanning og kopiering, så albummer, metadata o
 
 Brug din egen adgang til Lychees konfiguration og webhotellets kontrolpanel til at finde databaseværten, porten, databasenavnet og et eventuelt tabelpræfiks. Opret helst en særskilt databasebruger med **kun SELECT på Lychee-databasen**. Importøren skal ikke kunne ændre Lychees tabeller. Hvis kontrolpanelet ikke tilbyder en læsebruger, bed webhotellet om at oprette den.
 
-Databaseoplysningerne står normalt i Lychee-installationens `.env` som `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` og `DB_PASSWORD`. Aktivér eventuelt **vis skjulte filer** i filmanageren. Læs dem kun med din egen adgang; ændr ikke Lychees konfiguration. Den nye læsebruger til importen kan have et andet brugernavn og en anden adgangskode end Lychees egen databasebruger.
+Databaseoplysningerne står normalt i Lychee-installationens `.env` som `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` og `DB_PASSWORD`. Aktivér eventuelt **vis skjulte filer** i filmanageren. Hvis programfilerne eller `.env` er væk, bruger du webhotellets databaseoversigt til at finde databasen og oprette læsebrugeren; `.env` er ikke et krav. Læs eksisterende oplysninger kun med din egen adgang; ændr ikke Lychees konfiguration. Den nye læsebruger til importen kan have et andet brugernavn og en anden adgangskode end Lychees egen databasebruger.
 
-Find samtidig den absolutte serversti til Lychees lokale `images`-disk. Ved en standardinstallation er det Lychees `public/uploads`-mappe, eksempelvis:
+Find samtidig den absolutte serversti til Lychees lokale `images`-disk. Har du en struktur med `uploads/original/01/`, `uploads/original/02/` osv., skal `uploads_root` pege på **`uploads`**, mappen lige over `original`. Eksempel:
 
 ```text
-/home/DIT_LOGIN/public_html/Lychee/public/uploads
+uploads_root: /home/DIT_LOGIN/public_html/Lychee/uploads
+short_path:   original/01/02/EKSEMPEL.jpg
+fuld filsti:  /home/DIT_LOGIN/public_html/Lychee/uploads/original/01/02/EKSEMPEL.jpg
 ```
 
-Dette er et eksempel, ikke en sti du skal kopiere ukritisk. Lychees indstillinger som `LYCHEE_UPLOADS`/`LYCHEE_UPLOADS_DIR` kan ændre placeringen. `uploads_root` skal være **hele diskens rod**, ikke en underliggende `big/`-mappe. Importøren finder hver original gennem `size_variants` med `type=0` og dens relative `short_path`.
+Dette er et eksempel, ikke en påstand om, hvor en bestemt fil ligger. Nogle installationer har `public/uploads`; Lychees indstillinger som `LYCHEE_UPLOADS`/`LYCHEE_UPLOADS_DIR` kan også ændre placeringen. `uploads_root` skal være **hele diskens rod**, ikke `original`, `01` eller en anden undermappe. Importøren finder hver original gennem `size_variants` med `type=0` og dens relative `short_path`, inklusive alle undermapper. Mapper som `medium`, `small` og `thumb` bruges ikke som kilde. Behold filnavne og mappestruktur uændret; filnavnet alene fortæller ikke, hvilket album et billede hører til.
+
+Vil du først slå en bestemt fil op, kan du åbne [lychee-originals.sql](private/tools/lychee-originals.sql), erstatte `DIT_FILNAVN.jpg` med dens filnavn og køre forespørgslen i phpMyAdmins **SQL**-fane i **Lychees database**. Tilpas tabelnavnene, hvis de har et præfiks. Forespørgslen læser kun originalens registrerede sti, fotooplysninger og albumtilknytninger; den ændrer ingen data. Flere rækker kan betyde, at samme foto hører til flere albummer. Gem eventuelle resultater privat.
+
+Et databaseopslag kan vise den forventede sti, men ikke om filen stadig findes. Det kontrolleres af importørens prøvevisning. Manglende originalregistreringer eller originalfiler vises som manglende; databasen kan ikke genskabe slettede billedfiler. Filer uden en databasepost får heller ikke gættet en albumtilknytning.
 
 LexGalleris PHP-proces skal kunne læse denne mappe og originalerne. En FTPS-kontos mappebegrænsning giver ikke i sig selv PHP adgang. Hvis `open_basedir` forhindrer adgang, skal webhotellet tillade PHP at læse både Lychees billedrod og LexGalleris private mappe. Vælg ikke serverens rod eller LexGalleris egen private mappe som kilde. Importøren afviser stier og symlinks, der forlader den angivne billedrod.
 
