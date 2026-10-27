@@ -1,6 +1,12 @@
-name: Deploy PHP via SFTP
+name: Deploy PHP via FTPS
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_only:
+        description: 'Kontrollér kun FTPS-login, TLS og offentlig kontorod; overfør ingen filer'
+        type: boolean
+        required: true
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -8,29 +14,40 @@ concurrency:
   cancel-in-progress: false
 jobs:
   checks:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.diagnostic_only
     uses: ./.github/workflows/tests.yml
-  deploy:
-    if: github.ref == 'refs/heads/main'
+  transfer:
+    if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() && (inputs.diagnostic_only || needs.checks.result == 'success') }}
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SFTP_HOST: ${{ vars.SFTP_HOST || secrets.SFTP_HOST }}
-      SFTP_USERNAME: ${{ vars.SFTP_USERNAME || secrets.SFTP_USERNAME }}
-      SFTP_PORT: ${{ vars.SFTP_PORT || secrets.SFTP_PORT || '22' }}
-      SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
-      SFTP_KNOWN_HOSTS: ${{ vars.SFTP_KNOWN_HOSTS || secrets.SFTP_KNOWN_HOSTS }}
-      SFTP_PUBLIC_PATH: ${{ vars.SFTP_PUBLIC_PATH || '/home/lexandkk/public_html/LexGalleri' }}
-      SFTP_PRIVATE_PATH: ${{ vars.SFTP_PRIVATE_PATH || '/home/lexandkk/lexgalleri-private' }}
+      FTPS_HOST: ${{ vars.FTPS_HOST }}
+      FTPS_USERNAME: ${{ vars.FTPS_USERNAME }}
+      FTPS_PORT: ${{ vars.FTPS_PORT }}
+      FTPS_PASSWORD: ${{ secrets.FTPS_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate connection settings without displaying them
-        run: node scripts/sftp-plan.mjs "$RUNNER_TEMP/lexgalleri-sftp-preflight"
-      - name: Install SFTP password helper
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-      - name: Transfer code files via SFTP
-        run: bash scripts/deploy-sftp.sh
+      - name: Validate FTPS settings
+        env:
+          DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
+        run: |
+          if [[ "$DIAGNOSTIC_ONLY" == "true" ]]; then
+            node scripts/ftps-plan.mjs "$RUNNER_TEMP/lexgalleri-ftps-preflight" --diagnose
+          else
+            node scripts/ftps-plan.mjs "$RUNNER_TEMP/lexgalleri-ftps-preflight"
+          fi
+      - name: Install FTPS client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Check connection or transfer code
+        env:
+          DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
+        run: |
+          if [[ "$DIAGNOSTIC_ONLY" == "true" ]]; then
+            bash scripts/deploy-ftps.sh --diagnose
+          else
+            bash scripts/deploy-ftps.sh
+          fi

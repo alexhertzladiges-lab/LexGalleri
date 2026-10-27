@@ -1,57 +1,42 @@
-# Installation hos e-studio.dk — PHP 8.4 / MySQL
+# Installation — PHP 8.4/MySQL og FTPS med adgang kun til public/
 
-Mål: `/home/lexandkk/public_html/LexGalleri`. Privat mappe: `/home/lexandkk/lexgalleri-private`.
+Du installerer selv alle private filer med din egen adgang til webhotellet. ChatGPT/GitHub får kun en FTPS-konto, der er begrænset til `/home/lexandkk/public_html/LexGalleri`. Der gives ingen FTPS-adgang til den private mappe.
 
-## 1. Kontrollér PHP
+## 1. Opret database og vælg PHP
 
-Vælg PHP **8.4** i kontrolpanelet, og aktivér:
+I webhotellets kontrolpanel:
 
-- `pdo_mysql`, `gd` (med JPEG, PNG og WebP), `exif`, `mbstring` og sessioner.
-- `zip` til ZIP-designpakker. JSON-designpakker virker uden zip.
+- Vælg PHP **8.4** og aktivér `pdo_mysql`, `gd` (JPEG/PNG/WebP), `exif`, `mbstring` og sessioner. `zip` er valgfri til ZIP-temaer; JSON-temaer virker uden.
+- Opret en tom MySQL/MariaDB-database og separat databasebruger med alle rettigheder **kun til denne database**. Gem værtsnavn, port, fuldt databasenavn, brugernavn og adgangskode hos dig selv.
+- Anbefal: `memory_limit=256M`, `upload_max_filesize=25M`, `post_max_size=26M`, `max_execution_time=60`, `display_errors=Off`, `log_errors=On`. Fejllog skal være privat.
 
-Anbefalede indstillinger: `memory_limit=256M`, `upload_max_filesize=25M`, `post_max_size=26M`, `max_execution_time=60`, `display_errors=Off`, `log_errors=On`. Serverens fejllog skal være privat. `open_basedir`, hvis aktiveret, skal tillade både den offentlige og private mappe. Ændr dette gennem webhotellets kontrolpanel eller support.
+Tabeller oprettes automatisk ved første admin-opsætning. Du skal ikke oprette dem manuelt. Brug MySQL 8+ eller MariaDB 10.6+.
 
-Appen forventer Apache/LiteSpeed med `.htaccess`, `mod_rewrite` og tilladelse til rewrite-regler. Ved andre servertyper skal webhotellet konfigurere en tilsvarende regel til `index.php`. Hvis `Options -Indexes` ikke er tilladt og giver fejl 500, bed support om directory-index-beskyttelse og fjern kun denne linje. Behold rewrite-reglerne.
+## 2. Læg de private filer på serveren selv
 
-## 2. Opret en tom database
-
-Opret en MySQL/MariaDB-database og separat bruger i kontrolpanelet. Giv brugeren alle rettigheder **kun til denne database**. Notér værtsnavn, eventuel port, fuldt databasenavn og fuldt brugernavn. Gem adgangskoden i din adgangskodeadministrator. Den skal ikke sendes i chat eller lægges på GitHub.
-
-Tabellerne oprettes automatisk ved første admin-opsætning. Brug en tom database, der kun er til LexGalleri. MySQL 8+ eller MariaDB 10.6+ anbefales; lokale integrationstests køres med MySQL 8.4 og MariaDB 11.4.
-
-## 3. Opret private mapper via SFTP
-
-Filoverførslen kan også køres fra GitHub med [SFTP-deployworkflowet](DEPLOYMENT.md). Database og privat `config.php` skal stadig oprettes ved første installation.
+Hent kildekoden fra GitHub (**Code → Download ZIP**) og pak den ud på din pc. Brug webhotellets filmanager eller din egen fulde filadgang til at oprette:
 
 ```text
-/home/lexandkk/
-├── lexgalleri-private/
-│   ├── app.php
-│   ├── schema.sql
-│   ├── config/
-│   │   └── config.php
-│   ├── originals/
-│   ├── previews/
-│   ├── thumbnails/
-│   └── sessions/
-└── public_html/
-    └── LexGalleri/
-        ├── .htaccess
-        ├── index.php
-        └── static/
-            ├── app.js
-            └── style.css
+/home/lexandkk/lexgalleri-private/
+├── app.php
+├── schema.sql
+├── config/
+│   └── config.php
+├── originals/
+├── previews/
+├── thumbnails/
+└── sessions/
 ```
 
-Upload indholdet af repositoryets **`public/`** til `/home/lexandkk/public_html/LexGalleri/`. Husk den skjulte fil `.htaccess` — aktivér visning af skjulte filer i SFTP-programmet.
+Kopiér repositoryets `private/app.php` og `private/schema.sql` til denne mappe. Opret de øvrige mapper. Kopiér `private/config/config.example.php` til `config/config.php` på serveren, og redigér den dér.
 
-Upload `private/app.php` og `private/schema.sql` til `/home/lexandkk/lexgalleri-private/`. Opret `config/`, `originals/`, `previews/`, `thumbnails/` og `sessions/` i den private mappe.
+Private mapper: normalt **700**. Private filer: normalt **600**. PHP-processen skal kunne læse app, skema og konfiguration og skrive i billedmapperne og `sessions/`. Hvis PHP kører som en anden bruger, få webhotellet til at tilpasse ejer/grupperettigheder; brug ikke 777.
 
-Private mapper: normalt **700**. Private filer: normalt **600**. Offentlige mapper: normalt **755**, offentlige filer: **644**. PHP skal kunne læse app, skema og konfiguration og skrive i billedmapperne og `sessions/`. Tilpas ejer/grupperettigheder sammen med webhotellet, hvis PHP kører som en anden bruger. Brug ikke 777. Flyt aldrig private filer ind i webroden for at løse adgangsproblemer.
+**FTP-kontoens mappebegrænsning og PHP's filadgang er forskellige.** PHP skal have adgang til sine private filer, selv om vores FTPS-konto ikke har det. Hvis `open_basedir` er slået til, skal webhotellet tillade PHP adgang til begge appmapper. Det giver ikke FTPS-kontoen adgang til privatmappen.
 
-## 4. Udfyld privat konfiguration
+## 3. Udfyld den private config.php selv
 
-Kopiér `private/config/config.example.php` til serverens **`/home/lexandkk/lexgalleri-private/config/config.php`**. Redigér denne serverfil:
+Serverfilen `/home/lexandkk/lexgalleri-private/config/config.php` skal indeholde:
 
 ```php
 <?php
@@ -63,35 +48,59 @@ return [
     'db_password' => 'DIN_HEMMELIGE_DATABASEADGANGSKODE',
     'base_path' => '/LexGalleri',
     'secure_cookies' => true,
-    'setup_token' => 'EN_LANG_TILFAELDIG_NOEGLE_PAA_MINDST_32_TEGN',
+    'setup_token' => 'EN_TILFAELDIG_ENGANGSNOEGLE_PAA_MINDST_32_TEGN',
 ];
 ```
 
-Brug en adgangskodeadministrator til at generere en tilfældig opsætningsnøgle på mindst 32 tegn. Den skal være forskellig fra databaseadgangskoden og bruges kun til at oprette første administrator. Brug ikke eksemplets tekst. Hvis en værdi indeholder `'` eller `\`, skal den escapes i PHP-strengen (henholdsvis `\'` og `\\`). Gem aldrig den udfyldte konfiguration i repositoryet.
+Brug de rigtige databaseoplysninger fra dit kontrolpanel. Generér opsætningsnøglen i en adgangskodeadministrator; brug ikke eksemplets tekst. Den er forskellig fra databaseadgangskoden. Hvis en værdi indeholder `'` eller `\`, skal den escapes i PHP-strengen (henholdsvis `\'` og `\\`).
 
-## 5. Opret administrator
+Gem aldrig den udfyldte konfiguration, databaseadgangskoden eller opsætningsnøglen i GitHub eller chatten. GitHub-deploy hverken læser, tester, overfører eller ændrer denne servermappe direkte.
 
-Åbn **HTTPS-adressen på dit eget domæne efterfulgt af `/LexGalleri/`**. `e-studio.dk` er oplyst som udbyder, så der antages ikke et konkret domæne her.
+## 4. Begræns FTPS-kontoen til den offentlige mappe
 
-Indtast opsætningsnøgle, navn, e-mail og en unik adminadgangskode på 12–72 bytes. Installationen opretter tabellerne og admin-kontoen under en MySQL-lås, så to anmodninger ikke opretter hver sin første admin. Brug HTTPS og behold `secure_cookies=true`.
+Opret `/home/lexandkk/public_html/LexGalleri` med din egen adgang. I webhotellets kontrolpanel skal den FTPS-konto, der bruges til LexGalleri, have **præcis denne mappe som sin rod/hjemmemappe**. Den skal ikke kunne komme op i `public_html`, andre websites eller privatmappen.
 
-Når du er logget ind, fjern opsætningsnøglen i den private konfiguration ved at sætte `'setup_token' => ''`. Der kan ikke oprettes endnu en første admin, når en bruger allerede findes.
+Når denne konto logger ind med FTP over TLS, skal `/` i FTP-programmet svare til `/home/lexandkk/public_html/LexGalleri` på serveren. Det er samme mappe set fra to forskellige konti. Hvis kontoen aktuelt er begrænset til et andet projekt, skal dens rod ændres eller en passende konto oprettes. Genbrug ikke en anden projektmappe ved at gætte på stier.
 
-Opret et testgalleri, upload et ufølsomt testfoto, og kontrollér det på både pc og mobil. Opret en gæsteinvitation, og åbn den i et separat browserprofil/privat vindue. Kontrollér at gæsten kun ser det tildelte galleri. Afprøv til sidst tilbagekaldelse af adgang og GPS-rettigheder, inden du uploader familiens arkiv.
+FTPS = **FTP med TLS**. Vælg eksplicit FTP over TLS i fx FileZilla, korrekt værtsnavn/bruger fra kontrolpanelet og den oplyste port (ofte 21). SFTP er en anden protokol. Certifikatet skal være gyldigt for værtsnavnet.
 
-## 6. Backup og opdatering
+Du kan enten overføre de offentlige filer selv med FTPS eller lade [GitHub-workflowet](DEPLOYMENT.md) gøre det. Det offentlige indhold skal ende sådan:
 
-Brug webhotellets backupfunktion til **både hele den private mappe og MySQL-databasen**. En SQL-eksport alene indeholder ingen billeder. Hold appen ude af brug under en manuel samlet backup og gendannelse. Opbevar backup krypteret og privat. Afprøv en gendannelse på en separat installation. Sessionsmappen kan udelades fra backup; det logger brugerne ud ved gendannelse.
+```text
+/home/lexandkk/public_html/LexGalleri/
+├── .htaccess
+├── index.php
+└── static/
+    ├── app.js
+    └── style.css
+```
 
-Ved en kodeopdatering: tag backup, udskift de relevante offentlige filer samt `private/app.php`, og bevar `config.php` og de fire datamapper. Denne første version har ingen automatiske schemaopgraderinger for senere datamodeller; fremtidige ændringer skal have en særskilt migreringsvejledning.
+Det er **indholdet af `public/`**, der lægges i målmappen — ikke en ekstra `public/`-mappe og ikke hele repositoryet. Husk den skjulte `.htaccess`. Offentlige mapper: normalt 755. Offentlige filer: normalt 644.
+
+PHP's `public/index.php` er allerede kodet til at finde privatmappen på `/home/lexandkk/lexgalleri-private` ved netop denne installation. Behold derfor den private placering ovenfor, eller tilpas bootstrap-filen selv ved en anden placering.
+
+## 5. Åbn galleriet og opret admin
+
+Åbn dit eget domænes HTTPS-adresse efterfulgt af `/LexGalleri/`. Udbydernavnet er ikke nødvendigvis dit domæne.
+
+Indtast opsætningsnøgle, navn, e-mail og en unik adminadgangskode på 12–72 bytes. PHP opretter tabellerne og admin-kontoen under en MySQL-lås. Efter vellykket oprettelse ændrer du selv `'setup_token' => ''` i den private konfiguration. Behold `secure_cookies=true` og brug HTTPS.
+
+Opret et testgalleri, upload et ufølsomt testfoto, og prøv en gæsteinvitation i en anden browserprofil. Kontroller adgang og tilbagekaldelse på pc og mobil, før du uploader familiens arkiv.
+
+## 6. Opdatering og backup
+
+GitHub/vores FTPS-konto opdaterer **kun de fire offentlige filer**. Hvis en ny kodeversion også ændrer `private/app.php` eller `private/schema.sql`, får du en vejledning og lægger selv de relevante private filer ind fra samme version. Nye databaseskemaer skal have særskilt migreringsvejledning; upload af schema.sql alene opgraderer ikke en allerede installeret database.
+
+Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**. SQL alene indeholder ingen billeder. Hold appen ude af brug under manuel samlet backup/gendannelse, opbevar kopier privat/krypteret, og afprøv gendannelse separat. Sessionsmappen kan udelades; brugerne skal så logge ind igen efter gendannelse.
 
 ## Fejlfinding
 
-- **503 med manglende installation:** Kontrollér de private stier og læserettigheder.
-- **503 med PHP-udvidelse:** Aktivér den navngivne udvidelse i kontrolpanelet.
-- **404 på `/api/status`:** Kontrollér `.htaccess`, rewrite-understøttelse og `base_path`.
-- **500:** Se webhotellets private PHP-fejllog. Kontrollér databaseforbindelse, databaseprivilegier, skemafilen og `open_basedir`. Del ikke logs, hvis de indeholder hemmeligheder.
-- **Login forsvinder:** Brug HTTPS. Kontrollér skriverettigheder til `sessions/` og korrekt `/LexGalleri` i konfigurationen.
-- **Upload er for stor:** Kontrollér PHP-grænser og billedets pixelantal. Prøv et mindre foto.
+- **FTPS-kontoen viser et andet website:** Ret kontoens rod i kontrolpanelet. Workflowet gætter ikke alternative mapper.
+- **503 med manglende installation:** Kontrollér dine private filer og PHP-læserettigheder via din egen adgang.
+- **503 med manglende PHP-udvidelse:** Aktivér den i kontrolpanelet.
+- **404 på `/LexGalleri/api/status`:** Kontrollér `.htaccess`, `base_path` og Apache/LiteSpeed-rewrite. Ved andre servertyper skal webhotellet konfigurere tilsvarende routing til index.php.
+- **500:** Se din private PHP-fejllog. Kontrollér DB-forbindelse, privilegier og `open_basedir`. Hvis webhotellet ikke tillader `Options -Indexes`, bed support om mappeindeks-beskyttelse og fjern kun denne linje fra .htaccess.
+- **Login forsvinder:** Brug HTTPS og kontrollér PHP-skriveadgang til `sessions/`.
+- **Upload afvises:** Kontrollér PHP-grænser; prøv et mindre billede.
 
-Der er ikke oprettet en SFTP-forbindelse eller installeret noget på din server fra denne chat. Denne vejledning og kildekoden gør installationen klar til filoverførsel.
+Ingen webhotelinstallation eller rigtig FTPS-login er foretaget fra denne chat. GitHub-kode og beståede tests er ikke i sig selv en installation på serveren.

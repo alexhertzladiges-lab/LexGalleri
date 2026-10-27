@@ -2,7 +2,7 @@
 
 Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatter den tidligere Python/FastAPI-prototype. Der kræves ingen Python, Node, Composer, Docker eller vedvarende serverproces i drift.
 
-**Start med [INSTALLATION.md](INSTALLATION.md).** [Deploy fra GitHub via SFTP](DEPLOYMENT.md) kan derefter overføre kodefilerne med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
+**Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan derefter overføre de fire offentlige kodefiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
 ## Funktioner
 
@@ -35,6 +35,10 @@ Undlad at uploade hele repositoryet til webroden. Der følger ingen rigtige adga
 Se [eksempeltemaet Hav](themes/hav/theme.json). Upload JSON-filen direkte i adminpanelet, eller pak den i en ZIP med præcis én fil: `theme.json`. ZIP-understøttelse kræver PHP ZipArchive. Pakken tillader farver i #RRGGBB, skrifttypen sans/serif, hjørner 0–32 og afstand compact/comfortable. Pakker kan ikke installere PHP, JavaScript, HTML eller vilkårlig CSS.
 
 Alle nye visuelle forslag, billeder og visualiseringer lægges i dette private GitHub-repository med direkte links til ejeren. Familiens rigtige billeder hører ikke hjemme i Git.
+
+## FTPS og private filer
+
+FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun `index.php`, `.htaccess`, `static/app.js` og `static/style.css`. Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages. Se [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Test
 
