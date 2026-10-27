@@ -4,6 +4,8 @@ Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatt
 
 **Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan derefter overføre de fire offentlige kodefiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
+Har du **Lychee 6.6.12**, kan admin importere fra database og lokale originaler uden eksport eller opgradering. Start med [Lychee-importvejledningen](LYCHEE-IMPORT.md); den kræver særskilt privat konfiguration og en migrering i LexGalleris database, før du laver prøvevisningen.
+
 ## Funktioner
 
 - Administrator, gæstekonti og personlige engangsinvitationer, som udløber efter 7 dage.
@@ -49,6 +51,8 @@ LEXGALLERI_TEST=1 TEST_DB_HOST=127.0.0.1 TEST_DB_USER=root TEST_DB_PASSWORD=test
 ```
 
 GitHub Actions er sat op til PHP 8.4 og MySQL 8.4. Testen kontrollerer installation, konti, invitationer, gallerirettigheder, direkte billedadgang, tilbagekaldelse, EXIF/GPS, orientering, originalbevarelse, metadata, favoritter og temaer. Browserudseendet og det konkrete webhotel skal stadig kontrolleres efter installation.
+
+CI kører også `php tests/lychee-import.php` med samme isolerede testindstillinger. Importtesten opretter to testdatabaser og en midlertidig kildebruger med kun SELECT; testkontoen skal derfor også kunne oprette brugere og tildele rettigheder. Alle testdata er syntetiske og ryddes op bagefter. `node --test tests/lychee-ui.test.mjs` kontrollerer blandt andet, at prøvevisning ikke starter kopiering, og at navigation og pause stopper nye portioner.
 
 ## Begrænsninger
 

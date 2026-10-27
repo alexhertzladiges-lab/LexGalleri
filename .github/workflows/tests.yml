@@ -37,7 +37,10 @@ jobs:
           TEST_DB_HOST: 127.0.0.1
           TEST_DB_USER: root
           TEST_DB_PASSWORD: test-only-password
-        run: php tests/run.php
+        run: |
+          php tests/run.php
+          php tests/lychee-import.php
       - run: node --check public/static/app.js
       - run: node --test tests/ftps-plan.test.mjs
+      - run: node --test tests/lychee-ui.test.mjs
       - run: bash -n scripts/deploy-ftps.sh

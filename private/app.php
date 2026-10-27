@@ -157,14 +157,30 @@ function route(string $method,string $path): never {
         query('DELETE FROM invitations WHERE token=?',[$hash]);$db->commit();login_user($u);
     }
     $u=user();
+    if ($path==='/admin/lychee-import' || str_starts_with($path,'/admin/lychee-import/')) {
+        user(true);
+        if(!is_file($private.'/lychee-import.php')) {
+            if($method==='GET') send(['configured'=>false,'migration_needed'=>true,'source_version'=>'6.6.12','job'=>null]);
+            fail(409,'Den private importør er ikke installeret');
+        }
+        require_once $private.'/lychee-import.php';
+        lychee_route($method,substr($path,strlen('/admin/lychee-import')));
+    }
     if ($method==='GET' && $path==='/me') send(safe_user($u));
     if ($method==='GET' && $path==='/galleries') send(rows('SELECT g.*,(SELECT count(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',[(int)$u['admin'],$u['id']]));
     if ($method==='POST' && $path==='/galleries') {user(true);$b=body();$id=uid();query('INSERT INTO galleries VALUES(?,?,?,?)',[$id,text($b,'name',100,true),text($b,'description',1000),stamp()]);send(['id'=>$id]);}
     if (preg_match('~^/galleries/([a-f0-9]{32})/photos$~D',$path,$m)) {
         $g=$m[1];[$u,$a]=access($g,$method==='POST'?'upload':null);
         if ($method==='GET') {
-            $ps=rows('SELECT p.*,u.name uploader_name,EXISTS(SELECT 1 FROM favorites f WHERE f.photo_id=p.id AND f.user_id=?) favorite FROM photos p JOIN users u ON p.uploader=u.id WHERE gallery_id=? ORDER BY COALESCE(NULLIF(taken,\'\'),uploaded) DESC',[$u['id'],$g]);
-            foreach($ps as &$p) { unset($p['digest'],$p['filename']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null; }
+            $provenance=$u['admin']&&one('SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=\'lychee_import_items\'')?',(SELECT source_metadata FROM lychee_import_items i WHERE i.target_photo_id=p.id AND i.status=\'imported\' ORDER BY i.id LIMIT 1) _import_metadata':'';
+            $ps=rows('SELECT p.*,u.name uploader_name,EXISTS(SELECT 1 FROM favorites f WHERE f.photo_id=p.id AND f.user_id=?) favorite'.$provenance.' FROM photos p JOIN users u ON p.uploader=u.id WHERE gallery_id=? ORDER BY COALESCE(NULLIF(taken,\'\'),uploaded) DESC',[$u['id'],$g]);
+            foreach($ps as &$p) {
+                if(!empty($p['_import_metadata'])){
+                    $source=json_decode($p['_import_metadata'],true);
+                    if(is_array($source))$p['import_source']=['version'=>'6.6.12','owner_name'=>(string)($source['_owner_username']??''),'description'=>(string)($source['description']??''),'tags'=>(string)($source['tags']??''),'created_at'=>(string)($source['created_at']??''),'taken_at'=>(string)($source['taken_at']??''),'taken_at_orig_tz'=>(string)($source['taken_at_orig_tz']??''),'source_photo_id'=>(string)($source['id']??'')];
+                }
+                unset($p['digest'],$p['filename'],$p['_import_metadata']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null;
+            }
             unset($p);send(['photos'=>$ps,'permissions'=>['upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps'])]]);
         }
         if ($method==='POST') {
