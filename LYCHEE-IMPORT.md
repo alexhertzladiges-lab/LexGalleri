@@ -16,6 +16,8 @@ Undgå ændringer i Lychee under scanning og kopiering, så albummer, metadata o
 
 Brug din egen adgang til Lychees konfiguration og webhotellets kontrolpanel til at finde databaseværten, porten, databasenavnet og et eventuelt tabelpræfiks. Opret helst en særskilt databasebruger med **kun SELECT på Lychee-databasen**. Importøren skal ikke kunne ændre Lychees tabeller. Hvis kontrolpanelet ikke tilbyder en læsebruger, bed webhotellet om at oprette den.
 
+Databaseoplysningerne står normalt i Lychee-installationens `.env` som `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` og `DB_PASSWORD`. Aktivér eventuelt **vis skjulte filer** i filmanageren. Læs dem kun med din egen adgang; ændr ikke Lychees konfiguration. Den nye læsebruger til importen kan have et andet brugernavn og en anden adgangskode end Lychees egen databasebruger.
+
 Find samtidig den absolutte serversti til Lychees lokale `images`-disk. Ved en standardinstallation er det Lychees `public/uploads`-mappe, eksempelvis:
 
 ```text

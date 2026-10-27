@@ -147,8 +147,24 @@ SQL);
     copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
     if (!is_file($root.'/private/lychee-import.php')) throw new RuntimeException('Importer backend is not present yet');
     copy($root.'/private/lychee-import.php',$privateRoot.'/lychee-import.php');
+    // Change only the temporary module before PHP starts; the one-shot fault is
+    // inactive until the final recovery scenario creates its private sentinel.
+    $commitCode='$commitAttempted=true;$db->commit();';
+    $faultCode=<<<'PHP'
+$commitAttempted=true;$db->commit();
+global $private;
+if(is_file($private.'/test-lost-commit-ack')){
+    unlink($private.'/test-lost-commit-ack');
+    throw new PDOException('Synthetic lost COMMIT acknowledgement after successful commit');
+}
+PHP;
+    $module=file_get_contents($privateRoot.'/lychee-import.php');
+    $module=str_replace($commitCode,$faultCode,$module,$replacements);
+    li_assert($replacements===1,'Fault injection replaces exactly one photo COMMIT in temporary module');
+    if($replacements!==1)throw new RuntimeException('Cannot inject precise lost-commit acknowledgement fault');
+    file_put_contents($privateRoot.'/lychee-import.php',$module);
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8766);$origin='http://127.0.0.1:'.$httpPort;$env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
-    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable_cli=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start test server');
     $owner=li_client();$guest=li_client();$anonymous=li_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(li_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
@@ -258,6 +274,32 @@ SQL);
     $status=li_steps($owner,$status,'completed');
     li_assert(li_count($pdo,$targetName,'photos')===$beforePhotos&&li_count($pdo,$targetName,'galleries')===$beforeGalleries,'Repeated scan/import is idempotent');
     li_assert(li_source_snapshot($pdo,$sourceName)===$sourceSnapshot,'Source DB unchanged after resumed and repeated imports');
+    // Repair only the isolated fixture, then simulate a lost COMMIT acknowledgement
+    // in the temporary module copy. Production code has no fault-injection hook.
+    $q=$pdo->prepare('UPDATE `'.$sourceName.'`.photos SET checksum=?,original_checksum=? WHERE id=?');
+    $repairedChecksum=sha1_file($uploadsRoot.'/big/photo11.jpg');
+    $q->execute([$repairedChecksum,$repairedChecksum,li_photo_id(11)]);
+    $repairedSourceSnapshot=li_source_snapshot($pdo,$sourceName);
+    $status=li_ok(li_request($owner,'POST','/admin/lychee-import/scan',[]),'Rescan repaired isolated checksum fixture');
+    $status=li_steps($owner,$status,'preview');
+    $status=li_ok(li_request($owner,'POST','/admin/lychee-import/start',['job_id'=>$status['job']['id'],'confirm'=>true]),'Start isolated lost-commit-ack regression');
+    file_put_contents($privateRoot.'/test-lost-commit-ack','once');
+    $lostAck=li_request($owner,'POST','/admin/lychee-import/step',['job_id'=>$status['job']['id']]);
+    li_assert($lostAck[0]===503,'Lost COMMIT acknowledgement returns a retriable 503');
+    li_assert(!is_file($privateRoot.'/test-lost-commit-ack'),'Post-commit fault actually executed once');
+    $q=$pdo->prepare('SELECT i.status,i.target_photo_id,p.digest FROM lychee_import_items i LEFT JOIN photos p ON p.id=i.target_photo_id WHERE i.job_id=? AND i.source_photo_id=?');
+    $q->execute([$status['job']['id'],li_photo_id(11)]);$committed=$q->fetch();
+    li_assert(($committed['status']??'')==='imported'&&!empty($committed['target_photo_id'])&&!empty($committed['digest']),'Successful COMMIT retains target photo and imported receipt despite lost acknowledgement');
+    $committedId=$committed['target_photo_id']??str_repeat('0',32);
+    $retainedOriginal=$privateRoot.'/originals/'.$committedId.'.bin';
+    li_assert(is_file($retainedOriginal)&&hash_file('sha256',$retainedOriginal)===$sourceHashes['big/photo11.jpg'],'Committed original remains intact after acknowledgement error');
+    foreach(['previews','thumbnails'] as $dir)li_assert(is_file($privateRoot.'/'.$dir.'/'.$committedId.'.jpg')&&getimagesize($privateRoot.'/'.$dir.'/'.$committedId.'.jpg')!==false,'Committed '.$dir.' image retained after acknowledgement error');
+    $status=li_ok(li_request($owner,'GET','/admin/lychee-import'),'Reload status after uncertain COMMIT');
+    li_assert(($status['job']['state']??'')==='running','Uncertain acknowledgement permits status refresh before continuing');
+    $status=li_steps($owner,$status,'completed');
+    li_assert(li_count($pdo,$targetName,'photos')===$beforePhotos+1,'Continue after lost acknowledgement creates no duplicate photo');
+    li_assert(li_count($pdo,$targetName,'galleries')===$beforeGalleries,'Continue after lost acknowledgement creates no duplicate galleries');
+    li_assert(li_source_snapshot($pdo,$sourceName)===$repairedSourceSnapshot,'Importer does not change repaired source fixture during commit recovery');
     echo "\n$checks checks, $failures failures\n";
 }catch(Throwable $e){$failures++;fwrite(STDERR,$e->getMessage()."\n");if(is_file($temp.'/server.log'))fwrite(STDERR,file_get_contents($temp.'/server.log'));}
 finally{
