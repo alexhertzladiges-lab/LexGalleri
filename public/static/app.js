@@ -38,9 +38,14 @@ function stopLycheeView(){lycheeGeneration++;if(lycheeSession)lycheeSession.canc
 function lycheeActive(session){return !session.cancelled&&session.generation===lycheeGeneration&&view==='lychee'&&!!me?.admin&&!!$('#lychee-import')}
 function lycheeCount(value){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.floor(n)):0}
 const lycheeStateNames={scanning:'Finder albummer og billeder',preview:'Prøvevisning klar',running:'Kopiering i gang',paused:'Kopiering sat på pause',completed:'Import afsluttet',failed:'Import kræver gennemgang'};
+function lycheeMode(session){
+  const job=session.data?.job;
+  if(job&&(job.mode_locked||['running','paused','completed'].includes(job.state)))return job.transfer_mode==='move'?'move':'copy';
+  return session.transferMode==='move'?'move':'copy';
+}
 async function lycheeView(){
   stopLycheeView();
-  const session={generation:lycheeGeneration,cancelled:false,busy:false,stopRequested:false,error:'',data:null};
+  const session={generation:lycheeGeneration,cancelled:false,busy:false,stopRequested:false,error:'',data:null,transferMode:'copy',confirmed:false};
   lycheeSession=session;
   $('#content').innerHTML='<div id="lychee-import"><p role="status">Henter importstatus…</p></div>';
   try{
@@ -59,14 +64,19 @@ function lycheeDraw(session){
   const finished=n('imported')+n('duplicate')+n('unsupported')+n('missing')+n('error');
   const total=n('photos');
   const isReady=!!data?.configured&&!data?.migration_needed;
+  const mode=lycheeMode(session),moving=mode==='move',transfer=moving?'flytning':'kopiering';
+  const moveAvailable=data?.move_available===true,modeLocked=!!job?.mode_locked;
+  const startAllowed=!moving||modeLocked||moveAvailable;
+  const stateName=moving&&state==='running'?'Flytning i gang':moving&&state==='paused'?'Flytning sat på pause':lycheeStateNames[state]||state||'Importstatus';
+  const moveReason=typeof data?.move_unavailable_reason==='string'&&data.move_unavailable_reason?data.move_unavailable_reason:'Flytning kræver den opdaterede private importør og dens SQL-migrering.';
   const metrics=[['albums','Albummer'],['photos','Billedplaceringer'],['pending','Afventer'],['imported','Importeret'],['duplicate','Dubletter'],['unsupported','Ikke understøttet'],['missing','Manglende filer'],['error','Fejl']];
   let controls='';
   if(isReady&&!job)controls='<button data-lychee="scan">Lav prøvevisning</button>';
   if(isReady&&job&&!session.busy){
-    if(state==='preview')controls='<label class="check"><input type="checkbox" id="lychee-confirm">Jeg har gennemgået prøvevisningen og vil kopiere billederne.</label><button data-lychee="start" id="lychee-start" disabled>Start kopiering</button><button class="secondary" data-lychee="scan">Lav ny prøvevisning</button>';
+    if(state==='preview')controls=`${modeLocked?`<p>Overførselsmetode: <strong>${moving?'Flyt originalerne':'Kopiér originalerne'}</strong>. Metoden bevares, når importen fortsættes.</p>`:`<label style="flex-basis:100%;min-width:0">Overførselsmetode<select id="lychee-transfer-mode"><option value="copy" ${!moving?'selected':''}>Kopiér originalerne</option><option value="move" ${moving?'selected':''} ${!moveAvailable?'disabled':''}>Flyt originalerne</option></select></label>${!moveAvailable?`<p class="muted" role="status">${esc(moveReason)}${data?.move_migration_needed?' Importér 003_lychee_move.sql i LexGalleris database, og lav derefter en ny prøvevisning.':''} <a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/LYCHEE-IMPORT.md" target="_blank" rel="noopener">Se installationsvejledningen</a>.</p>`:''}`}<label class="check"><input type="checkbox" id="lychee-confirm" ${session.confirmed?'checked':''}>Jeg har gennemgået prøvevisningen og vil ${moving?'flytte originalerne fra Lychee til LexGalleri':'kopiere billederne'}.</label><button data-lychee="start" id="lychee-start" ${!session.confirmed||!startAllowed?'disabled':''}>Start ${transfer}</button><button class="secondary" data-lychee="scan">Lav ny prøvevisning</button>`;
     if(state==='scanning')controls='<button data-lychee="continue">Fortsæt prøvevisning</button>';
-    if(state==='running')controls='<button data-lychee="continue">Fortsæt kopiering</button> <button class="secondary" data-lychee="pause">Sæt på pause</button>';
-    if(state==='paused')controls='<button data-lychee="start">Fortsæt kopiering</button>';
+    if(state==='running')controls=`<button data-lychee="continue">Fortsæt ${transfer}</button> <button class="secondary" data-lychee="pause">Sæt på pause</button>`;
+    if(state==='paused')controls=`<button data-lychee="start">Fortsæt ${transfer}</button>`;
     if(state==='completed')controls='<button class="secondary" data-lychee="scan">Lav ny prøvevisning</button>';
   }
   if(session.busy)controls=`<button class="secondary" data-lychee="stop" ${session.stopRequested?'disabled':''}>${session.stopRequested?'Stopper efter aktuel portion…':state==='scanning'?'Stop efter aktuel portion':'Pause efter aktuel portion'}</button>`;
@@ -74,28 +84,34 @@ function lycheeDraw(session){
   const issues=Array.isArray(job?.issues)?job.issues.slice(0,50):[];
   const issueNames={unsupported:'Format understøttes ikke',missing:'Fil mangler',error:'Fejl',duplicate:'Dublet'};
   $('#lychee-import').innerHTML=`<div class="heading"><div><div class="eyebrow">Fra Lychee til familiens arkiv</div><h1>Import fra Lychee</h1><p class="muted">Til Lychee 6.6.12 · ingen opgradering nødvendig</p></div><button class="secondary" data-lychee="refresh" ${session.busy?'disabled':''}>Opdatér status</button></div>
-    <div class="panel"><h2>Originalerne bliver i Lychee</h2><p>Først laves en prøvevisning. Når du vælger at starte, kopieres billederne i små portioner til LexGalleri, og der laves nye visningsbilleder. De importerede gallerier får kun adgang for admin, indtil du selv deler dem.</p><p class="muted">Oplysninger fra Lychee gemmes i importhistorikken. Lychees ejer er ikke nødvendigvis den oprindelige uploader; i LexGalleri er det den administrator, der kører importen, som står for denne overførsel.</p></div>
+    <div class="panel"><h2>${moving?'Originalerne flyttes til LexGalleri':'Originalerne bliver i Lychee'}</h2><p>${moving?'Når du starter flytningen, flyttes de understøttede originaler fra Lychees mapper til LexGalleri i små portioner. Et foto i flere albummer genbruger samme original, så der ikke gemmes en ekstra originalkopi for hvert album. Der skal stadig være plads til nye visningsbilleder og miniaturer. Ikke-understøttede filer bliver i Lychee, og manglende filer registreres til gennemgang.':'Først laves en prøvevisning. Når du vælger at starte, kopieres billederne i små portioner til LexGalleri, og der laves nye visningsbilleder.'} De importerede gallerier får kun adgang for admin, indtil du selv deler dem.</p><p class="muted">Oplysninger fra Lychee gemmes i importhistorikken. Lychees ejer er ikke nødvendigvis den oprindelige uploader; i LexGalleri er det den administrator, der kører importen, som står for denne overførsel.</p></div>
     ${session.error?`<div class="panel lychee-problem" role="alert"><h2>Importen er stoppet her</h2><p>${esc(session.error)}</p><p class="muted">Ingen nye portioner startes automatisk. Opdatér status, og fortsæt, når problemet er løst.</p></div>`:''}
     ${data&&!data.configured?'<div class="panel"><h2>Gør importøren klar</h2><p>Kontrollér de to forskellige filer i den private mappe:</p><ul><li><code>lychee-import.php</code>: importmodulet, ved siden af <code>app.php</code>.</li><li><code>config/lychee-import.php</code>: den udfyldte kildekonfiguration.</li></ul><p>I konfigurationen skal <code>enabled</code> sættes til <code>true</code> uden anførselstegn.</p><p class="muted">Når filerne er på plads og konfigurationen er aktiveret, vælger du Opdatér status.</p></div>':''}
     ${data?.configured&&data?.migration_needed?'<div class="panel"><h2>Importtabellerne mangler</h2><p>Importér importørens SQL-migrering i LexGalleris database via phpMyAdmin med din egen adgang. Brug migrationsvejledningen til denne version; Lychees database skal ikke ændres.</p><p class="muted">Opdatér status bagefter. Første prøvevisning kopierer ingen billeder.</p></div>':''}
-    ${job?`<div class="panel"><div class="lychee-status-head"><h2>${esc(lycheeStateNames[state]||state||'Importstatus')}</h2><span class="badge">Lychee ${esc(data.source_version||'6.6.12')}</span></div><div class="lychee-metrics">${metrics.map(([key,label])=>`<div><strong>${n(key).toLocaleString('da-DK')}</strong><span>${label}</span></div>`).join('')}</div>
+    ${job?`<div class="panel"><div class="lychee-status-head"><h2>${esc(stateName)}</h2><span class="badge">Lychee ${esc(data.source_version||'6.6.12')}</span></div><div class="lychee-metrics">${metrics.map(([key,label])=>`<div><strong>${n(key).toLocaleString('da-DK')}</strong><span>${label}</span></div>`).join('')}</div>
       ${state==='scanning'?'<progress aria-label="Prøvevisning indlæses"></progress>':total?`<progress max="${total}" value="${Math.min(total,finished)}" aria-label="Behandlede billedplaceringer"></progress><p class="muted status">${Math.min(total,finished).toLocaleString('da-DK')} af ${total.toLocaleString('da-DK')} billedplaceringer behandlet</p>`:''}
       <p class="muted">Et billede kan høre til flere Lychee-albummer. Tælleren viser derfor billedplaceringer i albummer. Manglende filer, dubletter og formater, der ikke understøttes, registreres særskilt.</p>
+      ${moving?`<p><strong>${lycheeCount(job.moved_files).toLocaleString('da-DK')}</strong> originaler flyttet. Ét originalfoto kan dække flere billedplaceringer.</p>`:''}
       ${state==='completed'?'<p>Gennemgå resultatet og eventuelle fejl, før du tager Lychee ud af brug. Gallerierne kan nu findes under Gallerier.</p>':''}
-      ${state==='running'&&!session.busy?'<p>Vælg Fortsæt kopiering for at behandle næste portion. Der startes ingen nye portioner, mens du er væk fra denne side.</p>':''}
-      ${['preview','completed'].includes(state)?'<p class="muted">En ny prøvevisning kan finde nye eller reparerede poster. Gennemførte importposter bevares. Prøvevisningen kopierer ingen billeder, og systemerne synkroniseres ikke løbende.</p>':''}
+      ${state==='running'&&!session.busy?`<p>Vælg Fortsæt ${transfer} for at behandle næste portion. Der startes ingen nye portioner, mens du er væk fra denne side.</p>`:''}
+      ${['preview','completed'].includes(state)?'<p class="muted">En ny prøvevisning kan finde nye eller reparerede poster. Gennemførte importposter bevares. Prøvevisningen flytter eller kopierer ingen billeder, og systemerne synkroniseres ikke løbende.</p>':''}
       <div class="lychee-controls">${controls}</div>
     </div>`:isReady?`<div class="panel"><h2>Begynd med et overblik</h2><p>Prøvevisningen læser Lychees albummer og metadata, så du kan gennemgå omfanget før kopiering. JPEG, PNG og WebP kan importeres. Andre formater vises særskilt i resultatet.</p><div class="lychee-controls">${controls}</div></div>`:''}
-    ${rows.length?`<div class="panel"><h2>Albummer i prøvevisningen</h2>${rows.length<n('albums')?`<p class="muted">Viser ${rows.length.toLocaleString('da-DK')} af ${n('albums').toLocaleString('da-DK')} albummer. Tællerne og kopieringen omfatter alle albummer.</p>`:''}<div class="lychee-table-wrap"><table class="lychee-table"><thead><tr><th scope="col">Album / galleri</th><th scope="col">Billedplaceringer</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.title)}</td><td>${lycheeCount(row.count).toLocaleString('da-DK')}</td></tr>`).join('')}</tbody></table></div><p class="muted">Albumstier bevares i gallerinavnene. Nye gallerier er private for admin.</p></div>`:''}
+    ${rows.length?`<div class="panel"><h2>Albummer i prøvevisningen</h2>${rows.length<n('albums')?`<p class="muted">Viser ${rows.length.toLocaleString('da-DK')} af ${n('albums').toLocaleString('da-DK')} albummer. Tællerne og ${moving?'flytningen':'kopieringen'} omfatter alle albummer.</p>`:''}<div class="lychee-table-wrap"><table class="lychee-table"><thead><tr><th scope="col">Album / galleri</th><th scope="col">Billedplaceringer</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.title)}</td><td>${lycheeCount(row.count).toLocaleString('da-DK')}</td></tr>`).join('')}</tbody></table></div><p class="muted">Albumstier bevares i gallerinavnene. Nye gallerier er private for admin.</p></div>`:''}
     ${issues.length?`<div class="panel"><h2>Poster til gennemgang</h2><p class="muted">Her vises op til 50 poster med oplysninger fra den aktuelle import. Ret eventuelle problemer i kilden, og lav derefter en ny prøvevisning.</p><div class="lychee-table-wrap"><table class="lychee-table lychee-issues"><thead><tr><th scope="col">Billede</th><th scope="col">Lychee-id</th><th scope="col">Status</th><th scope="col">Oplysning</th></tr></thead><tbody>${issues.map(issue=>`<tr><td>${esc(issue.title||'Uden titel')}</td><td>${esc(issue.source_photo_id)}</td><td>${esc(issueNames[issue.status]||issue.status)}</td><td>${esc(issue.error||'Ingen yderligere oplysninger')}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
   document.querySelectorAll('[data-lychee]').forEach(button=>button.onclick=()=>{
     const action=button.dataset.lychee;
     if(action==='refresh'){lycheeView();return}
     if(action==='stop'){session.stopRequested=true;lycheeDraw(session);return}
-    if(action==='start'&&state==='preview'&&!$('#lychee-confirm')?.checked)return;
+    if(action==='start'&&state==='preview'&&!session.confirmed)return;
     lycheeAction(session,action);
   });
-  if($('#lychee-confirm'))$('#lychee-confirm').onchange=e=>{$('#lychee-start').disabled=!e.target.checked};
+  if(state==='preview'&&!session.busy&&isReady){
+    const confirm=$('#lychee-confirm'),start=$('#lychee-start'),selector=$('#lychee-transfer-mode');
+    if(confirm){confirm.checked=!!session.confirmed;confirm.onchange=e=>{session.confirmed=!!e.target.checked;if(start)start.disabled=!session.confirmed||!startAllowed};}
+    if(start)start.disabled=!session.confirmed||!startAllowed;
+    if(!modeLocked&&selector)selector.onchange=e=>{session.transferMode=e.target.value==='move'&&moveAvailable?'move':'copy';session.confirmed=false;lycheeDraw(session)};
+  }
 }
 async function lycheeLoop(session){
   while(lycheeActive(session)&&!session.stopRequested&&['scanning','running'].includes(session.data?.job?.state)){
@@ -110,10 +126,14 @@ async function lycheeLoop(session){
 }
 async function lycheeAction(session,action){
   if(!lycheeActive(session)||session.busy)return;
+  if(action==='start'&&session.data?.job?.state==='preview'&&!session.confirmed)return;
+  const transferMode=lycheeMode(session);
+  if(action==='start'&&transferMode==='move'&&!session.data?.job?.mode_locked&&session.data?.move_available!==true){session.error=session.data?.move_unavailable_reason||'Flytning er ikke klar. Opdatér status og kontrollér opsætningen.';lycheeDraw(session);return;}
+  if(action==='scan')session.confirmed=false;
   session.busy=true;session.stopRequested=false;session.error='';lycheeDraw(session);
   try{
     if(action==='scan')session.data=await api('/admin/lychee-import/scan','POST',{});
-    else if(action==='start')session.data=await api('/admin/lychee-import/start','POST',{job_id:session.data.job.id,confirm:true});
+    else if(action==='start')session.data=await api('/admin/lychee-import/start','POST',{job_id:session.data.job.id,confirm:true,transfer_mode:transferMode});
     else if(action==='pause')session.data=await api('/admin/lychee-import/pause','POST',{job_id:session.data.job.id});
     else if(action!=='continue')throw Error('Ukendt importhandling');
     if(!lycheeActive(session))return;

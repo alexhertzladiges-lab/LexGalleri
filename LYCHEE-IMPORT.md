@@ -1,6 +1,6 @@
 # Flyt fra Lychee 6.6.12 til LexGalleri
 
-Importøren læser Lychees database og kopierer originalerne direkte på dit webhotel. Du behøver ingen eksport fra Lychee, og Lychee bliver ikke opgraderet. Den understøttede kilde er **præcis Lychee 6.6.12**, med databaseversionsværdien `060612`.
+Importøren læser Lychees database og overfører originalerne direkte på dit webhotel. Du vælger **kopiering** eller **flytning** efter prøvevisningen. Du behøver ingen eksport fra Lychee, og Lychee bliver ikke opgraderet. Den understøttede kilde er **præcis Lychee 6.6.12**, med databaseversionsværdien `060612`.
 
 En fungerende Lychee-installation er ikke nødvendig: databasen og de bevarede originalmapper er nok. Manglende programfiler og gamle visningsbilleder eller miniaturer forhindrer ikke importen. LexGalleri læser kun originalvarianter og laver nye visningsbilleder og miniaturer.
 
@@ -8,11 +8,16 @@ Du installerer selv de private filer og indtaster databaseoplysningerne i en pri
 
 ## 1. Tag backup og kontrollér pladsen
 
-Tag backup af LexGalleris database og private billedmapper, før du installerer migreringen. Bevar også en selvstændig backup af Lychees database og billeder. En databasebackup indeholder ikke selve billederne.
+Tag backup af LexGalleris database og private billedmapper, før du installerer migreringen. Bevar også en selvstændig backup af Lychees database og billeder. En databasebackup indeholder ikke selve billederne. Ved pladsmangel bør sikkerhedskopierne opbevares uden for det berørte webhotel.
 
-Importen kopierer til LexGalleri; den flytter eller sletter ingen Lychee-filer. Der skal være ledig plads til originaler samt nye visningsbilleder og miniaturer. Et foto i flere Lychee-albummer får en separat kopi i hvert tilsvarende LexGalleri-galleri.
+| Valg | Originaler og plads |
+|---|---|
+| **Kopiér** | Lychees originaler bliver liggende. LexGalleri gemmer egne originalkopier samt nye visningsbilleder og miniaturer. Et foto i flere albummer får en originalkopi i hvert tilsvarende galleri. |
+| **Flyt originalerne** | Originalen flyttes til LexGalleris private lager på samme filsystem. Der laves ingen ekstra originalkopi. Flere albummer kan bruge den samme original på disken. Nye visningsbilleder og miniaturer kræver stadig ledig plads. |
 
-Undgå ændringer i Lychee under scanning og kopiering, så albummer, metadata og billedfiler passer sammen. Prøvevisningen er et øjebliksbillede, ikke en løbende synkronisering.
+En flytning undgår pladsen til en ekstra originalkopi; originalens eksisterende diskplads bruges fortsat, nu i LexGalleri. Gamle Lychee-mapper som `medium`, `small` og `thumb` ryddes ikke automatisk op.
+
+Undgå ændringer i Lychees database, originaler og importkonfiguration under scanning og overførsel, så albummer, metadata og billedfiler passer sammen. Prøvevisningen er et øjebliksbillede, ikke en løbende synkronisering.
 
 ## 2. Find Lychees database og billedrod
 
@@ -34,7 +39,9 @@ Vil du først slå en bestemt fil op, kan du åbne [lychee-originals.sql](privat
 
 Et databaseopslag kan vise den forventede sti, men ikke om filen stadig findes. Det kontrolleres af importørens prøvevisning. Manglende originalregistreringer eller originalfiler vises som manglende; databasen kan ikke genskabe slettede billedfiler. Filer uden en databasepost får heller ikke gættet en albumtilknytning.
 
-LexGalleris PHP-proces skal kunne læse denne mappe og originalerne. En FTPS-kontos mappebegrænsning giver ikke i sig selv PHP adgang. Hvis `open_basedir` forhindrer adgang, skal webhotellet tillade PHP at læse både Lychees billedrod og LexGalleris private mappe. Vælg ikke serverens rod eller LexGalleris egen private mappe som kilde. Importøren afviser stier og symlinks, der forlader den angivne billedrod.
+LexGalleris PHP-proces skal kunne læse denne mappe og originalerne. Ved flytning skal PHP også kunne skrive i originalernes mapper og i LexGalleris private lager, og PHP-funktionerne `rename` og `link` skal være tilgængelige. Originalerne og mållageret skal ligge på samme filsystem. Flere albummer deler originalens indhold gennem filsystemets hardlinks; de ekstra filnavne opretter ingen ekstra originalkopier.
+
+En FTPS-kontos mappebegrænsning giver ikke i sig selv PHP adgang. Hvis `open_basedir` forhindrer adgang, skal webhotellet tillade PHP at læse begge billedområder og, ved flytning, skrive i dem. Importøren kontrollerer flytteforudsætningerne før start og afviser en flytning mellem forskellige filsystemer. Den falder ikke tilbage til at kopiere originalen. Vælg ikke serverens rod eller LexGalleris egen private mappe som kilde. Importøren afviser stier og symlinks, der forlader den angivne billedrod.
 
 **Del ikke databaseadgangskoder eller den udfyldte konfiguration i chatten eller på GitHub.**
 
@@ -50,6 +57,10 @@ Hent følgende filer fra **samme kodeversion** i GitHub, og læg dem ind med web
 
 Behold din eksisterende `config/config.php`, billedmapper og database. Du skal ikke geninstallere LexGalleri eller genimportere `schema.sql`. Private filer bør normalt have rettighed 600 og kun være læsbare for den bruger, som PHP kører under; se [installationsvejledningen](INSTALLATION.md).
 
+**Har du allerede en fungerende importør og en prøvevisning?** Opdatér kun [det private importmodul](private/lychee-import.php) ved siden af `app.php`, og kør den nye `003`-migrering fra næste trin i LexGalleris database. Din udfyldte `config/lychee-import.php` indeholder fortsat kildeoplysningerne. Der skal ikke tilføjes en indstilling for kopiering eller flytning i konfigurationsfilen; valget foretages på adminsiden. Lav en **ny prøvevisning** efter opdateringen, før du vælger flytning.
+
+Der er to forskellige filer med navnet `lychee-import.php`: programfilen i den private mappes rod og din udfyldte konfigurationsfil i `config`-undermappen. Programopdateringen skal erstatte programfilen.
+
 I den nye, private `config/lychee-import.php` udfylder du:
 
 - `db_host`, `db_port`, `db_name`, `db_user`, `db_password`: **Lychees** database og helst dens nye læsebruger. LexGalleris databaseoplysninger bliver i den eksisterende `config.php`.
@@ -62,9 +73,14 @@ Hvis en værdi indeholder `'` eller `\`, skal tegnene escapes i PHP-strengen som
 
 ## 4. Tilføj importtabeller i LexGalleris database
 
-Hent [private/migrations/002_lychee_import.sql](private/migrations/002_lychee_import.sql).
+Importtabellerne tilføjes med disse filer:
 
-Åbn phpMyAdmin, vælg **LexGalleris database**, og brug **Importér** til at køre denne SQL-fil. Kontrollér det valgte databasenavn, før du starter. Migreringen opretter tre tabeller til job, albummer og importposter. Den skal ikke køres i Lychees database og ændrer ikke Lychees skema.
+| SQL-fil | Formål |
+|---|---|
+| [002_lychee_import.sql](private/migrations/002_lychee_import.sql) | Grundlaget: tre tabeller til job, albummer og importposter. Kræves til både kopiering og flytning. |
+| [003_lychee_move.sql](private/migrations/003_lychee_move.sql) | To nye tabeller til overførselsvalg og flyttejournal. Kræves til flytning. |
+
+Åbn phpMyAdmin, vælg **LexGalleris database**, og brug **Importér** til at køre `002` og derefter `003`. Kontrollér det valgte databasenavn, før du starter. Har du allerede installeret `002`, er den nye opdatering kun `003`. Begge filer skal køres i LexGalleris database; de ændrer ikke Lychees skema.
 
 Skift derefter `'enabled' => false` til `'enabled' => true` i din private `config/lychee-import.php`.
 
@@ -74,7 +90,7 @@ De offentlige filer fra samme kodeversion skal også være installeret, før den
 
 Log ind som admin, vælg **Import fra Lychee**, og tryk **Opdatér status**, hvis siden allerede er åben. Vælg derefter **Lav prøvevisning**.
 
-Scanningen læser Lychees albummer, billedmetadata og albumtilknytninger. Den gemmer importoplysninger i LexGalleris nye importtabeller, men opretter endnu ingen gallerier, fotos eller billedkopier. Det er derfor normalt, at der endnu ikke kommer noget frem under Gallerier.
+Scanningen læser Lychees albummer, billedmetadata og albumtilknytninger. Den gemmer importoplysninger i LexGalleris importtabeller, men opretter endnu ingen gallerier, fotos eller billedkopier og flytter ingen originaler. Det er derfor normalt, at der endnu ikke kommer noget frem under Gallerier. Når du har opdateret en eksisterende importør til flytning, skal du vælge **Lav ny prøvevisning**, så de nødvendige stier registreres med den nye version.
 
 Hold siden åben, mens scanningen arbejder i små portioner. Du kan afbryde mellem portionerne og senere vælge **Fortsæt prøvevisning**. Gennemgå derefter antallene, albumoversigten og eventuelle poster til gennemgang. Albumoversigten viser højst 100 albummer; importen omfatter alle de scannede albummer.
 
@@ -82,11 +98,17 @@ Tælleren **billedplaceringer** er antal tilknytninger til albummer. Det samme f
 
 Der er ikke valg af enkelte albummer i denne version. Når du bekræfter, behandler importen hele den scannede kilde. Hvis du ønsker at afprøve forløbet på et mindre arkiv først, skal det ske med en separat testkopi og testinstallation.
 
-## 6. Start kopieringen og kontrollér resultatet
+## 6. Vælg overførslen og kontrollér resultatet
 
-Markér, at du har gennemgået prøvevisningen, og vælg **Start kopiering**. Først nu oprettes gallerier, og billeder kopieres til LexGalleri. Siden behandler små portioner automatisk, mens du bliver på importsiden.
+Kopiering er standardvalget. Vælg **Flyt originalerne**, hvis du vil undgå en ekstra originalkopi på serveren. Valget låses ved første start og følger jobbet ved pause og genoptagelse. Et job, der allerede har kopieret billeder, kan ikke ændres til flytning.
 
-Brug pauseknappen, hvis du vil stoppe efter den aktuelle portion. Lukning af fanen eller navigation væk fra siden stopper nye anmodninger; en allerede startet portion kan stadig afsluttes. Åbn importsiden igen, opdatér status, og vælg **Fortsæt kopiering** for at genoptage. Færdige importposter huskes, så de ikke kopieres igen ved genoptagelse.
+Gennemgå tællerne og det valgte forløb, markér bekræftelsesfeltet, og vælg **Start kopiering** eller **Start flytning**. Først nu oprettes gallerier, og originalerne behandles. Siden arbejder i små portioner automatisk, mens du bliver på importsiden.
+
+Ved flytning gemmer importøren en flyttejournal, før originalen omdøbes til sin placering i det private lager. Den kontrollerer filens indhold og bevarer journalen, så en afbrudt handling kan genoptages. Originalen flyttes kun på samme filsystem. Flyttede billeder kan derefter findes i LexGalleri, mens Lychees database fortsat henviser til de gamle stier. Lychee kan derfor ikke længere vise disse originaler fra sine tidligere mapper.
+
+Brug pauseknappen, hvis du vil stoppe efter den aktuelle portion. Lukning af fanen eller navigation væk fra siden stopper nye anmodninger; en allerede startet portion kan stadig afsluttes. Åbn importsiden igen, opdatér status, og vælg knappen til at fortsætte jobbet. Færdige importposter huskes. Hvis en flytning afbrydes, skal du genoptage det samme job, så importøren kan bruge den gemte flyttejournal.
+
+Originaler, som mangler eller har et format, der ikke understøttes, registreres særskilt og flyttes ikke. Det samme gælder filer, der afvises af kontrollen, før flytningen begynder.
 
 Alle importerede gallerier er kun tilgængelige for admin, indtil du selv giver gæster adgang under **Familie & gæster**. Lychees delingslinks og adgangsrettigheder følger ikke med.
 
@@ -97,19 +119,19 @@ Gennemgå resultatet, før du tager Lychee ud af brug:
 - Se de bevarede kildeoplysninger i billedets **Fra Lychee**-felt som admin, herunder ejer, beskrivelse, tags og tidsregistreringer.
 - Kontrollér gæsteadgang i en anden browserprofil, efter at du bevidst har tildelt adgang.
 
-En afsluttet import kan godt indeholde fejl eller oversprungne poster. Siden viser op til 50 poster til gennemgang. Hele importhistorikken ligger privat i databasens `lychee_import_jobs`, `lychee_import_albums` og `lychee_import_items`.
+En afsluttet import kan godt indeholde fejl eller oversprungne poster. Siden viser op til 50 poster til gennemgang. Hele importhistorikken ligger privat i databasens `lychee_import_jobs`, `lychee_import_albums` og `lychee_import_items`. Flyttevalget og filjournalen ligger i `lychee_import_transfer_jobs` og `lychee_import_move_files`.
 
 Efter rettelse af eksempelvis manglende filer kan du vælge **Lav ny prøvevisning**. Den kan finde reparerede og nye poster. Allerede gennemførte importposter bevares; ændrede titler, albumtilknytninger eller metadata fra disse poster synkroniseres ikke automatisk til eksisterende fotos. Importøren er ikke et værktøj til løbende synkronisering eller automatisk oprydning efter sletninger i Lychee.
 
-Behold Lychee og dine backups, indtil resultatet er kontrolleret. Du kan bagefter sætte importkonfigurationens `enabled` tilbage til `false`. Bevar importtabellerne som historik.
+Behold Lychees database, de tilbageværende kildefiler og dine backups, indtil resultatet er kontrolleret. Du kan bagefter sætte importkonfigurationens `enabled` tilbage til `false`. Bevar alle import- og flyttetabeller som historik. Flyttejournalen skal forblive intakt under et aktivt eller afbrudt job.
 
 ## Hvad følger med?
 
 | Oplysning | Håndtering |
 |---|---|
 | Almindelige albummer og underalbummer | Oprettes som separate gallerier med det fulde navn, fx `Lychee / Sommer / Bornholm`. Tomme albummer bevares. Meget lange navne forkortes med et id-afledt suffiks; den fulde kildesti bevares i importhistorikken. |
-| Foto i flere albummer | Lychees `photo_album` bruges. Fotoet kopieres til hvert tilsvarende galleri. Dubletter med samme SHA-256 inden for ét galleri genbruges. |
-| Originaler | Kopieres uden ændring. Kildens SHA-1 kontrolleres mod `checksum` eller `original_checksum`; Lychee kan have gendannet den urørte original efter at have beregnet en checksum på en roteret udgave. LexGalleri beregner selv SHA-256. |
+| Foto i flere albummer | Lychees `photo_album` bruges. Der oprettes en placering i hvert tilsvarende galleri. Kopiering gemmer en originalkopi pr. galleri; flytning lader placeringerne dele den flyttede original på disken. Dubletter med samme SHA-256 inden for ét galleri genbruger fotoposten. |
+| Originaler | Indholdet bevares uændret ved både kopiering og flytning. Kildens SHA-1 kontrolleres mod `checksum` eller `original_checksum`; Lychee kan have gendannet den urørte original efter at have beregnet en checksum på en roteret udgave. LexGalleri beregner selv SHA-256. |
 | Visningsbilleder og miniaturer | Genereres på ny uden originalens EXIF. Originalens orientering anvendes ved billedbehandlingen. |
 | Titel, sted og GPS | Overføres fra Lychees database, hvor koordinaterne er gyldige. |
 | Optagetid | Lychees UTC-værdi omregnes med `taken_at_orig_tz`, når den findes. LexGalleris optagetid gemmes som lokal klokketid uden tidszone; rå kildetid og oprindelig tidszone bevares i importhistorikken. |
@@ -121,15 +143,28 @@ Behold Lychee og dine backups, indtil resultatet er kontrolleret. Du kan bagefte
 
 Denne version importerer lokale **JPEG-, PNG- og WebP-originaler** på højst **25 MB og 20 megapixel**. PHP-hukommelsen kan sætte en lavere praktisk grænse. Video, HEIC, RAW og originaler på S3 registreres som formater eller lagring, der endnu ikke understøttes. Der er højst 10.000 almindelige albummer pr. kilde. Smartalbummer og Lychees øvrige funktioner genskabes ikke som særskilte funktioner.
 
+Ved databasefejl viser den opdaterede importør en fast forklaring og MySQL-fejlnummeret. Den gengiver ingen adgangskoder eller rå SQL-fejl. Brug nummeret til næste trin:
+
+| MySQL-fejl | Næste trin |
+|---|---|
+| **1045 eller 1698** — login afvist | Kontrollér parret `db_user`/`db_password` samt brugerens adgang fra den valgte PHP-server. |
+| **1044** — manglende databaseadgang | Tilknyt brugeren til Lychees database med SELECT i webhotellets MySQL-administration. |
+| **1142 eller 1143** — manglende SELECT | Tildel brugeren SELECT på kildedatabasen. |
+| **1146** — forventet tabel mangler | Kontrollér `db_name` og `table_prefix` mod Lychees database og tabelnavne. |
+| **1049** — databasen blev ikke fundet | Kontrollér `db_name` og databaseværten. |
+| **2002, 2003 eller 2005** — forbindelsen kunne ikke oprettes | Kontrollér `db_host`, `db_port` og webhotellets databaseindstillinger. |
+
 - **Forkert databaseversion:** Kontrollér, at kilden faktisk er Lychee 6.6.12, og at den rigtige database er valgt. Importøren opgraderer ikke databasen.
-- **Databasen kan ikke læses:** Kontrollér kildekonfiguration, tabelpræfiks og læsebrugerens SELECT-rettigheder. Kildens adgangsoplysninger skal være i den private importkonfiguration.
 - **Billedroden kan ikke læses:** Kontrollér stien og PHP-adgang samt eventuelt `open_basedir`. Ret det med din egen adgang eller webhotellets support.
 - **Originalfil mangler:** Kontrollér `uploads_root` og filens faktiske placering. En forkert billedrod kan få mange eksisterende billeder til at se manglende ud.
 - **Checksum matcher ikke:** Originalen stemmer ikke med nogen af de forventede SHA-1-værdier. Undersøg kildefilen, og lav en ny prøvevisning efter rettelse. Omgå ikke kontrollen ved at redigere importtabellerne.
 - **Billede for stort:** Kontrollér dimensioner, filstørrelse og PHP-hukommelse. Disse filer bliver stående i Lychee og vises til gennemgang.
 - **Kopiering afbrudt:** Genoptag fra importsiden. Importøren husker færdige poster og rydder egne ufærdige kopier ved næste forsøg.
+- **Flytning er ikke tilgængelig:** Kontrollér den nye programfil, `003`-migreringen og en ny prøvevisning. Adminsiden viser, hvilken forudsætning der mangler.
+- **Flytning kan ikke starte:** Kontrollér, at kilde og mål ligger på samme filsystem, at PHP understøtter `rename` og `link`, og at PHP kan skrive i de nødvendige mapper. Afklar det med webhotellet ved behov.
+- **Flytning afbrudt:** Opdatér status og genoptag det samme job. Originaler, der allerede er flyttet til det private lager, beskyttes af flyttejournalen. Ret den viste fejl, og behold journal og filer på deres registrerede placeringer.
 
-Importøren udfører kun læsninger af Lychees data og filer. Den bruger en UTC-indstilling for sin egen databaseforbindelse, men ændrer ingen kildedata. De nye jobtabeller, gallerier og billedfiler skrives kun i LexGalleri.
+Importøren bruger kun SELECT på Lychees database og en UTC-indstilling for sin egen databaseforbindelse. Ved kopiering læses kildefilerne. Ved flytning ændres originalernes placering på filsystemet efter dit valg på adminsiden; Lychees database opdateres ikke. Nye jobtabeller, gallerier, visningsbilleder og miniaturer skrives i LexGalleri.
 
 ## Versionsgrundlag
 
