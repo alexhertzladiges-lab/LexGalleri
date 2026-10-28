@@ -5,7 +5,7 @@ import test from 'node:test';
 const source=fs.readFileSync(new URL('../public/static/app.js', import.meta.url),'utf8').replace(/\ninit\(\);\s*$/,'');
 function fixture(){
  const elements=new Map();
- const doc={currentScript:{src:'https://example.test/LexGalleri/static/app.js'},querySelector(q){if(!elements.has(q))elements.set(q,{innerHTML:'',style:{},listeners:new Map(),addEventListener(type,handler){this.listeners.set(type,handler)},close(){},showModal(){},open:false});return elements.get(q)},querySelectorAll(){return[]},documentElement:{style:{setProperty(){}}},body:{style:{}}};
+ const doc={currentScript:{src:'https://example.test/LexGalleri/static/app.js'},querySelector(q){if(!elements.has(q)){const classes=new Set(),attributes=new Map();elements.set(q,{innerHTML:'',style:{},listeners:new Map(),classList:{add:value=>classes.add(value),remove:value=>classes.delete(value),contains:value=>classes.has(value),toggle(value,force){const on=force??!classes.has(value);if(on)classes.add(value);else classes.delete(value);return on;}},setAttribute:(key,value)=>attributes.set(key,String(value)),getAttribute:key=>attributes.get(key)??null,addEventListener(type,handler){this.listeners.set(type,handler)},close(){this.open=false;},showModal(){this.open=true;},open:false});}return elements.get(q)},querySelectorAll(){return[]},documentElement:{style:{setProperty(){}}},body:{style:{}}};
  const ctx=vm.createContext({document:doc,URL,setTimeout,clearTimeout,console,FormData,Blob});vm.runInContext(source,ctx);
  vm.runInContext("me={admin:true};view='lychee';globalThis.draws=[];globalThis.messages=[];lycheeDraw=()=>draws.push('paint');toast=s=>messages.push(s)",ctx);
  return{ctx,elements,run:s=>vm.runInContext(s,ctx)};
@@ -198,6 +198,53 @@ test('ordinary photos retain the image viewer even when video playback is permit
  assert(!f.html.includes('<video'));
  assert(!f.html.includes('adgang til at afspille'));
 });
+test('compact viewer keeps overlay arrows on the media and all metadata behind one collapsed Info control',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg',title:'Sommer i haven',place:'Haven'});
+ assert.equal(f.elements.get('#modal').classList.contains('photo-dialog'),true);
+ assert.match(f.html,/class="photo-stage"/);
+ assert.match(f.html,/id="photo-info-toggle"[^>]*aria-expanded="false"/);
+ assert.match(f.html,/aria-controls="photo-info"/);
+ assert.match(f.html,/<[^>]*id="photo-info"[^>]*hidden/);
+ const info=f.html.indexOf('id="photo-info"'),before=f.html.slice(0,info),details=f.html.slice(info);
+ assert(before.includes('id="prev"')&&before.includes('id="next"'));
+ assert.match(before,/aria-label="Forrige[^"]*"/);assert.match(before,/aria-label="Næste[^"]*"/);
+ assert(!before.includes('<dl>'));assert(!before.includes('Uploadet af'));assert(!before.includes('id="favorite"'));
+ for(const expected of ['Sommer i haven','Optaget','Sted','Uploadet af','Uploadtidspunkt','id="favorite"','Hent original med metadata'])assert(details.includes(expected),expected);
+ assert.equal(f.elements.get('#prev').disabled,true);assert.equal(f.elements.get('#next').disabled,true);
+});
+test('Info expands in place without replacing media, pausing video or issuing requests',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true});const toggle=f.elements.get('#photo-info-toggle'),panel=f.elements.get('#photo-info'),player=f.elements.get('#photo-video'),dialog=f.elements.get('#modal');
+ toggle.setAttribute('aria-expanded','false');panel.hidden=true;let pauses=0,replacements=0;player.pause=()=>pauses++;
+ const html=dialog.innerHTML;Object.defineProperty(dialog,'innerHTML',{get:()=>html,set:()=>replacements++});const calls=f.calls.length;
+ toggle.onclick();assert.equal(panel.hidden,false);assert.equal(toggle.getAttribute('aria-expanded'),'true');
+ toggle.onclick();assert.equal(panel.hidden,true);assert.equal(toggle.getAttribute('aria-expanded'),'false');
+ assert.equal(f.elements.get('#photo-video'),player);assert.equal(replacements,0);assert.equal(pauses,0);assert.equal(f.calls.length,calls);
+});
+test('arrow navigation respects photo boundaries and keyboard focus without rebuilding the gallery',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg'});f.ctx.other=mediaPhoto({id:'photo-2',mime:'image/jpeg',title:'Næste syntetiske billede'});f.run('photos.push(other)');await f.run('showPhoto(photo.id)');
+ const dialog=f.elements.get('#modal'),keydown=dialog.listeners.get('keydown');assert.equal(typeof keydown,'function');
+ const event=(key,blocked=false)=>({key,defaultPrevented:false,altKey:false,ctrlKey:false,metaKey:false,shiftKey:false,target:{closest:()=>blocked?{}:null},preventDefault(){this.prevented=true;}});
+ const count=f.calls.length;await f.elements.get('#prev').onclick();assert.equal(f.calls.length,count,'the first arrow must stay within bounds');
+ for(const blocked of [true]){const input=event('ArrowRight',blocked);await keydown(input);assert.equal(f.calls.length,count);assert(!input.prevented);}
+ for(const flags of [{ctrlKey:true},{altKey:true},{metaKey:true},{shiftKey:true},{defaultPrevented:true},{repeat:true}]){const modified={...event('ArrowRight'),...flags};await keydown(modified);assert.equal(f.calls.length,count);assert(!modified.prevented);}
+ const next=event('ArrowRight');await keydown(next);await Promise.resolve();assert.equal(f.calls.length,count+1);assert(next.prevented);assert(dialog.innerHTML.includes('Næste syntetiske billede'));
+ assert.equal(f.elements.get('#next').disabled,true);assert.equal(f.elements.get('#prev').disabled,false);
+ await f.elements.get('#next').onclick();assert.equal(f.calls.length,count+1,'the last arrow must stay within bounds');
+ const previous=event('ArrowLeft');await keydown(previous);await Promise.resolve();assert.equal(f.calls.length,count+2);assert(previous.prevented);
+ f.run("modal('Redigér','<input>')");assert.equal(dialog.classList.contains('photo-dialog'),false);const generic=event('ArrowRight');await keydown(generic);assert.equal(f.calls.length,count+2);
+});
+test('previous and next follow the filtered and sorted thumbnail order',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg'});
+ f.ctx.second=mediaPhoto({id:'photo-2',mime:'image/jpeg',title:'Vises først'});f.ctx.hidden=mediaPhoto({id:'photo-3',mime:'image/jpeg',title:'Skjult af søgning'});
+ f.run('photos.push(second,hidden);drawPhotos([second,photo])');
+ f.ctx.document.querySelectorAll=q=>q==='[data-photo]'?[...f.elements.get('#photo-grid').innerHTML.matchAll(/data-photo="([^"]+)"/g)].map(match=>({dataset:{photo:match[1]}})):[];
+ await f.run('showPhoto(second.id)');
+ assert.equal(f.elements.get('#prev').disabled,true);assert.equal(f.elements.get('#next').disabled,false);
+ const before=f.calls.length;await f.elements.get('#next').onclick();assert.equal(f.calls.length,before+1);
+ assert.equal(f.elements.get('#prev').disabled,false);assert.equal(f.elements.get('#next').disabled,true);
+ assert(!f.elements.get('#modal').innerHTML.includes('Skjult af søgning'));
+ await f.elements.get('#next').onclick();assert.equal(f.calls.length,before+1,'navigation must not enter a photo filtered out of the current grid');
+});
 test('native playback errors show a download suggestion only when original download is allowed',async()=>{
  for(const rights of [{video:true,download:true,gps:true},{video:true,download:true,gps:false}]){
   const f=await mediaFixture(rights),player=f.elements.get('#photo-video'),message=f.elements.get('#video-playback-error');
@@ -275,7 +322,7 @@ test('a delayed favorite request cannot change the next photo dialog or submit t
 });
 test('closing during a delayed next-photo request never reopens the viewer or loads another image',async()=>{
  for(const close of ['close','cancel','button']){
-  const f=await mediaFixture({video:true,download:true,gps:true});f.ctx.other=mediaPhoto({id:'photo-2',title:'Next photo'});f.run('photos.push(other)');
+  const f=await mediaFixture({video:true,download:true,gps:true});f.ctx.other=mediaPhoto({id:'photo-2',title:'Next photo'});f.run('photos.push(other)');await f.run('showPhoto(photo.id)');
   let finish,opens=0;f.ctx.delayedApi=()=>new Promise(resolve=>{finish=resolve});f.run('api=globalThis.delayedApi');
   const dialog=f.elements.get('#modal'),original=dialog.innerHTML;dialog.showModal=()=>opens++;
   const pending=f.elements.get('#next').onclick();

@@ -45,6 +45,8 @@ Login og de separate gallerirettigheder kontrolleres fortsat af serveren. Den ek
 
 Billeder åbnes oven på oversigten. Når du lukker visningen eller bruger Escape på pc, bevares miniaturerne, søgningen, sorteringen og din position. En almindelig lukning genindlæser ikke alle billeder.
 
+Brug pilene inde over billedet til at gå frem og tilbage. På pc kan du også bruge venstre og højre piletast, når fokus er i billedvisningen. **Info** viser titel, optagetid, sted, uploader og de øvrige oplysninger samt favorit-, download- og redigeringsmuligheder efter dine rettigheder. Info er lukket fra start og kan åbnes uden at genindlæse billedet eller afbryde en video.
+
 ## Kontrollér efter installation
 
 Åbn et ufølsomt testgalleri fra appikonet, prøv at åbne og lukke et billede, og kontrollér en gæstekonto i en anden browserprofil. Kontrollér også log ud og tilbagekaldt gallerirettighed. En grøn filoverførsel eller automatiske tests erstatter ikke kontrollen på din egen telefon og dit webhotel.

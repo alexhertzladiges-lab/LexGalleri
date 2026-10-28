@@ -10,7 +10,10 @@ function fixture(){
   const elements=new Map(),lists=new Map(),bindings=new Map(),calls=[],messages=[],historyCalls=[],reloads=[];
   const element=key=>{
     if(elements.has(key))return elements.get(key);
+    const classes=new Set(),attributes=new Map();
     const node={innerHTML:'',textContent:'',open:false,checked:false,disabled:false,style:{},listeners:new Map(),
+      classList:{add:value=>classes.add(value),remove:value=>classes.delete(value),contains:value=>classes.has(value),toggle(value,force){const on=force??!classes.has(value);if(on)classes.add(value);else classes.delete(value);return on;}},
+      setAttribute(key,value){attributes.set(key,String(value));},getAttribute:key=>attributes.get(key)??null,
       querySelector(q){return element(key+' '+q);},addEventListener(name,fn){this.listeners.set(name,fn);},
       showModal(){this.open=true;},close(){this.open=false;this.listeners.get('close')?.();},pause(){},click(){this.onclick?.();}};
     elements.set(key,node);return node;
