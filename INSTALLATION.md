@@ -48,7 +48,7 @@ return [
     'db_name' => 'FULDT_DATABASENAVN',
     'db_user' => 'FULDT_BRUGERNAVN',
     'db_password' => 'DIN_HEMMELIGE_DATABASEADGANGSKODE',
-    'base_path' => '/LexGalleri',
+    'base_path' => '/lexgalleri',
     'secure_cookies' => true,
     'setup_token' => 'EN_TILFAELDIG_ENGANGSNOEGLE_PAA_MINDST_32_TEGN',
 ];
@@ -57,6 +57,8 @@ return [
 Brug de rigtige databaseoplysninger fra dit kontrolpanel. Generér opsætningsnøglen i en adgangskodeadministrator; brug ikke eksemplets tekst. Den er forskellig fra databaseadgangskoden. Hvis en værdi indeholder `'` eller `\`, skal den escapes i PHP-strengen (henholdsvis `\'` og `\\`).
 
 Gem aldrig den udfyldte konfiguration, databaseadgangskoden eller opsætningsnøglen i GitHub eller chatten. GitHub-deploy hverken læser, tester, overfører eller ændrer denne servermappe direkte.
+
+Den offentlige URL bruger `/lexgalleri` med små bogstaver. [ROUTING.md](ROUTING.md) beskriver den ene konfigurationsværdi og blokken i domænets rod, som får `https://lexan.dk/` til at åbne galleriet. Den fysiske galleri-mappe i næste trin kan fortsat hedde `LexGalleri`.
 
 ## 4. Begræns FTPS-kontoen til den offentlige mappe
 
@@ -91,7 +93,9 @@ PHP's `public/index.php` er allerede kodet til at finde privatmappen på `/home/
 
 ## 5. Åbn galleriet og opret admin
 
-Åbn dit eget domænes HTTPS-adresse efterfulgt af `/LexGalleri/`. Udbydernavnet er ikke nødvendigvis dit domæne.
+Installér først domænets routing efter [ROUTING.md](ROUTING.md), hvis den lille adresse endnu ikke åbner galleri-mappen. Rodblokken installerer du med egen adgang ved siden af galleri-mappen.
+
+Åbn `https://lexan.dk/lexgalleri/` med små bogstaver. Udbydernavnet er ikke nødvendigvis dit domæne.
 
 Indtast opsætningsnøgle, navn, e-mail og en unik adminadgangskode på 12–72 bytes. PHP opretter tabellerne og admin-kontoen under en MySQL-lås. Tilknyt derefter en Authenticator-app ved at scanne QR-koden eller indtaste opsætningsnøglen fra skærmen, og bekræft med appens sekscifrede kode. Gem de viste engangskoder til gendannelse privat. Først efter bekræftelsen åbnes galleriet.
 
@@ -122,7 +126,7 @@ Følg [den særskilte Lychee-importvejledning](LYCHEE-IMPORT.md), hvis du vil ko
 - **FTPS-kontoen viser et andet website:** Ret kontoens rod i kontrolpanelet. Workflowet gætter ikke alternative mapper.
 - **503 med manglende installation:** Kontrollér dine private filer og PHP-læserettigheder via din egen adgang.
 - **503 med manglende PHP-udvidelse:** Aktivér den i kontrolpanelet.
-- **404 på `/LexGalleri/api/status`:** Kontrollér `.htaccess`, `base_path` og Apache/LiteSpeed-rewrite. Ved andre servertyper skal webhotellet konfigurere tilsvarende routing til index.php.
+- **404 på `/lexgalleri/api/status`:** Kontrollér `.htaccess`, `base_path` og Apache/LiteSpeed-rewrite. Ved andre servertyper skal webhotellet konfigurere tilsvarende routing til index.php.
 - **500:** Se din private PHP-fejllog. Kontrollér DB-forbindelse, privilegier og `open_basedir`. Hvis webhotellet ikke tillader `Options -Indexes`, bed support om mappeindeks-beskyttelse og fjern kun denne linje fra .htaccess.
 - **Login forsvinder:** Brug HTTPS og kontrollér PHP-skriveadgang til `sessions/`.
 - **Login kræver kontomigrering:** Kør `004_account_security.sql` i LexGalleris database, og kontrollér, at begge private programfiler er fra den samme version.

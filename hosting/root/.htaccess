@@ -1,0 +1,42 @@
+# BEGIN LexGalleri
+# Add this managed block before existing website/CMS rewrite rules. Preserve any
+# other directives already present in the domain's document-root .htaccess.
+# The public URL is lowercase; the existing physical gallery directory may be
+# named lexgalleri or LexGalleri. Prefer lexgalleri when both contain index.php.
+RewriteEngine On
+
+# mod_alias redirects survive child-directory rewrite configuration and run
+# before DirectorySlash can turn an existing directory into a different 301.
+# Fixed HTTPS destinations never reflect Host; original queries are preserved.
+<IfModule mod_alias.c>
+<If "%{HTTP_HOST} =~ m#^(?:www\.)?lexan\.dk(?::[0-9]+)?$#i">
+  RedirectMatch 308 ^/(?:index\.php)?$ https://lexan.dk/lexgalleri/
+  RedirectMatch 308 ^/lexgalleri$ https://lexan.dk/lexgalleri/
+  # Keep THE_REQUEST case-sensitive: internal mappings to the physical
+  # LexGalleri directory must not create an external redirect loop.
+  <If "%{THE_REQUEST} =~ m#\s/+LexGalleri(?:[/?\s])#">
+    RedirectMatch 308 ^/LexGalleri(?:/(.*))?$ https://lexan.dk/lexgalleri/$1
+  </If>
+</If>
+</IfModule>
+
+# End rewriting at an explicit public asset or the PHP front controller. Do not
+# use a generic filesystem pass-through: unknown or hidden files stay private.
+RewriteCond %{HTTP_HOST} ^(?:www\.)?lexan\.dk(?::[0-9]+)?$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/lexgalleri/index.php -f
+RewriteRule ^lexgalleri/(manifest\.webmanifest|service-worker\.js|static/(?:app\.js|pwa\.js|qrcode\.js|style\.css|icon\.svg|icon-192\.png|icon-512\.png|apple-touch-icon\.png))$ /lexgalleri/$1 [END]
+
+RewriteCond %{HTTP_HOST} ^(?:www\.)?lexan\.dk(?::[0-9]+)?$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/lexgalleri/index.php -f
+RewriteRule ^lexgalleri(?:/.*)?$ /lexgalleri/index.php [END]
+
+RewriteCond %{HTTP_HOST} ^(?:www\.)?lexan\.dk(?::[0-9]+)?$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/lexgalleri/index.php !-f
+RewriteCond %{DOCUMENT_ROOT}/LexGalleri/index.php -f
+RewriteRule ^lexgalleri/(manifest\.webmanifest|service-worker\.js|static/(?:app\.js|pwa\.js|qrcode\.js|style\.css|icon\.svg|icon-192\.png|icon-512\.png|apple-touch-icon\.png))$ /LexGalleri/$1 [END]
+
+RewriteCond %{HTTP_HOST} ^(?:www\.)?lexan\.dk(?::[0-9]+)?$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/lexgalleri/index.php !-f
+RewriteCond %{DOCUMENT_ROOT}/LexGalleri/index.php -f
+RewriteRule ^lexgalleri(?:/.*)?$ /LexGalleri/index.php [END]
+# END LexGalleri

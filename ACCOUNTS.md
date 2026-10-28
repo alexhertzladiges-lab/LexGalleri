@@ -4,6 +4,8 @@ Alle brugere har en profil med navn, e-mail og rolle. Administratoren kan se og 
 
 Administratorer skal bruge adgangskode og en kode fra en Authenticator-app for at logge ind. Medlemmer bruger deres almindelige login. Galleriernes separate adgangsrettigheder gælder fortsat.
 
+Log ind på **https://lexan.dk/lexgalleri/** med små bogstaver. Se [ROUTING.md](ROUTING.md) ved adresseændringen; brug den eksisterende konto og Authenticator, hvis den nye cookiesti kræver nyt login.
+
 ## Opdatér en eksisterende installation
 
 Brug din egen adgang til webhotellets filmanager og phpMyAdmin. FTPS-workflowet har fortsat kun adgang til den offentlige galleri-mappe.
