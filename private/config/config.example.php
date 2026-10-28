@@ -5,7 +5,7 @@ return [
     'db_name' => 'DIT_FULDE_DATABASENAVN',
     'db_user' => 'DIN_DATABASEBRUGER',
     'db_password' => 'DIN_DATABASEADGANGSKODE',
-    'base_path' => '/LexGalleri',
+    'base_path' => '/lexgalleri',
     'secure_cookies' => true,
     // Vælg en lang, tilfældig engangsnøgle til oprettelse af første admin.
     // Fjern værdien efter oprettelse. Del ikke nøglen eller denne fil.

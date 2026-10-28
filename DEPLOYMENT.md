@@ -8,6 +8,8 @@ Begræns kontoen i webhotellets kontrolpanel, så dens FTP-rod `/` svarer til `/
 
 Kontrollér rodbegrænsningen i kontrolpanelet, før kontoen kobles på GitHub. FTP-protokollens `PWD /` alene beviser ikke, hvilken fysisk servermappe roden er koblet til. Serveren skal håndhæve begrænsningen.
 
+Den offentlige URL er `https://lexan.dk/lexgalleri/`, selv om den eksisterende fysiske mappe hedder `LexGalleri`. [ROUTING.md](ROUTING.md) beskriver rodblokken, som ejeren lægger ved siden af galleri-mappen med egen adgang. Workflowet overfører ikke `hosting/root/` til domænets rod.
+
 ## GitHub-indstillinger — én gang
 
 Åbn **Settings → Secrets and variables → Actions** i LexGalleri.
@@ -76,6 +78,6 @@ De tolv rename-operationer er ikke én samlet transaktion. En afbrudt forbindels
 
 ## Efter overførsel
 
-Åbn din HTTPS-adresse med `/LexGalleri/`, genindlæs siden, log ind og kontroller et ufølsomt foto. Åbn og luk billedet; oversigten skal blive liggende uden ny hentning af alle miniaturer. Følg [WEBAPP.md](WEBAPP.md) for installation på mobilen, og kontrollér også opstart fra hjemmeskærmen. Første opsætning kræver de private filer og databasen fra installationsvejledningen. Et grønt GitHub-testjob eller en vellykket offentlig filoverførsel beviser ikke, at den private installation eller en konkret mobilbrowser virker.
+Åbn `https://lexan.dk/lexgalleri/`, genindlæs siden, log ind og kontroller et ufølsomt foto. Åbn og luk billedet; oversigten skal blive liggende uden ny hentning af alle miniaturer. Følg [WEBAPP.md](WEBAPP.md) for installation på mobilen, og kontrollér også opstart fra hjemmeskærmen. Første opsætning kræver de private filer og databasen fra installationsvejledningen. Et grønt GitHub-testjob eller en vellykket offentlig filoverførsel beviser ikke, at den private installation eller en konkret mobilbrowser virker.
 
 Planens fil-liste, adgangsgrænse, TLS-krav og rækkefølge testes automatisk. En gennemført offentlig overførsel kontrollerer FTPS-login og de nødvendige filoperationer; ejeren kontrollerer derefter selve galleriet og appinstallationen på sit domæne.

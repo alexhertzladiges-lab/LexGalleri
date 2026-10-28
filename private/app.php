@@ -309,7 +309,7 @@ try {
     foreach (['pdo_mysql','gd','exif','mbstring','openssl'] as $extension) if(!extension_loaded($extension)) fail(503,'PHP-udvidelsen '.$extension.' skal aktiveres på webhotellet');
     if(!is_file($private.'/security.php'))fail(503,'Sikkerhedsmodulet mangler. Installér security.php fra samme kodeversion i den private mappe');
     require_once $private.'/security.php';
-    $base=rtrim($config['base_path']??'/LexGalleri','/');
+    $base=rtrim($config['base_path']??'/lexgalleri','/');
     if($base!=='' && !preg_match('~^(/[a-zA-Z0-9_-]+)+$~D',$base))throw new RuntimeException('Ugyldig base_path');
     umask(0077);
     foreach(['sessions','originals','previews','thumbnails'] as $folder) {

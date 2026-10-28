@@ -2,6 +2,8 @@
 
 Importøren læser Lychees database og overfører originalerne direkte på dit webhotel. Du vælger **kopiering** eller **flytning** efter prøvevisningen. Du behøver ingen eksport fra Lychee, og Lychee bliver ikke opgraderet. Den understøttede kilde er **præcis Lychee 6.6.12**, med databaseversionsværdien `060612`.
 
+Galleriets offentlige adresse er **https://lexan.dk/lexgalleri/**. [Adressevejledningen](ROUTING.md) ændrer kun adgangen via domænet; Lychees kildekonfiguration, originalmapper og importhistorik følger deres eksisterende placeringer.
+
 En fungerende Lychee-installation er ikke nødvendig: databasen og de bevarede originalmapper er nok. Manglende programfiler og gamle visningsbilleder eller miniaturer forhindrer ikke importen. LexGalleri læser kun originalvarianter: JPEG, PNG, WebP og MP4. Billeder får nye visningsbilleder og miniaturer; MP4 får et neutralt videomotiv uden udtræk af videobilleder.
 
 Du installerer selv de private filer og indtaster databaseoplysningerne i en privat konfigurationsfil. GitHub/vores FTPS-konto får fortsat kun adgang til LexGalleris offentlige mappe. Importen køres af dig, mens du er logget ind som admin i LexGalleri.

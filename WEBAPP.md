@@ -6,6 +6,8 @@ LexGalleri kan installeres fra browseren og åbne i sit eget appvindue fra et ik
 
 Appen skal åbnes via **HTTPS**, og webhotellets offentlige og private programfiler skal være opdateret til samme version. Browseren afgør, hvilke installationsmuligheder den tilbyder.
 
+Brug **https://lexan.dk/lexgalleri/** med små bogstaver. Adresseopsætning og viderestilling fra `https://lexan.dk/` beskrives i [ROUTING.md](ROUTING.md). Er appen allerede installeret fra `/LexGalleri/`, skal den gamle genvej fjernes og appen installeres fra den nye adresse; et nyt login kan være nødvendigt.
+
 ## Opdatér en eksisterende installation
 
 1. Sæt en eventuel igangværende import på pause.
@@ -18,7 +20,7 @@ Privat og offentlig kode kan installeres i den rækkefølge, din adgang tillader
 
 ## Android med Chrome
 
-1. Åbn galleriets almindelige HTTPS-adresse i Chrome, fx dit eget domæne efterfulgt af `/LexGalleri/`.
+1. Åbn `https://lexan.dk/lexgalleri/` i Chrome med små bogstaver.
 2. Vælg **Installér app**, hvis LexGalleri eller browseren viser knappen. Du kan også åbne Chromes **⋮**-menu og vælge **Installér app** eller **Føj til startskærm**, afhængigt af browserens version.
 3. Bekræft, og åbn LexGalleri fra det nye ikon.
 
