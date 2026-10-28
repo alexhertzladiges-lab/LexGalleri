@@ -21,11 +21,13 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const galleryId='a'.repeat(32);
   const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
   const deleteRequests=[],pendingDeletes=[],deleted=new Set();
+  const approvalRequests=[],deletionRequestPosts=[],deletionDecisions=[],pendingRequestPosts=[],pendingDecisions=[];
+  let holdRequestPosts=false,holdDecisions=false;
   let holdGrantWrites=false,holdDeletes=false,otherRevoked=false,mediaDeleteCapability=mediaDelete;
   const defaultTheme={version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'};
   const activeThemeId='e'.repeat(32),inactiveThemeId='9'.repeat(32),themeDeleteRequests=[],pendingThemeDeletes=[];
@@ -38,10 +40,12 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   const photos=Array.from({length:60},(_,index)=>({
     id:(index+1).toString(16).padStart(32,'0'),gallery_id:galleryId,
     title:'Familie '+String(index+1).padStart(2,'0'),mime:'image/jpeg',
-    place:'Syntetisk test',uploader_name:'Testkonto',uploaded:'2020-01-01T00:00:'+String(index%60).padStart(2,'0')+'Z',
+    place:'Syntetisk test',uploader:'f'.repeat(32),uploader_name:'Testkonto',uploaded:'2020-01-01T00:00:'+String(index%60).padStart(2,'0')+'Z',
     taken:'',precision:'unknown',lat:null,lon:null,favorite:false,
   }));
   photos[0].mime='video/mp4';
+  if(deletionRequests){for(const photo of [photos[1],photos[2]]){photo.uploader=memberId;photo.uploader_name='Syntetisk medlem';}photos[2].mime='video/mp4';}
+  const newApproval=photo=>({id:'6'.repeat(30)+String(approvalRequests.length+1).padStart(2,'0'),photo_id:photo.id,gallery_id:photo.gallery_id,gallery_name:'Syntetisk galleri',title:photo.title,mime:photo.mime,requester_id:memberId,requester_name:'Syntetisk medlem',status:'pending',created:'2026-10-28T18:00:00Z',updated:'2026-10-28T18:00:00Z'});
   if(longPhotoTitles)for(const photo of [photos[1],photos[2]])photo.title='En lang familietitel med mange minder og detaljer. '.repeat(5).slice(0,200);
   const otherPhotos=[{...photos[1],id:'d'.repeat(31)+'1',gallery_id:otherGalleryId,title:'Privat syntetisk minde',favorite:true}];
   const video=Buffer.from((await readFile(join(root,'tests','fixtures','tiny.mp4.b64'),'utf8')).replace(/\s/g,''),'base64');
@@ -57,11 +61,32 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       send('text/html; charset=utf-8',html);return;
     }
     if(url.pathname===base+'/api/status'){
-      const capabilities={...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{})};
+      const capabilities={...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
     if(url.pathname===base+'/api/me'){json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
     if(url.pathname===base+'/api/theme'){json(activeTheme());return;}
+    if(deletionRequests&&url.pathname===base+'/api/admin/deletion-requests'&&req.method==='GET'){
+      if(member){json({detail:'Kun administrator'},403);return;}
+      json(approvalRequests.filter(request=>request.status==='pending'));return;
+    }
+    if(deletionRequests&&url.pathname===base+'/api/deletion-requests'&&req.method==='GET'){json(approvalRequests.filter(request=>request.requester_id===(member?memberId:'f'.repeat(32))));return;}
+    const approvalPost=url.pathname.match(new RegExp('^'+base+'/api/photos/([a-f0-9]{32})/deletion-request$'));
+    if(deletionRequests&&approvalPost&&req.method==='POST'){
+      deletionRequestPosts.push(approvalPost[1]);const photo=photos.find(photo=>photo.id===approvalPost[1]);
+      if(!photo||deleted.has(photo.id)){json({detail:'Foto findes ikke'},404);return;}
+      if(!member||photo.uploader!==memberId){json({detail:'Kun egne billeder kan markeres'},403);return;}
+      const finish=error=>{if(error){json({detail:error},503);return;}let request=approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending');if(!request){request=newApproval(photo);approvalRequests.push(request);}json({ok:true,request});};
+      if(holdRequestPosts)pendingRequestPosts.push(finish);else finish();return;
+    }
+    const approvalDecision=url.pathname.match(new RegExp('^'+base+'/api/admin/deletion-requests/([a-f0-9]{32})/(approve|reject)$'));
+    if(deletionRequests&&approvalDecision&&req.method==='POST'){
+      const [,id,decision]=approvalDecision;deletionDecisions.push({id,decision});
+      if(member){json({detail:'Kun administrator'},403);return;}
+      const request=approvalRequests.find(request=>request.id===id);if(!request){json({detail:'Anmodning findes ikke'},404);return;}
+      const finish=error=>{if(error){json({detail:error},503);return;}request.status=decision==='approve'?'approved':'rejected';if(decision==='approve')deleted.add(request.photo_id);json({ok:true,request});};
+      if(holdDecisions)pendingDecisions.push(finish);else finish();return;
+    }
     if(themePackages&&url.pathname===base+'/api/admin/themes'){json(installedThemes);return;}
     const themeDeletion=url.pathname.match(new RegExp('^'+base+'/api/admin/themes/([a-f0-9]{32}|default)$'));
     if(themePackages&&themeDeletion&&req.method==='DELETE'){
@@ -100,7 +125,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
-      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)),permissions:{upload:false,download:true,gps:true,video:true}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,download:true,gps:true,video:true}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
       json(otherRevoked?{detail:'Du har ikke adgang'}:{photos:otherPhotos,permissions:{upload:false,download:false,gps:false,video:false}},otherRevoked?403:200);return;
@@ -138,6 +163,11 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+    approvalRequests,deletionRequestPosts,deletionDecisions,
+    seedDeletionRequests:()=>{for(const photo of [photos[1],photos[2]])approvalRequests.push(newApproval(photo));},
+    holdDeletionRequestPosts:()=>{holdRequestPosts=true;},releaseDeletionRequestPost:error=>{assert(pendingRequestPosts.length,'a deletion request must be pending');pendingRequestPosts.shift()(error);},
+    holdDeletionDecisions:()=>{holdDecisions=true;},releaseDeletionDecision:error=>{assert(pendingDecisions.length,'an admin decision must be pending');pendingDecisions.shift()(error);},
+    hasDeleted:id=>deleted.has(id),
     holdGrantWrites:()=>{holdGrantWrites=true;},releaseGrantWrite:error=>{assert(pendingGrantWrites.length,'a grant request must be pending');pendingGrantWrites.shift()(error);},
     holdDeletes:()=>{holdDeletes=true;},releaseDelete:error=>{assert(pendingDeletes.length,'a media deletion must be pending');pendingDeletes.shift()(error);},
     holdThemeDeletes:()=>{holdThemeDeletes=true;},releaseThemeDelete:error=>{assert(pendingThemeDeletes.length,'a package deletion must be pending');pendingThemeDeletes.shift()(error);},disableThemeDelete:()=>{themeDeleteCapability=false;},enableThemeDelete:()=>{themeDeleteCapability=true;},
@@ -523,6 +553,272 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
       assert(await run('!document.querySelector("#delete-photo")&&!!document.querySelector("#edit-photo")'));
       const unavailable=await infoVisibility('.media-delete-unavailable');assert(unavailable.inside&&unavailable.visible&&unavailable.beforeTitle,'administrators must see the missing-capability explanation immediately in Info');assert.equal(unavailable.scroll,0);assert.equal(unavailable.titleLength,200);assert.equal(unavailable.role,'status');assert.equal(unavailable.text,'Sletning er ikke aktiveret endnu.');
       assert.equal(site.deleteRequests.length,3);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: gallery deletion selects exact media, confirms once and preserves surviving thumbnails',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async t=>{
+  const site=await fixture({mediaDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const photo=id=>'document.querySelector('+JSON.stringify('[data-photo="'+id+'"]')+')';
+    const ids=Array.from({length:8},(_,index)=>(index+1).toString(16).padStart(32,'0'));
+    const select=async selected=>{for(const id of selected)await run(photo(id)+'.click()');};
+    const close=()=>run("new Promise(resolve=>{const dialog=document.querySelector('#modal');dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();})");
+    const review=async()=>{await run('document.querySelector("#gallery-delete-review").click()');await wait('document.querySelector("#modal").open&&!!document.querySelector("#gallery-delete-confirm")','gallery deletion confirmation');};
+    const requests=async count=>{const until=Date.now()+5000;while(site.deleteRequests.length<count&&Date.now()<until)await pause(20);assert.equal(site.deleteRequests.length,count,'only one sequential deletion may be outstanding');};
+    const photosRequested=()=>site.requests.filter(path=>path.endsWith('/photos')).length;
+    const retain=async deleted=>{
+      assert(await run('__selectionGrid===document.querySelector("#photo-grid")'),'selection/deletion must retain the grid');
+      assert(await run('__selectionImages.filter(([id])=>!'+JSON.stringify(deleted)+'.includes(id)).every(([id,image])=>image.isConnected&&image===document.querySelector(\'[data-photo="\'+id+\'"] img\'))'),'surviving loaded thumbnail nodes must remain in place');
+    };
+    const gallery=async()=>{await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length>0','gallery media');};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','administrator overview');await gallery();
+
+    await t.test('desktop and mobile expose the entry above the grid without opening Info',async()=>{
+      for(const [width,height,mobile] of [[1280,900,false],[390,844,true]]){
+        await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:mobile?2:1,mobile});
+        const entry=await run('(()=>{const b=document.querySelector("#gallery-delete-toggle"),r=b.getBoundingClientRect(),g=document.querySelector("#photo-grid").getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{text:b.textContent,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&(hit===b||b.contains(hit)),above:r.bottom<=g.top,disabled:b.disabled};})()');
+        assert.match(entry.text,/Slet billeder/);assert(entry.visible&&entry.above&&!entry.disabled,'the gallery entry must be visible and tappable before the grid at '+width+'px');
+        assert(await run('!document.querySelector("#modal").open&&document.querySelector("#gallery-delete-tools").hidden'));
+      }
+      await call('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+    });
+
+    await t.test('selecting, reviewing and cancelling issue no deletes or gallery refetches',async()=>{
+      const before=photosRequested();
+      await run('window.__selectionGrid=document.querySelector("#photo-grid");window.__selectionImages=[...__selectionGrid.querySelectorAll("[data-photo]")].map(b=>[b.dataset.photo,b.querySelector("img")]);document.querySelector("#gallery-delete-toggle").click()');
+      assert(await run('!document.querySelector("#gallery-delete-tools").hidden&&document.querySelector("#gallery-delete-review").disabled'));
+      await select([site.photoId,site.stillPhotoId]);
+      assert(await run(photo(site.photoId)+'.getAttribute("role")==="checkbox"&&'+photo(site.photoId)+'.getAttribute("aria-checked")==="true"&&'+photo(ids[2])+'.getAttribute("aria-checked")==="false"'));
+      assert(await run('!document.querySelector("#modal").open&&document.querySelector("#gallery-delete-count").textContent.includes("2")'));
+      await review();
+      const list=await run('[...document.querySelector("#gallery-delete-confirm").querySelectorAll("li")].map(li=>li.textContent)');
+      assert.equal(list.length,2);assert(list.some(text=>text.includes('Familie 01'))&&list.some(text=>text.includes('Familie 02')),'confirmation must name precisely the selected video and still image');
+      assert.match(await run('document.querySelector("#gallery-delete-confirm").textContent'),/galleri/);
+      await run('document.querySelector("#gallery-delete-cancel").click()');await wait('!document.querySelector("#modal").open','cancelled confirmation');
+      await retain([]);assert.equal(site.deleteRequests.length,0);assert.equal(photosRequested(),before);
+      await run('document.querySelector("#gallery-delete-exit").click()');
+      assert(await run('document.querySelector("#gallery-delete-tools").hidden&&![...document.querySelectorAll("[data-photo]")].some(b=>b.hasAttribute("aria-checked"))'));
+      await retain([]);assert.equal(site.deleteRequests.length,0);
+    });
+
+    await t.test('search and sort clear previous selections before a new confirmation',async()=>{
+      await run('document.querySelector("#gallery-delete-toggle").click()');await select([ids[2]]);
+      await run('document.querySelector("#search-photo").value="Familie 04";document.querySelector("#search-photo").dispatchEvent(new Event("input",{bubbles:true}))');
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),1);
+      assert(await run('document.querySelector("#gallery-delete-review").disabled&&'+photo(ids[3])+'.getAttribute("aria-checked")==="false"'));
+      assert.match(await run('document.querySelector("#gallery-delete-count").textContent'),/0/);
+      await select([ids[3]]);
+      await run('document.querySelector("#sort").value="uploaded";document.querySelector("#sort").dispatchEvent(new Event("change",{bubbles:true}))');
+      assert(await run('document.querySelector("#gallery-delete-review").disabled&&'+photo(ids[3])+'.getAttribute("aria-checked")==="false"'));
+      await run('document.querySelector("#search-photo").value="";document.querySelector("#search-photo").dispatchEvent(new Event("input",{bubbles:true}));window.__selectionGrid=document.querySelector("#photo-grid");window.__selectionImages=[...__selectionGrid.querySelectorAll("[data-photo]")].map(b=>[b.dataset.photo,b.querySelector("img")])');
+      assert.equal(site.deleteRequests.length,0);
+    });
+
+    await t.test('one confirmation deletes only the selected JPEG and MP4 sequentially',async()=>{
+      const before=photosRequested();site.holdDeletes();await select([site.photoId,site.stillPhotoId]);await review();
+      await run('document.querySelector("#gallery-delete-submit").click();document.querySelector("#gallery-delete-submit").click()');await requests(1);
+      assert(await run('document.querySelector("#gallery-delete-submit").disabled'));
+      assert([site.photoId,site.stillPhotoId].includes(site.deleteRequests[0]));site.releaseDelete();await requests(2);
+      assert.notEqual(site.deleteRequests[0],site.deleteRequests[1]);assert.deepEqual([...site.deleteRequests].sort(),[site.photoId,site.stillPhotoId].sort());
+      site.releaseDelete();await wait('!document.querySelector("#modal").open&&document.querySelectorAll("[data-photo]").length===58','confirmed selection deletion');
+      await retain([site.photoId,site.stillPhotoId]);assert.equal(photosRequested(),before);
+      assert.equal(await run('document.querySelector("#gallery-media-count").textContent'),'58 billeder');
+      assert(await run('galleries.find(g=>g.id==='+JSON.stringify(site.galleryId)+').count===58'));
+    });
+
+    await t.test('a partial failure stops the batch and retries only failed or unattempted selections',async()=>{
+      if(await run('document.querySelector("#gallery-delete-tools").hidden'))await run('document.querySelector("#gallery-delete-toggle").click()');
+      await select(ids.slice(2,5));await review();
+      await run('document.querySelector("#gallery-delete-submit").click()');await requests(3);const first=site.deleteRequests[2];site.releaseDelete();await requests(4);const failed=site.deleteRequests[3];
+      site.releaseDelete('Syntetisk stop efter delvis sletning');await wait('document.querySelector("#gallery-delete-status").textContent.includes("Syntetisk stop")','partial failure feedback');
+      await pause(80);assert.equal(site.deleteRequests.length,4,'a failure must prevent starting the third selected deletion');
+      assert(await run('!'+photo(first)+'&&!!'+photo(failed)+'&&!document.querySelector("#gallery-delete-submit").disabled'));
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),57);await retain([site.photoId,site.stillPhotoId,first]);
+      await run('document.querySelector("#gallery-delete-submit").click()');await requests(5);assert.notEqual(site.deleteRequests[4],first);site.releaseDelete();await requests(6);assert.notEqual(site.deleteRequests[5],first);site.releaseDelete();
+      await wait('!document.querySelector("#modal").open&&document.querySelectorAll("[data-photo]").length===55','retry remaining selection');
+      assert.deepEqual(site.deleteRequests.slice(2).filter(id=>id===first),[first],'acknowledged deletion must never be resubmitted');
+      assert.deepEqual([...new Set(site.deleteRequests.slice(2))].sort(),ids.slice(2,5).sort());await retain(ids.slice(0,5));
+    });
+
+    await t.test('Escape during a pending deletion acknowledges that one and starts no next request',async()=>{
+      if(await run('document.querySelector("#gallery-delete-tools").hidden'))await run('document.querySelector("#gallery-delete-toggle").click()');
+      await select(ids.slice(5,7));await review();await run('document.querySelector("#gallery-delete-submit").click()');await requests(7);
+      const deleting=site.deleteRequests[6];
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await wait('!document.querySelector("#modal").open','native Escape closes confirmation');site.releaseDelete();
+      await wait('!'+photo(deleting),'acknowledged deletion after closing confirmation');await pause(100);
+      assert.equal(site.deleteRequests.length,7,'closing confirmation must stop starting new requests');
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),54);
+      await retain([...ids.slice(0,5),deleting]);
+    });
+
+    await t.test('leaving the gallery while one deletion is pending prevents subsequent batch requests',async()=>{
+      await run('document.querySelector("#gallery-delete-exit").click();document.querySelector("#gallery-delete-toggle").click()');
+      const remaining=await run('[...document.querySelectorAll("[data-photo]")].slice(0,2).map(b=>b.dataset.photo)');await select(remaining);await review();
+      await run('document.querySelector("#gallery-delete-submit").click()');await requests(8);
+      await close();await run('document.querySelector("#back").click()');await wait('!!document.querySelector("#gallery-grid")','gallery overview during pending deletion');
+      site.releaseDelete();await pause(100);assert.equal(site.deleteRequests.length,8,'navigation must stop the rest of a confirmed batch');
+      assert(await run('!!document.querySelector("#gallery-grid")&&!document.querySelector("#modal").open&&!document.querySelector("#gallery-delete-tools")'));
+    });
+
+    await t.test('an account change stops the rest of a pending batch without restoring private UI',async()=>{
+      await gallery();await run('document.querySelector("#gallery-delete-toggle").click()');
+      const remaining=await run('[...document.querySelectorAll("[data-photo]")].slice(0,2).map(b=>b.dataset.photo)');await select(remaining);await review();
+      await run('document.querySelector("#gallery-delete-submit").click()');await requests(9);
+      await run('clearAccountWorkspace();me=null;document.querySelector("#app").innerHTML="<p>Logget ud i syntetisk test</p>"');site.releaseDelete();await pause(100);
+      assert.equal(site.deleteRequests.length,9);assert(await run('document.querySelector("#app").textContent==="Logget ud i syntetisk test"&&!document.querySelector("#modal").open'));
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: gallery deletion is unavailable to members and disabled without server support',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async()=>{
+  for(const member of [true,false]){
+    const site=await fixture({member,mediaDelete:member});let browser;
+    try{
+      browser=await chrome();const {evaluate:run,wait,call}=browser;
+      await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');
+      await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','gallery media');
+      if(member)assert(await run('!document.querySelector("#gallery-delete-toggle")&&!document.querySelector("#gallery-delete-tools")'),'members must not receive gallery deletion controls');
+      else{
+        assert(await run('!!document.querySelector("#gallery-delete-toggle")&&document.querySelector("#gallery-delete-toggle").disabled'),'an old server must never expose an enabled deletion entry');
+        assert.match(await run('document.querySelector("#content").textContent'),/Sletning er ikke aktiveret/);
+      }
+      assert.equal(site.deleteRequests.length,0);
+    }finally{if(browser)await browser.close();await site.close();}
+  }
+});
+
+test('real Chromium: members request deletion approval only for their own media and retain the originals',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async t=>{
+  const site=await fixture({member:true,mediaDelete:true,deletionRequests:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const ownPhoto=site.stillPhotoId,ownVideo=(3).toString(16).padStart(32,'0');
+    const photo=id=>'document.querySelector('+JSON.stringify('[data-photo="'+id+'"]')+')';
+    const posts=async count=>{const until=Date.now()+5000;while(site.deletionRequestPosts.length<count&&Date.now()<until)await pause(20);assert.equal(site.deletionRequestPosts.length,count,'one approval request per selected media');};
+    const retained=async()=>{
+      assert(await run('__approvalGrid===document.querySelector("#photo-grid")&&__approvalImages.every(([id,image])=>image.isConnected&&image===document.querySelector(\'[data-photo="\'+id+\'"] img\'))'),'requesting approval must preserve every thumbnail and the grid');
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),60);
+      assert.equal(await run('document.querySelector("#gallery-media-count").textContent'),'60 billeder');
+      assert.equal(site.deleteRequests.length,0,'members must never issue direct media DELETE requests');
+      assert(!site.hasDeleted(ownPhoto)&&!site.hasDeleted(ownVideo),'approval requests must never remove originals');
+    };
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','member galleries');
+    assert(await run('!document.querySelector("[data-view=deletions]")'),'members must not receive the administrator approval inbox');
+    await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','member gallery');
+    await run('window.__approvalGrid=document.querySelector("#photo-grid");window.__approvalImages=[...__approvalGrid.querySelectorAll("[data-photo]")].map(b=>[b.dataset.photo,b.querySelector("img")])');
+
+    await t.test('members enter approval selection on desktop and mobile without deletion controls',async()=>{
+      for(const [width,height,mobile] of [[1280,900,false],[390,844,true]]){
+        await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:mobile?2:1,mobile});
+        const entry=await run('(()=>{const b=document.querySelector("#gallery-delete-toggle"),r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{text:b.textContent,enabled:!b.disabled,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&(hit===b||b.contains(hit))};})()');
+        assert.match(entry.text,/Markér til sletning/);assert(entry.enabled&&entry.visible);
+      }
+      await call('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+      await run('document.querySelector("#gallery-delete-toggle").click()');
+      assert(await run(photo(ownPhoto)+'.getAttribute("role")==="checkbox"&&!'+photo(ownPhoto)+'.disabled&&'+photo(ownVideo)+'.getAttribute("role")==="checkbox"&&!'+photo(ownVideo)+'.disabled'));
+      assert(await run(photo(site.photoId)+'.disabled'),'another uploader’s media must not be selectable');
+      await run(photo(site.photoId)+'.click()');
+      assert(await run('document.querySelector("#gallery-delete-review").disabled&&!document.querySelector("#modal").open'));
+      await retained();
+    });
+
+    await t.test('cancelling an exact photo/video approval review sends nothing',async()=>{
+      await run(photo(ownPhoto)+'.click();'+photo(ownVideo)+'.click();document.querySelector("#gallery-delete-review").click()');await wait('!!document.querySelector("#gallery-delete-confirm")','member approval review');
+      assert.equal(await run('document.querySelector("#gallery-delete-submit").textContent'),'Send til godkendelse');
+      const titles=await run('[...document.querySelector("#gallery-delete-confirm").querySelectorAll("li")].map(li=>li.textContent)');
+      assert.equal(titles.length,2);assert(titles.some(text=>text.includes('Familie 02'))&&titles.some(text=>text.includes('Familie 03')));
+      assert.match(await run('document.querySelector("#gallery-delete-confirm").textContent'),/admin|godkend/i);
+      await run('document.querySelector("#gallery-delete-cancel").click()');await wait('!document.querySelector("#modal").open','cancelled member approval review');
+      assert.equal(site.deletionRequestPosts.length,0);await retained();
+    });
+
+    await t.test('errors retain the selection and retry submits each request without deleting media',async()=>{
+      const before=site.requests.filter(path=>path.endsWith('/photos')).length;site.holdDeletionRequestPosts();
+      await run('document.querySelector("#gallery-delete-review").click();document.querySelector("#gallery-delete-submit").click();document.querySelector("#gallery-delete-submit").click()');await posts(1);
+      site.releaseDeletionRequestPost('Syntetisk fejl ved godkendelsesanmodning');await wait('document.querySelector("#gallery-delete-status").textContent.includes("Syntetisk fejl")','request failure message');
+      assert(await run('!document.querySelector("#gallery-delete-submit").disabled'));await retained();
+      await run('document.querySelector("#gallery-delete-submit").click()');await posts(2);site.releaseDeletionRequestPost();await posts(3);site.releaseDeletionRequestPost();
+      await wait('!document.querySelector("#modal").open','approval requests submitted');
+      assert.deepEqual([...new Set(site.deletionRequestPosts)].sort(),[ownPhoto,ownVideo].sort());
+      assert.equal(site.approvalRequests.length,2);assert(site.approvalRequests.every(request=>request.status==='pending'));
+      for(const id of [ownPhoto,ownVideo])assert(await run('!!'+photo(id)+'.querySelector(".deletion-request-badge")'),'pending request must be visible on its card');
+      assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before,'request submission must not refetch the gallery');await retained();
+    });
+
+    await t.test('pending requests remain visible after reload and cannot be selected again',async()=>{
+      await call('Page.reload');await wait('!!document.querySelector("[data-gallery]")','member reload');await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','gallery with pending requests');
+      for(const id of [ownPhoto,ownVideo])assert(await run('!!'+photo(id)+'.querySelector(".deletion-request-badge")'));
+      await run('document.querySelector("#gallery-delete-toggle").click()');
+      for(const id of [ownPhoto,ownVideo])assert(await run(photo(id)+'.disabled'),'already pending own media cannot be submitted again');
+      assert(await run('document.querySelector("#gallery-delete-review").disabled'));
+      assert.equal(site.deletionRequestPosts.length,3);assert.equal(site.deleteRequests.length,0);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: administrators review, reject or approve member deletion requests explicitly',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async t=>{
+  const site=await fixture({mediaDelete:true,deletionRequests:true});site.seedDeletionRequests();let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const [imageRequest,videoRequest]=site.approvalRequests;
+    const node=(attribute,id)=>'document.querySelector('+JSON.stringify('['+attribute+'="'+id+'"]')+')';
+    const card=request=>node('data-deletion-request',request.id);
+    const choose=async(request,decision)=>{await run(node('data-deletion-'+decision,request.id)+'.click()');await wait('!!document.querySelector("#deletion-decision-confirm")&&document.querySelector("#modal").open','administrator decision confirmation');};
+    const decisions=async count=>{const until=Date.now()+5000;while(site.deletionDecisions.length<count&&Date.now()<until)await pause(20);assert.equal(site.deletionDecisions.length,count,'decision confirmation must not submit duplicates');};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=deletions]")','administrator request inbox navigation');
+    await run('document.querySelector("[data-view=deletions]").click()');await wait('document.querySelectorAll("[data-deletion-request]").length===2','two pending requests');
+    await run('window.__approvalImageRequest='+card(imageRequest)+';window.__approvalVideoRequest='+card(videoRequest));
+
+    await t.test('confirmation identifies the media, requester and gallery and cancellation preserves files',async()=>{
+      assert.equal(await run('document.querySelector("#deletion-request-count").textContent'),'2 afventer godkendelse');
+      await choose(imageRequest,'approve');
+      const text=await run('document.querySelector("#deletion-decision-confirm").textContent');
+      for(const field of [imageRequest.title,imageRequest.requester_name,imageRequest.gallery_name])assert(text.includes(field),'decision must show '+field);
+      await run('document.querySelector("#deletion-decision-cancel").click()');await wait('!document.querySelector("#modal").open','cancelled decision');
+      assert.equal(site.deletionDecisions.length,0);assert(!site.hasDeleted(imageRequest.photo_id)&&!site.hasDeleted(videoRequest.photo_id));
+      assert(await run('__approvalImageRequest==='+card(imageRequest)+'&&__approvalVideoRequest==='+card(videoRequest)));
+    });
+
+    await t.test('a rapidly reopened rejection retries an error and preserves the video and other request',async()=>{
+      site.holdDeletionDecisions();await choose(videoRequest,'reject');
+      // A native close event is queued. Reopen immediately in the same browser
+      // task so that the old close cannot invalidate the new confirmation.
+      await run('document.querySelector("#deletion-decision-cancel").click();'+node('data-deletion-reject',videoRequest.id)+'.click();document.querySelector("#deletion-decision-submit").click();document.querySelector("#deletion-decision-submit").click()');await decisions(1);
+      assert.deepEqual(site.deletionDecisions[0],{id:videoRequest.id,decision:'reject'});
+      site.releaseDeletionDecision('Syntetisk fejl ved afvisning');await wait('document.querySelector("#deletion-decision-status").textContent.includes("Syntetisk fejl")','rejection error');
+      assert(await run('!!'+card(videoRequest)+'&&!document.querySelector("#deletion-decision-submit").disabled'));
+      assert(!site.hasDeleted(videoRequest.photo_id));
+      await run('document.querySelector("#deletion-decision-submit").click()');await decisions(2);site.releaseDeletionDecision();
+      await wait('!document.querySelector("#modal").open&&!'+card(videoRequest),'rejected request removed');
+      assert.equal(videoRequest.status,'rejected');assert(!site.hasDeleted(videoRequest.photo_id));assert(await run('__approvalImageRequest==='+card(imageRequest)));
+      assert.equal(await run('document.querySelector("#deletion-request-count").textContent'),'1 afventer godkendelse');
+      assert((await run('document.querySelector("#deletion-request-feedback").textContent')).length>0);
+    });
+
+    await t.test('approval removes the original only after a confirmed successful response and can retry',async()=>{
+      await choose(imageRequest,'approve');await run('document.querySelector("#deletion-decision-submit").click()');await decisions(3);
+      assert(!site.hasDeleted(imageRequest.photo_id),'sending the decision must not optimistically remove the file');
+      site.releaseDeletionDecision('Syntetisk fejl ved sletning');await wait('document.querySelector("#deletion-decision-status").textContent.includes("Syntetisk fejl")','approval error');
+      assert(!site.hasDeleted(imageRequest.photo_id));assert(await run('!!'+card(imageRequest)));
+      await run('document.querySelector("#deletion-decision-submit").click()');await decisions(4);site.releaseDeletionDecision();
+      await wait('!document.querySelector("#modal").open&&!'+card(imageRequest),'approved request removed');
+      assert.equal(imageRequest.status,'approved');assert(site.hasDeleted(imageRequest.photo_id));assert(!site.hasDeleted(videoRequest.photo_id));
+      assert.equal(await run('document.querySelector("#deletion-request-count").textContent'),'0 afventer godkendelse');
+      assert.equal(site.deleteRequests.length,0,'approval uses the approval endpoint, not a direct media DELETE');
+      await run('document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("[data-gallery]")','galleries after decisions');
+      await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===59','media after decisions');
+      assert(await run('!document.querySelector('+JSON.stringify('[data-photo="'+imageRequest.photo_id+'"]')+')&&!!document.querySelector('+JSON.stringify('[data-photo="'+videoRequest.photo_id+'"]')+')'),'approved image is removed and rejected video remains');
     });
   }finally{if(browser)await browser.close();await site.close();}
 });

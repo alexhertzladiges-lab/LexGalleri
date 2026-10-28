@@ -6,19 +6,22 @@ let photoViewerGeneration=0;
 let photoViewerNavigation=null;
 let accountGeneration=0,profileGeneration=0,privateAccountDialog=false;
 let navigationGeneration=0,serverCapabilities={};
+let galleryDeleteState=null;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,method='GET',body){const opt={method};if(body instanceof FormData)opt.body=body;else if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body)}const r=await fetch(BASE+'/api'+path,opt);let b;try{b=await r.json()}catch{throw Error('Serveren kunne ikke svare')}if(!r.ok){const error=Error(b.detail||'Der opstod en fejl');error.status=r.status;throw error}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',4500)}
 function applyTheme(t){activeTheme=t;for(const[k,v]of Object.entries(t.colors))document.documentElement.style.setProperty('--'+k,v);document.documentElement.style.setProperty('--radius',t.radius+'px');document.documentElement.style.setProperty('--gap',t.density==='compact'?'12px':'22px');document.body.style.fontFamily=t.font==='serif'?'Georgia,serif':'Arial,sans-serif'}
 function stopPhotoVideo(){$('#photo-video')?.pause?.()}
 function modal(title,html,photo=false){
+  cancelGalleryDeleteConfirmation();
   photoViewerGeneration++;photoViewerNavigation=null;privateAccountDialog=false;stopPhotoVideo();
   M.classList?.toggle('photo-dialog',photo);M.classList?.remove('photo-info-open');M.setAttribute?.('aria-labelledby','modal-title');
   M.innerHTML=`<div class="dialog-head${photo?' photo-toolbar':''}"><h2 id="modal-title"${photo?' class="photo-viewer-title"':''}>${esc(title)}</h2>${photo?'<button class="secondary" id="photo-info-toggle" type="button" aria-expanded="false" aria-controls="photo-info"><span aria-hidden="true">ⓘ</span> Info</button>':''}<button class="secondary" id="close-modal" type="button" aria-label="Luk">✕</button></div>${html}`;
-  $('#close-modal').onclick=()=>{photoViewerGeneration++;M.close()};if(!M.open)M.showModal();
+  $('#close-modal').onclick=()=>{cancelGalleryDeleteConfirmation();photoViewerGeneration++;M.close()};if(!M.open)M.showModal();
 }
 function formHandler(id,fn){$(id).onsubmit=async e=>{e.preventDefault();const btn=$('button[type=submit]',e.target);if(btn)btn.disabled=true;try{await fn(Object.fromEntries(new FormData(e.target)))}catch(err){const out=$('.error',e.target);if(out)out.textContent=err.message;else toast(err.message)}finally{if(btn)btn.disabled=false}}}
 function clearAccountWorkspace(){
+  cancelGalleryDeleteConfirmation();galleryDeleteState=null;
   accountGeneration++;profileGeneration++;navigationGeneration++;photoViewerGeneration++;stopLycheeView();stopPhotoVideo();galleries=[];photos=[];current=null;view='galleries';
   if(M.open)M.close();M.innerHTML='';privateAccountDialog=false;
 }
@@ -74,9 +77,9 @@ function recoveryCodesView(codes,continueWith){
 function auth(setup=false,invite=null,prefill=''){clearAccountWorkspace();me=null;A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Kun for jer</div><h1>${setup?'Et hjem til jeres minder.':invite?'Du er inviteret.':'Velkommen hjem.'}</h1><p class="muted">${setup?'Opret familiens administrator for at komme i gang.':invite?'Vælg en adgangskode på mindst 12 tegn. Har du allerede en konto, skal du bruge dens adgangskode.':'Log ind og find tilbage til de øjeblikke, I deler.'}</p><form id="auth">${setup?'<label>Opsætningsnøgle<input name="token" type="password" required></label><label>Dit navn<input name="name" autocomplete="name" required></label>':''}${invite?'':`<label>E-mail<input name="email" type="email" autocomplete="email" value="${esc(prefill)}" required></label>`}<label>Adgangskode<input name="password" type="password" autocomplete="${setup||invite?'new-password':'current-password'}" minlength="${setup||invite?12:1}" required></label><div class="error" role="alert"></div><button type="submit">${setup?'Opret familiearkiv':invite?'Acceptér invitation':'Log ind'} →</button></form><p class="muted" style="font-size:12px;margin-top:26px">Private billeder. Fælles minder.</p></div>`;formHandler('#auth',async b=>{if(invite)b.token=invite;const result=await api(setup?'/setup':invite?'/accept':'/login','POST',b);await authResult(result,true)})}
 async function init(){try{const s=await api('/status');serverCapabilities=s.capabilities&&typeof s.capabilities==='object'?s.capabilities:{};if(s.account_security_version!==1||(!s.setup&&s.account_security_ready!==true))return accountMaintenance();const token=new URLSearchParams(location.search).get('invite');if(token)return auth(false,token);if(s.setup)return auth(true);try{me=await api('/me')}catch(error){if(error.status&&error.status!==401)throw error;let pending;try{pending=await api('/mfa/status')}catch(problem){if(problem.status&&![401,404].includes(problem.status))throw problem;return auth()}return mfaGate(pending)}await start()}catch(e){A.innerHTML='<div class="login"><h1>Kunne ikke starte</h1><p>'+esc(e.message)+'</p></div>'}}
 async function start(){const generation=++navigationGeneration,account=accountGeneration;const theme=await api('/theme');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;const list=await api('/galleries');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;applyTheme(theme);galleries=list;shell();await render()}
-function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?'<button data-view="people">♧ &nbsp; Familie & gæster</button><button data-view="design">◐ &nbsp; Design</button>':''}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
+function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?'<button data-view="people">♧ &nbsp; Familie & gæster</button><button data-view="design">◐ &nbsp; Design</button><button data-view="deletions">⌫ &nbsp; Sletteønsker</button>':''}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
 async function render(){if(view!=='lychee')stopLycheeView();document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const C=$('#content');if(view==='galleries'&&!current){C.innerHTML=`<div class="heading"><div><div class="eyebrow">Saml på øjeblikkene</div><h1 style="margin:12px 0">Jeres gallerier</h1><p class="muted">Små hverdage. Store oplevelser. Alt det, I gerne vil huske.</p></div>${me.admin||serverCapabilities.gallery_create===true?'<button id="new-gallery">＋ Nyt galleri</button>':''}</div><div class="tools"><input id="search-gallery" placeholder="Søg i gallerier…" aria-label="Søg i gallerier"><span class="muted">${galleries.length} gallerier · privat adgang</span></div><div id="gallery-grid" class="grid"></div>`;const draw=()=>{$('#gallery-grid').innerHTML=galleries.filter(g=>g.name.toLowerCase().includes($('#search-gallery').value.toLowerCase())).map(g=>`<article class="card"><button data-gallery="${g.id}">${g.cover?`<img class="cover" src="${BASE}/api/photos/${g.cover}/image" loading="lazy" alt="">`:'<div class="cover placeholder">◈</div>'}<div class="card-body"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description||'Et sted til jeres minder')}</p><span class="badge">${g.count} billeder</span> <span class="badge">🔒 Begrænset adgang</span></div></button></article>`).join('')||'<div class="empty"><h2>Her begynder minderne</h2><p>Gallerier vises her, når de er oprettet og delt med dig.</p></div>';document.querySelectorAll('[data-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.gallery))};draw();$('#search-gallery').oninput=draw;if($('#new-gallery'))$('#new-gallery').onclick=newGallery;
-}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){await collectionView()}else if(view==='profile'){await profileView()}else if(view==='people'){await peopleView()}else if(view==='design'){await designView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
+}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){await collectionView()}else if(view==='profile'){await profileView()}else if(view==='people'){await peopleView()}else if(view==='design'){await designView()}else if(view==='deletions'&&me.admin){await deletionRequestsView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
 function newGallery(){
   const account=accountGeneration;
   modal('Et nyt kapitel',`<div class="dialog-content"><form id="new"><label>Galleriets navn<input name="name" required maxlength="100" placeholder="Fx Sommer ved Vesterhavet"></label><label>Beskrivelse<textarea name="description" rows="3" maxlength="1000"></textarea></label><p class="muted">${me.admin?'Kun admin har adgang fra start. Del det bagefter med familien.':'Du og admin har adgang fra start. Admin kan dele galleriet med familien.'}</p><div class="error" role="alert"></div><button type="submit">Opret galleri</button></form></div>`);
@@ -139,6 +142,7 @@ async function openGallery(id){
   try{await render();}catch(error){$('#content').innerHTML='<p class="error" role="alert">'+esc(error.message)+'</p>';}
 }
 async function galleryView(){
+  cancelGalleryDeleteConfirmation();galleryDeleteState=null;
   const requestGallery=current,generation=navigationGeneration,account=accountGeneration,requestView=view,content=$('#content');
   photos=[];permissions={};content.innerHTML='<p role="status">Henter billeder…</p>';
   let result;
@@ -150,9 +154,10 @@ async function galleryView(){
   }
   if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
   photos=result.photos;permissions=result.permissions;
-  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted">${esc(requestGallery.description)} · <span id="gallery-media-count">${photos.length} billeder</span></p></div>${permissions.upload?'<button id="upload">＋ Tilføj billeder</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp" hidden>':''}</div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><div id="upload-status" role="status"></div><div id="photo-grid" class="photo-grid"></div>`;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted">${esc(requestGallery.description)} · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp" hidden>':''}${galleryDeletionToggleMarkup()}</div></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
   $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
-  const filter=()=>{const q=$('#search-photo').value.toLowerCase(),key=$('#sort').value;drawPhotos(photos.filter(photo=>[photo.title,photo.place,photo.uploader_name].join(' ').toLowerCase().includes(q)).sort((a,b)=>(b[key]||'').localeCompare(a[key]||'')));};
+  bindGalleryDelete(requestGallery);
+  const filter=()=>{if(galleryDeleteState?.active){galleryDeleteState.selected.clear();$('#gallery-delete-feedback').textContent='Markeringerne er nulstillet, fordi søgningen eller sorteringen blev ændret.';}const q=$('#search-photo').value.toLowerCase(),key=$('#sort').value;drawPhotos(photos.filter(photo=>[photo.title,photo.place,photo.uploader_name].join(' ').toLowerCase().includes(q)).sort((a,b)=>(b[key]||'').localeCompare(a[key]||'')));};
   $('#search-photo').oninput=filter;$('#sort').onchange=filter;
   if($('#upload')){
     const upload=$('#upload'),status=$('#upload-status');upload.onclick=()=>$('#files').click();
@@ -170,6 +175,52 @@ async function galleryView(){
     };
   }
 }
+async function deletionRequestsView(){
+  const generation=navigationGeneration,account=accountGeneration,content=$('#content');
+  if(!me?.admin)return;
+  content.innerHTML='<div class="heading"><div><h1>Sletteønsker</h1><p>Medlemmer markerer egne billeder og videoer. Filerne slettes først, når du godkender.</p></div></div>';
+  if(serverCapabilities.media_delete_requests!==true){content.insertAdjacentHTML('beforeend','<div class="panel"><p role="status">Godkendelse af sletning er ikke aktiveret endnu. Installér den nye private app.php og SQL-migrering 005.</p><a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/ACCOUNTS.md#markering-til-sletning-og-admins-godkendelse" target="_blank" rel="noopener">Se installationsvejledningen</a></div>');return;}
+  content.insertAdjacentHTML('beforeend','<p role="status" id="deletion-request-loading">Henter markeringer…</p>');
+  const active=()=>galleryRequestActive(generation,account,'deletions',null)&&!!me?.admin;
+  let requests;
+  try{requests=await api('/admin/deletion-requests');if(!Array.isArray(requests))throw Error('Serveren kunne ikke bekræfte markeringerne.');}
+  catch(error){if(active()){$('#deletion-request-loading').textContent='Kunne ikke hente markeringerne: '+error.message;$('#deletion-request-loading').className='error';}return;}
+  if(!active())return;
+  $('#deletion-request-loading').remove();
+  content.insertAdjacentHTML('beforeend',`<p id="deletion-request-count" role="status">${requests.length} afventer godkendelse</p><p id="deletion-request-feedback" role="status" aria-live="polite"></p><div id="deletion-request-list">${requests.map(request=>`<article class="panel deletion-request-card" data-deletion-request="${esc(request.id)}"><h2>${esc(request.title)}</h2><p>${request.mime==='video/mp4'?'Video':'Billede'} i <strong>${esc(request.gallery_name||'Galleri')}</strong></p><p>Markeret af <strong>${esc(request.requester_name)}</strong> · ${esc(new Date(request.created).toLocaleString('da-DK'))}</p><div class="gallery-delete-actions"><button class="secondary" data-deletion-preview="${esc(request.id)}" type="button">Vis ${request.mime==='video/mp4'?'video':'billede'}</button><button class="danger" data-deletion-approve="${esc(request.id)}" type="button">Godkend sletning</button><button class="secondary" data-deletion-reject="${esc(request.id)}" type="button">Afvis</button></div></article>`).join('')}</div>`);
+  const updateCount=()=>{$('#deletion-request-count').textContent=requests.length+' afventer godkendelse';};
+  for(const request of requests){
+    const card=Array.from(document.querySelectorAll('[data-deletion-request]')).find(element=>element.dataset.deletionRequest===request.id);
+    $('[data-deletion-preview]',card).onclick=()=>{
+      if(!active())return;
+      const photo={id:request.photo_id,title:request.title,mime:request.mime};
+      modal('Gennemse markering',`<div class="dialog-content"><h2>${esc(request.title)}</h2><p>${esc(request.requester_name)} · ${esc(request.gallery_name||'Galleri')}</p><div class="deletion-preview-media">${photoMedia(photo,{video:true})}</div></div>`);bindPhotoVideo(photo,{video:true,download:true,gps:true});
+    };
+    for(const action of ['approve','reject'])$('[data-deletion-'+action+']',card).onclick=()=>{
+      if(!active()||card.dataset.pending==='true')return;
+      const approve=action==='approve';
+      modal(approve?'Godkend sletning':'Afvis sletning',`<div class="dialog-content" id="deletion-decision-confirm"><p>${approve?'Vil du godkende sletning af':'Vil du afvise sletning af'} <strong>${esc(request.title)}</strong> i <strong>${esc(request.gallery_name||'Galleri')}</strong>?</p><p>Markeret af ${esc(request.requester_name)}.</p><p>${approve?'Billedet eller videoen fjernes fra dette galleri. Handlingen kan ikke fortrydes her.':'Billedet eller videoen bevares, og markeringen fjernes.'}</p><p id="deletion-decision-status" role="status" aria-live="polite"></p><div class="gallery-delete-actions"><button id="deletion-decision-submit" class="${approve?'danger':'secondary'}" type="button">${approve?'Godkend sletning':'Afvis markering'}</button><button id="deletion-decision-cancel" class="secondary" type="button">Annullér</button></div></div>`);
+      const dialogGeneration=photoViewerGeneration,submit=$('#deletion-decision-submit'),cancel=$('#deletion-decision-cancel'),status=$('#deletion-decision-status');let pending=false,resolved=false;
+      const dialogActive=()=>active()&&M.open&&dialogGeneration===photoViewerGeneration;
+      cancel.onclick=()=>{if(!pending)M.close();};
+      submit.onclick=async()=>{
+        if(pending||resolved||!dialogActive())return;pending=true;submit.disabled=true;cancel.disabled=true;card.dataset.pending='true';status.textContent=approve?'Godkender sletning…':'Afviser markering…';status.classList.remove('error');
+        card.querySelectorAll('button').forEach(button=>button.disabled=true);
+        try{
+          const result=await api('/admin/deletion-requests/'+encodeURIComponent(request.id)+'/'+action,'POST');
+          if(result?.ok!==true||result.request?.status!==(approve?'approved':'rejected'))throw Error('Serveren kunne ikke bekræfte handlingen.');
+          resolved=true;
+          if(!active())return;
+          requests=requests.filter(item=>item.id!==request.id);card.remove();updateCount();
+          $('#deletion-request-feedback').textContent=approve?'Sletningen er godkendt. Filen er slettet fra galleriet.':'Markeringen er afvist. Filen er bevaret.';
+          if(approve){const gallery=galleries.find(item=>item.id===request.gallery_id);if(gallery){gallery.count=Math.max(0,(Number(gallery.count)||0)-1);if(gallery.cover===request.photo_id)gallery.cover=null;}photos=photos.filter(photo=>photo.id!==request.photo_id);}
+          if(dialogActive()){stopPhotoVideo();M.close();}
+        }catch(error){if(dialogActive()){status.textContent='Handlingen kunne ikke gennemføres: '+error.message;status.classList.add('error');}else if(active())$('#deletion-request-feedback').textContent='Handlingen kunne ikke gennemføres: '+error.message;}
+        finally{pending=false;card.dataset.pending='false';card.querySelectorAll('button').forEach(button=>button.disabled=false);if(dialogActive()){submit.disabled=false;cancel.disabled=false;}}
+      };
+    };
+  }
+}
 function date(p){return p.taken?(p.precision==='circa'?'ca. ':'')+p.taken.replace('T',' kl. '):'Dato ukendt'}
 function photoPath(p){return BASE+'/api/photos/'+encodeURIComponent(String(p.id??''))}
 function photoMedia(p,rights){
@@ -184,7 +235,95 @@ function bindPhotoVideo(p,rights){
   if(!player||!message)return;
   player.addEventListener('error',()=>{message.textContent='Browseren kan ikke afspille denne video.'+(rights.download&&rights.gps?' Hent originalen for at åbne den i en anden afspiller.':' Prøv en anden browser.');message.hidden=false});
 }
-function drawPhotos(ps){$('#photo-grid').innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span></button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>showPhoto(b.dataset.photo).catch(error=>toast(error.message)))}
+function drawPhotos(ps){$('#photo-grid').innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span>${deletionRequestBadge(p)}</button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{const state=galleryDeleteState;if(galleryDeleteActive(state)&&state.active){if(state.pending||!galleryDeletionEligible(photos.find(photo=>photo.id===b.dataset.photo)||{}))return;if(state.selected.has(b.dataset.photo))state.selected.delete(b.dataset.photo);else state.selected.add(b.dataset.photo);syncGalleryDelete(state);return;}showPhoto(b.dataset.photo).catch(error=>toast(error.message));});if(galleryDeleteActive(galleryDeleteState))syncGalleryDelete(galleryDeleteState);}
+function galleryDeleteActive(state){
+  return !!state&&state===galleryDeleteState&&state.account===accountGeneration&&state.navigation===navigationGeneration&&current===state.gallery&&state.grid===$('#photo-grid')&&galleryDeletionAllowed();
+}
+function galleryDeletionAllowed(){return !!me&&(me.admin?serverCapabilities.media_delete===true:serverCapabilities.media_delete_requests===true);}
+function galleryDeletionToggleMarkup(){
+  if(!me.admin&&serverCapabilities.media_delete_requests!==true)return '';
+  return `<button class="secondary" id="gallery-delete-toggle" type="button" aria-expanded="false" ${galleryDeletionAllowed()?'aria-controls="gallery-delete-tools"':'disabled'}>${me.admin?'Slet billeder':'Markér til sletning'}</button>${galleryDeletionAllowed()?'':'<p class="muted" role="status">Sletning er ikke aktiveret endnu.</p>'}`;
+}
+function galleryDeletionToolsMarkup(){
+  if(!galleryDeletionAllowed())return '';
+  return `<section id="gallery-delete-tools" class="gallery-delete-tools" aria-label="Vælg billeder og videoer til sletning" hidden><p>${me.admin?'Klik på de billeder og videoer, du vil slette fra dette galleri.':'Du kan markere dine egne billeder og videoer til sletning. Filerne bliver liggende, indtil admin godkender. Andres uploads kan ikke markeres.'}</p><div class="gallery-delete-actions"><span id="gallery-delete-count" role="status" aria-live="polite">0 valgt</span><button id="gallery-delete-review" type="button" disabled>${me.admin?'Slet':'Markér'} valgte (0)</button><button id="gallery-delete-exit" class="secondary" type="button">Annullér</button></div></section><p id="gallery-delete-feedback" role="status" aria-live="polite"></p>`;
+}
+function galleryDeletionEligible(photo){return !!me&&(!!me.admin||photo.uploader===me.id&&photo.deletion_request?.status!=='pending');}
+function deletionRequestBadge(photo){return photo.deletion_request?.status==='pending'?'<span class="deletion-request-badge">Markeret til sletning · afventer admin</span>':'';}
+function updatePhotoDeletionMarker(photo){
+  for(const button of document.querySelectorAll('[data-photo]')){
+    if(button.dataset.photo!==photo.id)continue;
+    $('.deletion-request-badge',button)?.remove();
+    if(photo.deletion_request?.status==='pending'){const marker=document.createElement('span');marker.className='deletion-request-badge';marker.textContent='Markeret til sletning · afventer admin';button.append(marker);}
+  }
+}
+function cancelGalleryDeleteConfirmation(){
+  if(galleryDeleteState?.confirmation)galleryDeleteState.confirmation.cancelled=true;
+}
+function syncGalleryDelete(state){
+  if(!galleryDeleteActive(state))return;
+  state.grid.classList.toggle('delete-selecting',state.active);
+  $('#gallery-delete-tools').hidden=!state.active;
+  $('#gallery-delete-toggle').setAttribute('aria-expanded',String(state.active));
+  $('#gallery-delete-toggle').disabled=state.pending;
+  $('#gallery-delete-count').textContent=state.selected.size+' valgt';
+  $('#gallery-delete-review').textContent=(state.requestOnly?'Markér':'Slet')+' valgte ('+state.selected.size+')';
+  $('#gallery-delete-review').disabled=state.pending||!state.selected.size;
+  $('#gallery-delete-exit').disabled=state.pending;
+  for(const button of state.grid.querySelectorAll('[data-photo]')){
+    const eligible=galleryDeletionEligible(photos.find(photo=>photo.id===button.dataset.photo)||{});
+    if(state.active&&eligible){button.setAttribute('role','checkbox');button.setAttribute('aria-checked',String(state.selected.has(button.dataset.photo)));}
+    else{button.removeAttribute('role');button.removeAttribute('aria-checked');}
+    button.disabled=state.pending||state.active&&!eligible;
+  }
+}
+function bindGalleryDelete(gallery){
+  if(!galleryDeletionAllowed())return;
+  const state={gallery,grid:$('#photo-grid'),account:accountGeneration,navigation:navigationGeneration,active:false,pending:false,requestOnly:!me.admin,selected:new Set(),confirmation:null};
+  galleryDeleteState=state;
+  const exit=()=>{if(state.pending)return;cancelGalleryDeleteConfirmation();state.active=false;state.selected.clear();syncGalleryDelete(state);$('#gallery-delete-toggle').focus({preventScroll:true});};
+  $('#gallery-delete-toggle').onclick=()=>{if(!galleryDeleteActive(state)||state.pending)return;if(state.active){exit();return;}state.active=true;state.selected.clear();$('#gallery-delete-feedback').textContent='';syncGalleryDelete(state);};
+  $('#gallery-delete-exit').onclick=exit;
+  $('#gallery-delete-review').onclick=()=>reviewGalleryDelete(state);
+}
+function reviewGalleryDelete(state){
+  if(!galleryDeleteActive(state)||!state.active||state.pending)return;
+  const chosen=photos.filter(photo=>state.selected.has(photo.id)&&galleryDeletionEligible(photo));if(!chosen.length)return;
+  modal(state.requestOnly?'Markér til sletning':'Slet valgte billeder og videoer',`<div class="dialog-content" id="gallery-delete-confirm"><p>Du er ved at ${state.requestOnly?'markere':'slette'} <strong id="gallery-delete-total"></strong> fra <strong>${esc(state.gallery.name)}</strong>. ${state.requestOnly?'Filerne bliver liggende, indtil admin godkender sletningen.':'Handlingen kan ikke fortrydes her.'}</p><ul id="gallery-delete-list" class="gallery-delete-list"></ul>${state.requestOnly?'':'<p>Andre placeringer af samme billede eller video i andre gallerier bevares.</p>'}<p id="gallery-delete-status" role="status" aria-live="polite" aria-atomic="true"></p><div class="gallery-delete-actions"><button id="gallery-delete-submit" class="danger" type="button">${state.requestOnly?'Send til godkendelse':'Bekræft sletning'}</button><button id="gallery-delete-cancel" class="secondary" type="button">Annullér</button></div></div>`);
+  const confirmation={cancelled:false,generation:photoViewerGeneration,remaining:chosen};state.confirmation=confirmation;
+  const submit=$('#gallery-delete-submit'),cancel=$('#gallery-delete-cancel'),status=$('#gallery-delete-status'),list=$('#gallery-delete-list'),total=$('#gallery-delete-total');
+  const active=()=>galleryDeleteActive(state)&&state.confirmation===confirmation&&!confirmation.cancelled&&confirmation.generation===photoViewerGeneration&&M.open;
+  const showRemaining=()=>{total.textContent=confirmation.remaining.length+' filer';list.innerHTML=confirmation.remaining.map(photo=>`<li>${esc(photo.title)} <span class="muted">(${photo.mime==='video/mp4'?'Video':'Billede'})</span></li>`).join('');};showRemaining();
+  cancel.onclick=()=>{confirmation.cancelled=true;M.close();};
+  submit.onclick=async()=>{
+    if(!active()||state.pending||!confirmation.remaining.length)return;
+    state.pending=true;submit.disabled=true;cancel.textContent='Stop efter denne fil';status.classList.remove('error');
+    const controls=['#search-photo','#sort','#upload'].map(selector=>$(selector)).filter(Boolean).map(element=>[element,element.disabled]);controls.forEach(([element])=>element.disabled=true);syncGalleryDelete(state);
+    let completed=0;
+    try{
+      while(confirmation.remaining.length&&active()){
+        const photo=confirmation.remaining[0];status.textContent=(state.requestOnly?'Markerer: ':'Sletter: ')+photo.title;
+        const result=await api('/photos/'+encodeURIComponent(photo.id)+(state.requestOnly?'/deletion-request':''),state.requestOnly?'POST':'DELETE');
+        if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte '+(state.requestOnly?'markeringen.':'sletningen.'));
+        if(state.requestOnly&&(result.request?.status!=='pending'||result.request?.photo_id!==photo.id))throw Error('Serveren kunne ikke bekræfte markeringen.');
+        confirmation.remaining.shift();state.selected.delete(photo.id);completed++;
+        if(state.account!==accountGeneration||!me)break;
+        if(state.requestOnly){photo.deletion_request={id:result.request.id,status:'pending',created:result.request.created};if(current===state.gallery&&state.grid===$('#photo-grid'))updatePhotoDeletionMarker(photo);}
+        else if(current===state.gallery&&state.grid===$('#photo-grid'))removeDeletedPhoto(photo,state.gallery);
+        else{const cached=galleries.find(gallery=>gallery===state.gallery);if(cached){cached.count=Math.max(0,(Number(cached.count)||0)-1);if(cached.cover===photo.id)cached.cover=null;}}
+        if(active()){showRemaining();syncGalleryDelete(state);}
+      }
+      if(active()&&!confirmation.remaining.length){
+        state.active=false;state.selected.clear();$('#gallery-delete-feedback').textContent=completed+(state.requestOnly?' filer er markeret til sletning og afventer admins godkendelse.':' filer er slettet fra galleriet.');confirmation.cancelled=true;M.close();
+      }
+    }catch(error){if(active()){showRemaining();status.textContent=(state.requestOnly?'Markeringen':'Sletningen')+' er stoppet. '+completed+(state.requestOnly?' filer er markeret':' filer er slettet')+' i dette forsøg. '+(error?.message||'Prøv igen.');status.classList.add('error');submit.textContent='Prøv igen ('+confirmation.remaining.length+')';}}
+    finally{
+      state.pending=false;controls.forEach(([element,disabled])=>element.disabled=disabled);
+      if(galleryDeleteActive(state)){syncGalleryDelete(state);if(confirmation.cancelled&&state.active)$('#gallery-delete-feedback').textContent=(state.requestOnly?'Markeringen':'Sletningen')+' er stoppet. De resterende filer er stadig valgt.';}
+      if(active()){submit.disabled=false;cancel.textContent='Annullér';}
+    }
+  };
+}
 // Keep the thumbnail elements and their loaded image bytes when a favorite is
 // changed in the viewer. Closing a dialog never needs to rebuild this grid.
 function updatePhotoCard(p){
@@ -518,6 +657,6 @@ async function lycheeAction(session,action){
 }
 
 M.addEventListener('keydown',photoViewerKeydown);
-M.addEventListener('cancel',()=>{photoViewerGeneration++;photoViewerNavigation=null});
-M.addEventListener('close',()=>{photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
+M.addEventListener('cancel',()=>{cancelGalleryDeleteConfirmation();photoViewerGeneration++;photoViewerNavigation=null});
+M.addEventListener('close',()=>{if(M.open)return;photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
 init();

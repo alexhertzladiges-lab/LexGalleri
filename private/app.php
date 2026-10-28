@@ -185,6 +185,90 @@ function delete_photo(string $id): void {
         try{query('SELECT RELEASE_LOCK(?)',[$lock]);}catch(Throwable $ignored){}
     }
 }
+function media_delete_requests_ready(): bool {
+    // Existing galleries keep working while the owner installs this migration.
+    return (int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='media_delete_requests' AND column_name IN ('id','photo_id','gallery_id','gallery_name','requester_id','requester_name','title','mime','status','created','updated','resolved_by','resolved_at')")->fetchColumn()===13;
+}
+function media_delete_requests_require(): void {
+    if(!media_delete_requests_ready())fail(503,'Slettemarkeringer er ikke klar. Admin skal installere migrering 005_media_delete_requests.sql.');
+}
+function media_delete_request_lock(string $photoId,callable $operation): mixed {
+    $lock='lexgalleri-request-'.$photoId;
+    if((int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn()!==1)fail(409,'Slettemarkeringen behandles allerede. Prøv igen.');
+    try{return $operation();}
+    finally{try{query('SELECT RELEASE_LOCK(?)',[$lock]);}catch(Throwable $ignored){}}
+}
+function media_delete_request_resolve(string $photoId,array $admin): void {
+    // No foreign key points at photos: approval keeps its own audit receipt.
+    if(media_delete_requests_ready())query("UPDATE media_delete_requests SET status='approved',updated=?,resolved_at=?,resolved_by=? WHERE photo_id=? AND status='pending'",[stamp(),stamp(),$admin['id'],$photoId]);
+}
+function media_delete_direct(string $photoId,array $admin): void {
+    if(!media_delete_requests_ready()){delete_photo($photoId);return;}
+    media_delete_request_lock($photoId,function()use($photoId,$admin){
+        try{delete_photo($photoId);}
+        catch(ApiError $error){
+            // Cleanup may have completed before writing the request outcome
+            // failed. Only an existing pending receipt permits this recovery.
+            if($error->status!==404||one('SELECT id FROM photos WHERE id=?',[$photoId])||!one("SELECT id FROM media_delete_requests WHERE photo_id=? AND status='pending' LIMIT 1",[$photoId]))throw $error;
+        }
+        media_delete_request_resolve($photoId,$admin);
+    });
+}
+function media_delete_request_create(string $photoId,array $u): array {
+    media_delete_requests_require();
+    return media_delete_request_lock($photoId,function()use($photoId,$u){
+        global $db;
+        $db->beginTransaction();
+        try {
+            $p=one('SELECT * FROM photos WHERE id=? FOR UPDATE',[$photoId]);if(!$p)fail(404,'Foto findes ikke');
+            access($p['gallery_id']);
+            if($p['uploader']!==$u['id'])fail(403,'Du kan kun markere dine egne billeder og videoer til sletning.');
+            $pending=one("SELECT * FROM media_delete_requests WHERE photo_id=? AND status='pending' ORDER BY created,id LIMIT 1",[$photoId]);
+            if($pending){if($pending['requester_id']!==$u['id'])fail(409,'Filen har allerede en slettemarkering.');$db->commit();return $pending;}
+            $id=uid();$now=stamp();$gallery=one('SELECT name FROM galleries WHERE id=?',[$p['gallery_id']]);
+            query('INSERT INTO media_delete_requests(id,photo_id,gallery_id,gallery_name,requester_id,requester_name,title,mime,status,created,updated,resolved_by,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$photoId,$p['gallery_id'],$gallery['name'],$u['id'],$u['name'],$p['title'],$p['mime'],'pending',$now,$now,null,null]);
+            $request=one('SELECT * FROM media_delete_requests WHERE id=?',[$id]);$db->commit();return $request;
+        }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+    });
+}
+function media_delete_request_started(string $photoId): bool {
+    global $private;
+    $directory=$private.'/.deletions/'.$photoId;
+    // An uncertain commit can leave both a live row and staged files. Keep its
+    // approval pending until delete_photo has reconciled the durable receipt.
+    return !one('SELECT id FROM photos WHERE id=?',[$photoId])||file_exists($directory)||is_link($directory);
+}
+function media_delete_request_cancel(string $photoId,array $u): array {
+    media_delete_requests_require();
+    return media_delete_request_lock($photoId,function()use($photoId,$u){
+        $request=one("SELECT * FROM media_delete_requests WHERE photo_id=? AND status='pending' ORDER BY created,id LIMIT 1",[$photoId]);
+        if(!$request)fail(404,'Slettemarkeringen findes ikke.');
+        if($request['requester_id']!==$u['id'])fail(403,'Du kan kun fjerne din egen slettemarkering.');
+        access($request['gallery_id']);
+        if(media_delete_request_started($photoId))fail(409,'Sletningen er allerede påbegyndt. Admin skal afslutte godkendelsen.');
+        query("UPDATE media_delete_requests SET status='cancelled',updated=?,resolved_at=?,resolved_by=? WHERE id=? AND status='pending'",[stamp(),stamp(),$u['id'],$request['id']]);
+        return one('SELECT * FROM media_delete_requests WHERE id=?',[$request['id']]);
+    });
+}
+function media_delete_request_decide(string $requestId,string $action,array $admin): array {
+    media_delete_requests_require();
+    $request=one('SELECT * FROM media_delete_requests WHERE id=?',[$requestId]);if(!$request)fail(404,'Slettemarkeringen findes ikke.');
+    return media_delete_request_lock($request['photo_id'],function()use($requestId,$action,$admin){
+        $request=one('SELECT * FROM media_delete_requests WHERE id=?',[$requestId]);if(!$request)fail(404,'Slettemarkeringen findes ikke.');
+        $target=$action==='approve'?'approved':'rejected';
+        if($request['status']===$target)return $request;
+        if($request['status']!=='pending')fail(409,'Slettemarkeringen er allerede afsluttet.');
+        if($action==='reject'&&media_delete_request_started($request['photo_id']))fail(409,'Sletningen er allerede påbegyndt. Afslut godkendelsen for at rydde de resterende filer.');
+        if($action==='approve') {
+            // delete_photo owns its transaction and durable cleanup receipt.
+            // A cleanup503 keeps this request pending so approval can retry.
+            try{delete_photo($request['photo_id']);}
+            catch(ApiError $error){if($error->status!==404||one('SELECT id FROM photos WHERE id=?',[$request['photo_id']]))throw $error;}
+        }
+        query('UPDATE media_delete_requests SET status=?,updated=?,resolved_at=?,resolved_by=? WHERE id=? AND status=\'pending\'',[$target,stamp(),stamp(),$admin['id'],$requestId]);
+        return one('SELECT * FROM media_delete_requests WHERE id=?',[$requestId]);
+    });
+}
 // Parse decimal byte positions without overflowing PHP integers. Very large ends
 // and suffixes may be clamped; very large starts remain outside any stored file.
 function video_byte_number(string $digits): int {
@@ -252,7 +336,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['media_delete'=>true,'theme_delete'=>true,'gallery_create'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -308,6 +392,19 @@ function route(string $method,string $path): never {
         lychee_route($method,substr($path,strlen('/admin/lychee-import')));
     }
     if ($method==='GET' && $path==='/me') send(safe_user($u));
+    if ($method==='GET' && $path==='/deletion-requests') {
+        media_delete_requests_require();
+        send(rows('SELECT r.* FROM media_delete_requests r WHERE r.requester_id=? AND (?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=r.gallery_id AND a.user_id=?)) ORDER BY r.created DESC,r.id DESC',[$u['id'],(int)$u['admin'],$u['id']]));
+    }
+    if ($method==='GET' && $path==='/admin/deletion-requests') {
+        user(true);media_delete_requests_require();send(rows("SELECT * FROM media_delete_requests WHERE status='pending' ORDER BY created,id"));
+    }
+    if ($method==='POST' && preg_match('~^/admin/deletion-requests/([a-f0-9]{32})/(approve|reject)$~D',$path,$m)) {
+        $admin=user(true);send(['ok'=>true,'request'=>media_delete_request_decide($m[1],$m[2],$admin)]);
+    }
+    if (in_array($method,['POST','DELETE'],true) && preg_match('~^/photos/([a-f0-9]{32})/deletion-request$~D',$path,$m)) {
+        send(['ok'=>true,'request'=>$method==='POST'?media_delete_request_create($m[1],$u):media_delete_request_cancel($m[1],$u)]);
+    }
     if ($method==='GET' && $path==='/galleries') send(rows('SELECT g.*,(SELECT count(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',[(int)$u['admin'],$u['id']]));
     if ($method==='POST' && $path==='/galleries') {
         $b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);$id=uid();
@@ -323,7 +420,12 @@ function route(string $method,string $path): never {
         if ($method==='GET') {
             $provenance=$u['admin']&&one('SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=\'lychee_import_items\'')?',(SELECT source_metadata FROM lychee_import_items i WHERE i.target_photo_id=p.id AND i.status=\'imported\' ORDER BY i.id LIMIT 1) _import_metadata':'';
             $ps=rows('SELECT p.*,u.name uploader_name,EXISTS(SELECT 1 FROM favorites f WHERE f.photo_id=p.id AND f.user_id=?) favorite'.$provenance.' FROM photos p JOIN users u ON p.uploader=u.id WHERE gallery_id=? ORDER BY COALESCE(NULLIF(taken,\'\'),uploaded) DESC',[$u['id'],$g]);
+            $requests=[];
+            if(media_delete_requests_ready())foreach(rows("SELECT id,photo_id,requester_id,status,created FROM media_delete_requests WHERE gallery_id=? AND status='pending'",[$g]) as $request) {
+                if($u['admin']||$request['requester_id']===$u['id'])$requests[$request['photo_id']]=['id'=>$request['id'],'status'=>$request['status'],'created'=>$request['created']];
+            }
             foreach($ps as &$p) {
+                $p['deletion_request']=$requests[$p['id']]??null;
                 if(!empty($p['_import_metadata'])){
                     $source=json_decode($p['_import_metadata'],true);
                     if(is_array($source))$p['import_source']=['version'=>'6.6.12','owner_name'=>(string)($source['_owner_username']??''),'description'=>(string)($source['description']??''),'tags'=>(string)($source['tags']??''),'created_at'=>(string)($source['created_at']??''),'taken_at'=>(string)($source['taken_at']??''),'taken_at_orig_tz'=>(string)($source['taken_at_orig_tz']??''),'source_photo_id'=>(string)($source['id']??'')];
@@ -368,7 +470,7 @@ function route(string $method,string $path): never {
         if($size==='original')header("Content-Disposition: attachment; filename=\"foto\"; filename*=UTF-8''".rawurlencode($p['filename']));
         session_write_close();readfile($file);exit;
     }
-    if ($method==='DELETE' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {user(true);delete_photo($m[1]);send(['ok'=>true]);}
+    if ($method==='DELETE' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {$admin=user(true);media_delete_direct($m[1],$admin);send(['ok'=>true]);}
     if ($method==='PATCH' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {
         user(true);photo($m[1]);$b=body();$taken=text($b,'taken',32);$precision=text($b,'precision',16,true);validate_date($taken,$precision);
         $lat=$b['lat']??null;$lon=$b['lon']??null;
