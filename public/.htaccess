@@ -8,7 +8,7 @@ RewriteRule ^ index.php [QSA,L]
     AddType application/manifest+json .webmanifest
 </IfModule>
 <IfModule mod_headers.c>
-    <FilesMatch "^(service-worker\.js|manifest\.webmanifest)$">
+    <FilesMatch "^(app\.js|style\.css|service-worker\.js|manifest\.webmanifest)$">
         Header set Cache-Control "no-cache"
         Header set X-Content-Type-Options "nosniff"
     </FilesMatch>

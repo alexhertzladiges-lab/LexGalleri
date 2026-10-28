@@ -210,7 +210,8 @@ function lycheePhotoProvenance(p){
   return `<details class="lychee-provenance"><summary>Fra Lychee${source.version?' '+esc(source.version):''}</summary><p class="muted">Registreringer bevaret ved import. Lychee-ejeren er ikke nødvendigvis den oprindelige uploader. I LexGalleri står administratoren, der udførte overførslen, som uploader.</p><dl>${fields.filter(([,value])=>value!=='').map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl></details>`;
 }
 function photoDeleteMarkup(photo){
-  if(!me?.admin||serverCapabilities.media_delete!==true)return '';
+  if(!me?.admin)return '';
+  if(serverCapabilities.media_delete!==true)return '<p class="media-delete-unavailable" role="status">Sletning er ikke aktiveret endnu.</p>';
   const video=photo.mime==='video/mp4';
   return `<div class="media-delete"><button class="secondary" id="delete-photo" type="button">${video?'Slet video':'Slet billede'}</button><div id="delete-photo-confirm" class="media-delete-confirm" hidden><p>Vil du slette ${video?'videoen':'billedet'} <strong>${esc(photo.title)}</strong> fra dette galleri? Handlingen kan ikke fortrydes her.</p><p id="delete-photo-status" role="status" aria-live="polite" aria-atomic="true"></p><div class="media-delete-actions"><button id="delete-photo-submit" class="danger" type="button">Slet fra dette galleri</button><button id="delete-photo-cancel" class="secondary" type="button">Annullér</button></div></div></div>`;
 }
@@ -249,14 +250,14 @@ function bindPhotoDelete(photo){
       if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte sletningen.');
       if(account!==accountGeneration||!me)return;
       removeDeletedPhoto(photo,gallerySnapshot);
-      if(generation===photoViewerGeneration&&M.open)M.close();
+      if(generation===photoViewerGeneration&&M.open){stopPhotoVideo();M.close();}
       toast(photo.mime==='video/mp4'?'Videoen er slettet fra galleriet.':'Billedet er slettet fra galleriet.');
     }catch(error){if(generation===photoViewerGeneration&&account===accountGeneration){status.textContent='Kunne ikke slette: '+(error?.message||'Prøv igen.');status.classList.add('error');}}
     finally{pending=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);confirmation.setAttribute('aria-busy','false');}
   };
 }
 function photoDetails(p,rights){
-  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div><h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}${photoDeleteMarkup(p)}</div>`;
+  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div>${photoDeleteMarkup(p)}<h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}</div>`;
 }
 async function showPhoto(id){
   const generation=++photoViewerGeneration,account=accountGeneration,requestView=view,requestGallery=current,p=photos.find(p=>p.id===id);if(!p)return;
