@@ -26,6 +26,22 @@ test('only four public code files are staged before activation', () => {
   assert.equal(lines.filter(l=>l.startsWith('chmod 644 ')).length,4);
   assert(!/private|schema\.sql|app\.php|config|originals|previews|thumbnails|sessions|never-in-plan|^rm |^rmdir |^!|mirror/m.test(lines.join('\n')));
 });
+test('directory preparation stays bounded and returns to root before uploads', () => {
+  const lines=plan(env).trim().split('\n');
+  const firstUpload=lines.findIndex(line=>line.startsWith('put '));
+  const prepare=lines.slice(lines.indexOf('pwd')+1,firstUpload);
+  const directoryCommands=prepare.filter(line=>/^(cd|mkdir) /.test(line));
+  assert(directoryCommands.length>0,'the public static directory must be prepared');
+  for(const line of directoryCommands) {
+    assert(!/^(mkdir|cd) .*\.\./.test(line));
+    for(const quoted of line.matchAll(/"([^"]*)"/g))assert(['static','/'].includes(quoted[1]));
+  }
+  const lastCd=prepare.findLastIndex(line=>line.startsWith('cd '));
+  assert.equal(prepare[lastCd],'cd "/"','uploads must be relative to the account root');
+  assert(lastCd<prepare.indexOf('chmod 755 "static"'));
+  assert(!prepare.some(line=>line.startsWith('mkdir ')),
+    'an existing FTP directory must not receive an unconditional MKD');
+});
 test('all remote paths stay inside the account root; private/path env has no effect', () => {
   const p=plan({...env,FTPS_PRIVATE_PATH:'/forbidden',FTPS_PUBLIC_PATH:'/other-account'});
   assert.equal(p,plan(env));

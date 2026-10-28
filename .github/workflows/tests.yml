@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install FTPS client for local protocol tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
       - name: PHP syntax
         run: find public private tests -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: MySQL integration tests
@@ -42,5 +44,6 @@ jobs:
           php tests/lychee-import.php
       - run: node --check public/static/app.js
       - run: node --test tests/ftps-plan.test.mjs
+      - run: node --test tests/ftps-client.test.mjs
       - run: node --test tests/lychee-ui.test.mjs
       - run: bash -n scripts/deploy-ftps.sh
