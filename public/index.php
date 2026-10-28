@@ -30,4 +30,24 @@ if(function_exists('opcache_invalidate')) {
     @opcache_invalidate($private . '/app.php', false);
     @opcache_invalidate($private . '/security.php', false);
 }
+// The owner installs private programs separately. Version the public assets
+// here so even an older private HTML template loads the deployed public bytes.
+// API replies, images and streamed videos must never pass through this buffer.
+$requestPath=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH);
+if(is_string($requestPath)&&!preg_match('~/api(?:/|$)~',$requestPath)) {
+    $assetVersions=[];
+    foreach(['app.js','pwa.js','qrcode.js','style.css'] as $assetName) {
+        $assetHash=@hash_file('sha256',__DIR__.'/static/'.$assetName);
+        if(is_string($assetHash))$assetVersions[$assetName]=substr($assetHash,0,16);
+    }
+    ob_start(static function(string $html)use($assetVersions):string {
+        $isHtml=false;
+        foreach(headers_list() as $header)if(stripos($header,'Content-Type: text/html')===0)$isHtml=true;
+        if(!$isHtml)return $html;
+        foreach($assetVersions as $name=>$version) {
+            $html=preg_replace('~(static/'.preg_quote($name,'~').')(?:\?v=[A-Za-z0-9._-]+)?(?=["\'])~','$1?v='.$version,$html)??$html;
+        }
+        return $html;
+    });
+}
 require $private . '/app.php';

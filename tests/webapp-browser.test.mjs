@@ -557,6 +557,38 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
   }finally{if(browser)await browser.close();await site.close();}
 });
 
+test('real Chromium: deletion starts directly from the gallery front page and admin access is labelled correctly',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async()=>{
+  const site=await fixture({mediaDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("#gallery-delete-overview")','front-page delete entry');
+    for(const mobile of [false,true]){
+      await call('Emulation.setDeviceMetricsOverride',{width:mobile?390:1280,height:mobile?844:900,deviceScaleFactor:1,mobile});
+      const entry=await run('(()=>{const b=document.querySelector("#gallery-delete-overview"),r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{text:b.textContent,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&(hit===b||b.contains(hit)),disabled:b.disabled};})()');
+      assert.equal(entry.text,'Slet billeder');assert.equal(entry.disabled,false);assert(entry.visible,'front-page deletion must be visible on '+(mobile?'mobile':'desktop'));
+    }
+    assert(await run('document.querySelector("[data-gallery] .card-body").textContent.includes("Fuld adgang · Admin")&&!document.querySelector("#gallery-grid").textContent.includes("Begrænset adgang")'));
+    assert(await run('!!document.querySelector("[data-view=deletions]")'),'the current admin code must expose Sletteønsker');
+    const before=site.requests.filter(path=>path.endsWith('/photos')).length;
+    await run('window.__overview=document.querySelector("#gallery-grid");document.querySelector("#gallery-delete-overview").click()');await wait('!!document.querySelector("#gallery-delete-choose")','choose deletion gallery');
+    await run('document.querySelector("#close-modal").click()');
+    assert(await run('__overview===document.querySelector("#gallery-grid")&&!document.querySelector("#modal").open'));
+    assert.equal(site.deleteRequests.length,0);assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before,'cancelling the gallery choice must not fetch or delete media');
+    await run('document.querySelector("#gallery-delete-overview").click();document.querySelector("#gallery-delete-open").click()');
+    await wait('!!document.querySelector("#gallery-delete-tools")&&!document.querySelector("#gallery-delete-tools").hidden','chosen gallery selection');
+    assert.equal(await run('document.querySelectorAll("[data-photo][role=checkbox]").length'),60);assert.equal(site.deleteRequests.length,0);
+  }finally{if(browser)await browser.close();await site.close();}
+  const memberSite=await fixture({member:true});let memberBrowser;
+  try{
+    memberBrowser=await chrome();const {evaluate:run,wait,call}=memberBrowser;
+    await call('Page.navigate',{url:memberSite.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','member front page');
+    assert(await run('document.querySelector("[data-gallery] .card-body").textContent.includes("Delt med dig")&&!document.querySelector("#gallery-grid").textContent.includes("Fuld adgang")'));
+    assert(await run('!document.querySelector("#gallery-delete-overview")&&!document.querySelector("[data-view=deletions]")'));
+  }finally{if(memberBrowser)await memberBrowser.close();await memberSite.close();}
+});
+
 test('real Chromium: gallery deletion selects exact media, confirms once and preserves surviving thumbnails',{
   skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
 },async t=>{

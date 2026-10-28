@@ -79,7 +79,7 @@ Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationsl
 
 Kun administratorer kan gennemføre sletninger. Medlemmer og gæster kan markere egne uploads til godkendelse som beskrevet nedenfor. De kan ikke markere administratorens eller andre medlemmers uploads. Serveren kontrollerer ejerskab og godkendelse ved hvert forsøg.
 
-Åbn et galleri, og vælg **Slet billeder** over billedoversigten. Klik på de billeder og MP4-filer, der skal slettes; markeringerne vises direkte på miniaturebillederne. Vælg **Slet valgte**, gennemgå listen, og vælg **Bekræft sletning**. **Annullér** bevarer filerne. Du kan fortsat slette ét medie fra dets **Info**-panel.
+Vælg **Slet billeder** på forsiden med gallerilisten, og vælg galleriet. Du kan også åbne et galleri og vælge **Slet billeder** over billedoversigten. Klik på de billeder og MP4-filer, der skal slettes; markeringerne vises direkte på miniaturebillederne. Vælg **Slet valgte**, gennemgå listen, og vælg **Bekræft sletning**. **Annullér** bevarer filerne. Du kan fortsat slette ét medie fra dets **Info**-panel.
 
 Hvis du ændrer søgning eller sortering, nulstilles markeringerne. Under sletningen behandles filerne én ad gangen. En fejl stopper resten af listen; de gennemførte sletninger bevares, og **Prøv igen** forsøger kun de resterende filer. **Stop efter denne fil**, Escape eller lukning af bekræftelsen stopper nye sletninger; en fil, som serveren allerede behandler, kan stadig blive slettet. Navigerer du væk eller logger ud, starter listen heller ikke flere sletninger.
 
