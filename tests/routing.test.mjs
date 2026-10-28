@@ -86,7 +86,7 @@ test('real Apache: lowercase gallery aliases, canonical redirects and public ass
         const posted=await f.request('/lexgalleri/api/login?test=1','POST','{"synthetic":"body preserved"}');assert.equal(posted.status,200);assert.deepEqual(JSON.parse(posted.body),{physical:expected,uri:'/lexgalleri/api/login?test=1',method:'POST',body:'{"synthetic":"body preserved"}'});
         for(const [asset,mime] of [['static/app.js',/javascript/],['static/pwa.js',/javascript/],['static/qrcode.js',/javascript/],['static/style.css',/text\/css/],['static/icon.svg',/image\/svg\+xml/],['static/icon-192.png',/image\/png/],['static/icon-512.png',/image\/png/],['static/apple-touch-icon.png',/image\/png/],['manifest.webmanifest',/application\/manifest\+json/],['service-worker.js',/javascript/]]){
           const r=await f.request('/lexgalleri/'+asset);assert.equal(r.status,200,asset);assert.match(r.headers['content-type'],mime,asset);assert.deepEqual(r.body,await readFile(join(root,'public',asset)),asset+' exact public bytes');
-          if(asset==='manifest.webmanifest'||asset==='service-worker.js')assert.match(r.headers['cache-control']||'',/no-cache/,asset);
+          if(['manifest.webmanifest','service-worker.js','static/app.js','static/style.css'].includes(asset))assert.match(r.headers['cache-control']||'',/no-cache/,asset);
         }
         const hidden=await f.request('/lexgalleri/.htaccess');assert(!hidden.body.includes(Buffer.from('# BEGIN LexGalleri')));assert(!hidden.body.includes(Buffer.from('Options -Indexes')),'hidden configuration is not served');
         const unrelated=await f.request('/unrelated.txt');assert.equal(unrelated.status,200);assert.equal(unrelated.body.toString(),'unrelated site content');

@@ -21,7 +21,7 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const galleryId='a'.repeat(32);
   const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
@@ -42,6 +42,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
     taken:'',precision:'unknown',lat:null,lon:null,favorite:false,
   }));
   photos[0].mime='video/mp4';
+  if(longPhotoTitles)for(const photo of [photos[1],photos[2]])photo.title='En lang familietitel med mange minder og detaljer. '.repeat(5).slice(0,200);
   const otherPhotos=[{...photos[1],id:'d'.repeat(31)+'1',gallery_id:otherGalleryId,title:'Privat syntetisk minde',favorite:true}];
   const video=Buffer.from((await readFile(join(root,'tests','fixtures','tiny.mp4.b64'),'utf8')).replace(/\s/g,''),'base64');
   const html='<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>LexGalleri browser test</title><link rel="manifest" href="'+base+'/manifest.webmanifest"><link rel="apple-touch-icon" href="'+base+'/static/apple-touch-icon.png"><link rel="stylesheet" href="'+base+'/static/style.css"><script src="'+base+'/static/app.js" defer></script><script src="'+base+'/static/pwa.js" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';
@@ -409,7 +410,7 @@ test('real Chromium: members see freshly authorized galleries and revoked metada
       await run(galleryButton(site.galleryId)+'.click()');await wait('!!'+photoButton(site.stillPhotoId),'member gallery');
       await run(photoButton(site.stillPhotoId)+'.click()');await wait('document.querySelector("#modal").open','member viewer');
       await run('document.querySelector("#photo-info-toggle").click()');
-      assert(await run('!document.querySelector("#delete-photo")&&!document.querySelector("#edit-photo")'));
+      assert(await run('!document.querySelector("#delete-photo")&&!document.querySelector(".media-delete-unavailable")&&!document.querySelector("#edit-photo")'));
       assert.equal(site.deleteRequests.length,0);await close();
       await run('document.querySelector("#back").click()');await wait("document.querySelectorAll('[data-gallery]').length===2",'member overview');
     });
@@ -446,11 +447,13 @@ test('real Chromium: members see freshly authorized galleries and revoked metada
 test('real Chromium: administrators confirm photo and MP4 removal without reloading the surviving gallery',{
   skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
 },async t=>{
-  const site=await fixture({mediaDelete:true});let browser;
+  const site=await fixture({mediaDelete:true,longPhotoTitles:true});let browser;
   try{
     browser=await chrome();const {evaluate:run,wait,call}=browser;
     const photo=id=>'document.querySelector('+JSON.stringify('[data-photo="'+id+'"]')+')';
     const open=async id=>{await run(photo(id)+'.click()');await wait('document.querySelector("#modal").open','media viewer');};
+    const close=()=>run("new Promise(resolve=>{const dialog=document.querySelector('#modal');dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();})");
+    const infoVisibility=selector=>run('(()=>{const element=document.querySelector('+JSON.stringify(selector)+'),info=document.querySelector("#photo-info"),title=info.querySelector("h2"),rect=element.getBoundingClientRect(),titleRect=title.getBoundingClientRect(),top=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);return{inside:info.contains(element),visible:rect.width>0&&rect.height>0&&rect.top>=0&&rect.bottom<=innerHeight&&(top===element||element.contains(top)),scroll:info.scrollTop,beforeTitle:rect.bottom<=titleRect.top,titleLength:title.textContent.length,text:element.textContent,role:element.getAttribute("role")};})()');
     const confirm=()=>run('document.querySelector("#delete-photo").click();document.querySelector("#delete-photo-submit").click();document.querySelector("#delete-photo-submit").click()');
     const waitForDeletes=async count=>{const until=Date.now()+5000;while(site.deleteRequests.length<count&&Date.now()<until)await pause(20);assert.equal(site.deleteRequests.length,count,'deletion must send exactly one request per confirmation');};
     const assertSurvivors=async deletedIds=>{
@@ -464,6 +467,12 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
     await t.test('the delete action stays inside Info and cancellation preserves the selected photo',async()=>{
       await open(site.stillPhotoId);
       assert(await run('document.querySelector("#photo-info").hidden&&document.querySelector("#delete-photo").getClientRects().length===0'),'delete must not consume the compact viewer toolbar');
+      await run('document.querySelector("#photo-info-toggle").click()');
+      const desktop=await infoVisibility('#delete-photo');assert(desktop.inside&&desktop.visible&&desktop.beforeTitle,'desktop Info must reveal a tappable delete action before the long title without scrolling');assert.equal(desktop.scroll,0);assert.equal(desktop.titleLength,200);
+      await close();await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:2,mobile:true});
+      await open(site.stillPhotoId);await run('document.querySelector("#photo-info-toggle").click()');
+      const mobile=await infoVisibility('#delete-photo');assert(mobile.inside&&mobile.visible&&mobile.beforeTitle,'mobile Info must reveal a tappable delete action before the long title without scrolling');assert.equal(mobile.scroll,0);assert.equal(mobile.titleLength,200);
+      await close();await call('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});await open(site.stillPhotoId);
       await run('document.querySelector("#photo-info-toggle").click();document.querySelector("#delete-photo").click()');
       assert(await run('!document.querySelector("#delete-photo-confirm").hidden&&document.querySelector("#delete-photo-cancel")&&document.querySelector("#delete-photo-submit")'));
       await run('document.querySelector("#delete-photo-cancel").click()');
@@ -512,6 +521,7 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
       await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===58','remaining media after reload');
       const id=await run('document.querySelector("[data-photo]").dataset.photo');await open(id);await run('document.querySelector("#photo-info-toggle").click()');
       assert(await run('!document.querySelector("#delete-photo")&&!!document.querySelector("#edit-photo")'));
+      const unavailable=await infoVisibility('.media-delete-unavailable');assert(unavailable.inside&&unavailable.visible&&unavailable.beforeTitle,'administrators must see the missing-capability explanation immediately in Info');assert.equal(unavailable.scroll,0);assert.equal(unavailable.titleLength,200);assert.equal(unavailable.role,'status');assert.equal(unavailable.text,'Sletning er ikke aktiveret endnu.');
       assert.equal(site.deleteRequests.length,3);
     });
   }finally{if(browser)await browser.close();await site.close();}
