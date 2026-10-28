@@ -4,6 +4,9 @@ declare(strict_types=1);
 // Owner-installed module for the exact Lychee6.6.12 schema. Never connects to any
 // server on behalf of ChatGPT: the signed-in owner runs it in their own PHP app.
 final class LycheeCommitUncertain extends RuntimeException {}
+// A bounded piece of video I/O finished successfully. Keep the pending receipt
+// and resume it on the next /step; this is not an import error or a pause.
+final class LycheeWorkPending extends RuntimeException {}
 function lychee_config(): ?array {
     global $private;
     $path=$private.'/config/lychee-import.php';
@@ -114,7 +117,12 @@ function lychee_status(?array $c,bool $ready): array {
         elseif($mode!=='move'&&$totals['imported']+$totals['duplicate']>0)$reason='Flytning skal vælges, før dette job har importerede billeder.';
         $out['move_available']=$reason==='';$out['move_unavailable_reason']=$reason;
     }
-    $out['job']=['id'=>$job['id'],'state'=>$job['state'],'source_photos'=>(int)$job['source_photo_count'],'totals'=>$totals,'preview'=>$preview,'preview_limit'=>100,'issues'=>$issues,'transfer_mode'=>$mode,'mode_locked'=>$locked,'moved_files'=>$moved];
+    $progress=null;
+    $pending=one('SELECT source_metadata FROM lychee_import_items WHERE job_id=? AND status=\'pending\' ORDER BY id LIMIT 1',[$job['id']]);
+    if($pending){$metadata=json_decode($pending['source_metadata'],true);$work=$metadata['_video_work']??null;
+        if(is_array($work)&&is_int($work['offset']??null)&&is_int($work['stat']['size']??null)&&$work['offset']>=0&&$work['offset']<=$work['stat']['size'])$progress=['label'=>($work['phase']??'')==='copy'?'Kopierer video':'Kontrollerer video','done_bytes'=>$work['offset'],'total_bytes'=>$work['stat']['size']];
+    }
+    $out['job']=['id'=>$job['id'],'state'=>$job['state'],'source_photos'=>(int)$job['source_photo_count'],'totals'=>$totals,'preview'=>$preview,'preview_limit'=>100,'issues'=>$issues,'transfer_mode'=>$mode,'mode_locked'=>$locked,'moved_files'=>$moved,'media_progress'=>$progress];
     return $out;
 }
 function lychee_inventory_path(array $c,array $job,array &$p): array {
@@ -123,7 +131,7 @@ function lychee_inventory_path(array $c,array $job,array &$p): array {
         $p['_move_relative']=substr($result[2],strlen($c['uploads_root'])+1);return $result;
     }
     if($result[0]!=='missing'||!lychee_move_migration_ready()||lychee_transfer_mode($job)!=='move')return $result;
-    if(!in_array($p['type']??'',['image/jpeg','image/png','image/webp'],true))return $result;
+    if(!in_array($p['type']??'',['image/jpeg','image/png','image/webp','video/mp4'],true))return $result;
     $rel=$p['_short_path']??'';
     $old=one('SELECT source_metadata FROM lychee_import_items WHERE job_id=? AND source_photo_id=? ORDER BY id LIMIT 1',[$job['id'],$p['id']]);
     if($old){$previous=json_decode($old['source_metadata'],true);$rel=$previous['_move_relative']??$rel;}
@@ -146,7 +154,7 @@ function lychee_safe_path(array $c,array $metadata): array {
     $path=realpath($c['uploads_root'].'/'.$short);
     if(!$path||!is_file($path)||!is_readable($path))return ['missing','Originalfilen mangler eller kan ikke læses',null];
     if(!str_starts_with($path,$c['uploads_root'].DIRECTORY_SEPARATOR))return ['error','Originalstien eller et symlink forlader den tilladte billedrod',null];
-    if(!in_array($metadata['type']??'',['image/jpeg','image/png','image/webp'],true))return ['unsupported','Formatet understøttes endnu ikke (kun JPEG/PNG/WebP)',null];
+    if(!in_array($metadata['type']??'',['image/jpeg','image/png','image/webp','video/mp4'],true))return ['unsupported','Formatet understøttes endnu ikke (kun JPEG/PNG/WebP/MP4)',null];
     return ['pending','',$path];
 }
 function lychee_album_paths(array $albums): array {
@@ -214,6 +222,7 @@ function lychee_taken(array $p): string {
 }
 function lychee_copy_one(array $c,array $job,array $item,array $u): void {
     $p=json_decode($item['source_metadata'],true,512,JSON_THROW_ON_ERROR);
+    if(($p['type']??'')==='video/mp4'){lychee_copy_video_one($c,$job,$item,$u,$p);return;}
     [$status,$error,$source]=lychee_safe_path($c,$p);
     if($status!=='pending'){query('UPDATE lychee_import_items SET status=?,error=?,updated=? WHERE id=?',[$status,$error,stamp(),$item['id']]);return;}
     $album=one('SELECT * FROM lychee_import_albums WHERE job_id=? AND source_id=?',[$job['id'],$item['source_album_id']]);
@@ -267,6 +276,7 @@ function lychee_copy_one(array $c,array $job,array $item,array $u): void {
     }
 }
 function lychee_step(array $c,array $job,array $u): void {
+    global $lychee_video_budget;$lychee_video_budget=8*1024*1024;
     if($job['state']==='scanning'){lychee_scan_step($c,$job);return;}
     if($job['state']!=='running')fail(409,'Importen kører ikke');
     $mode=lychee_transfer_mode($job);
@@ -275,7 +285,7 @@ function lychee_step(array $c,array $job,array $u): void {
     foreach($albums as $album)lychee_target_gallery($job,$album);
     if(count($albums)===20)return;
     foreach(rows('SELECT * FROM lychee_import_items WHERE job_id=? AND status=\'pending\' ORDER BY id LIMIT 2',[$job['id']]) as $item){
-        try{if($mode==='move')lychee_move_one($c,$job,$item,$u);else lychee_copy_one($c,$job,$item,$u);}catch(LycheeCommitUncertain){fail(503,'Databasens bekræftelse mangler. Opdatér importstatus før du fortsætter');}catch(LycheeMovePending $e){
+        try{if($mode==='move')lychee_move_one($c,$job,$item,$u);else lychee_copy_one($c,$job,$item,$u);}catch(LycheeWorkPending){return;}catch(LycheeCommitUncertain){fail(503,'Databasens bekræftelse mangler. Opdatér importstatus før du fortsætter');}catch(LycheeMovePending $e){
             lychee_pause_move($job,$e->getMessage());
         }catch(PDOException $e){
             if($mode==='move')lychee_pause_move($job,'Flytningen er afbrudt af en databasefejl. Flyttejournalen er bevaret. Opdatér status før du fortsætter');
@@ -341,6 +351,195 @@ function lychee_route(string $method,string $action): never {
 // original's bytes: same-filesystem rename relocates it, and hardlinks share it.
 final class LycheeMovePending extends RuntimeException {}
 
+function lychee_video_stat(array $stat): array {
+    return ['dev'=>(string)$stat['dev'],'ino'=>(string)$stat['ino'],'size'=>(int)$stat['size'],'mtime'=>(int)$stat['mtime']];
+}
+function lychee_video_same_stat(array $a,array $b): bool {
+    foreach(['dev','ino','size','mtime'] as $key)if(!isset($a[$key],$b[$key])||(string)$a[$key]!== (string)$b[$key])return false;
+    return true;
+}
+function lychee_video_limit(array $stat): void {
+    if(PHP_INT_SIZE<8)throw new RuntimeException('MP4-import kræver 64-bit PHP');
+    if($stat['size']<=0||$stat['size']>2147483648)throw new RuntimeException('MP4-originalen skal være højst 2 GiB');
+}
+// Inspect box headers, seeking over media payload. Neither mdat nor the entire
+// moov is read into memory. A shared bound covers all nested header reads.
+function lychee_video_boxes($handle,int $start,int $end,int &$budget): array {
+    $boxes=[];$at=$start;
+    while($at<$end){
+        if($end-$at<8||$budget<16||fseek($handle,$at)!==0)throw new RuntimeException('MP4-containeren er beskadiget eller for kompleks');
+        $header=fread($handle,8);$budget-=8;
+        if(strlen($header)!==8)throw new RuntimeException('MP4-containerens filhoved kan ikke læses');
+        $parts=unpack('Nsize/a4type',$header);$size=(int)$parts['size'];$head=8;
+        if($size===1){
+            $extended=fread($handle,8);$budget-=8;if(strlen($extended)!==8)throw new RuntimeException('MP4-containerens boksstørrelse mangler');
+            $wide=unpack('Nhigh/Nlow',$extended);if($wide['high']!==0)throw new RuntimeException('MP4-containerens boksstørrelse er ugyldig');
+            $size=(int)$wide['low'];$head=16;
+        }elseif($size===0)$size=$end-$at;
+        if($size<$head||$size>$end-$at)throw new RuntimeException('MP4-containerens bokse går uden for filen');
+        $boxes[]=['type'=>$parts['type'],'start'=>$at+$head,'end'=>$at+$size];$at+=$size;
+    }
+    return $boxes;
+}
+function lychee_video_info(string $path): array {
+    if(is_link($path)||!is_file($path)||!is_readable($path))throw new RuntimeException('MP4-originalen kan ikke læses');
+    $handle=@fopen($path,'rb');if(!$handle)throw new RuntimeException('MP4-originalen kan ikke læses');
+    try {
+        $before=fstat($handle);if(!$before)throw new RuntimeException('MP4-originalens størrelse kan ikke læses');lychee_video_limit($before);
+        $budget=65536;$top=lychee_video_boxes($handle,0,(int)$before['size'],$budget);$ftyp=0;$moov=0;$mdat=0;$video=false;
+        foreach($top as $box){
+            if($box['type']==='ftyp'){
+                $ftyp++;$length=$box['end']-$box['start'];
+                if($length<8||$length>4096||$length%4!==0||$length>$budget||fseek($handle,$box['start'])!==0)throw new RuntimeException('MP4-containerens formatmærke er ugyldigt');
+                $brands=fread($handle,$length);$budget-=$length;if(strlen($brands)!==$length)throw new RuntimeException('MP4-containerens formatmærke mangler');
+                $compatible=substr($brands,0,4).substr($brands,8);$accepted=false;
+                foreach(str_split($compatible,4) as $brand)if(preg_match('/^(?:isom|iso[2-9]|mp4[12]|avc1|dash|M4V |MSNV)$/D',$brand))$accepted=true;
+                if(!$accepted)throw new RuntimeException('Originalen er ikke en understøttet MP4-container');
+            }elseif($box['type']==='mdat'){
+                if($box['end']<=$box['start'])throw new RuntimeException('MP4-containeren har intet medieindhold');$mdat++;
+            }elseif($box['type']==='moov'){
+                $moov++;$movieHeader=false;
+                foreach(lychee_video_boxes($handle,$box['start'],$box['end'],$budget) as $child){
+                    if($child['type']==='mvhd'&&$child['end']-$child['start']>=20)$movieHeader=true;
+                    if($child['type']!=='trak')continue;
+                    foreach(lychee_video_boxes($handle,$child['start'],$child['end'],$budget) as $track){
+                        if($track['type']!=='mdia')continue;
+                        foreach(lychee_video_boxes($handle,$track['start'],$track['end'],$budget) as $media){
+                            if($media['type']!=='hdlr')continue;
+                            if($media['end']-$media['start']<12||$budget<12||fseek($handle,$media['start'])!==0)throw new RuntimeException('MP4-containerens medietype er ugyldig');
+                            $handler=fread($handle,12);$budget-=12;if(strlen($handler)!==12)throw new RuntimeException('MP4-containerens medietype mangler');
+                            if(substr($handler,8,4)==='vide')$video=true;
+                        }
+                    }
+                }
+                if(!$movieHeader)throw new RuntimeException('MP4-containerens filmoplysninger mangler');
+            }
+        }
+        $after=fstat($handle);clearstatcache(true,$path);$named=@stat($path);
+        if(!$after||!$named||!lychee_video_same_stat($before,$after)||!lychee_video_same_stat($before,$named))throw new RuntimeException('MP4-originalen blev ændret under kontrollen');
+        if($ftyp!==1||$moov!==1||$mdat<1||!$video)throw new RuntimeException('Originalen er ikke en gyldig MP4 med et videospor');
+        // These are poster dimensions, never inferred camera/image metadata.
+        return [1280,720,0,'mime'=>'video/mp4'];
+    }finally{fclose($handle);}
+}
+function lychee_video_context(mixed $encoded,int $length): HashContext {
+    if(!is_string($encoded)||strlen($encoded)>8192)throw new RuntimeException('Videoens fortsættelsesdata er ugyldige');
+    $serialized=base64_decode($encoded,true);if($serialized===false)throw new RuntimeException('Videoens fortsættelsesdata er ugyldige');
+    try{$context=@unserialize($serialized,['allowed_classes'=>['HashContext']]);}
+    catch(Throwable $e){throw new RuntimeException('Videoens fortsættelsesdata kan ikke læses',0,$e);}
+    if(!$context instanceof HashContext||strlen(hash_final(hash_copy($context)))!==$length)throw new RuntimeException('Videoens fortsættelsesdata er ugyldige');
+    return $context;
+}
+function lychee_video_save(array $item,array &$p): void {
+    // An item can check both its source and an existing gallery duplicate.
+    // Preserve each phase independently, so alternating requests never restart
+    // one large hash while trying to finish the other.
+    if(is_array($p['_video_work']??null)&&is_string($p['_video_work']['phase']??null))$p['_video_tasks'][$p['_video_work']['phase']]=$p['_video_work'];
+    query('UPDATE lychee_import_items SET source_metadata=?,updated=? WHERE id=?',[lychee_json($p),stamp(),$item['id']]);
+}
+// Hash a single bounded piece, optionally copying that same piece. Only native
+// server-generated HashContext objects are serialized, in private target JSON;
+// the source SELECT uses an explicit column list without these reserved keys.
+function lychee_video_hash(string $path,array &$p,array $item,string $phase,?string $destination=null): array {
+    global $lychee_video_budget,$db;
+    if($db->inTransaction())throw new RuntimeException('Videoarbejde må ikke køre i en databasetransaktion');
+    if(is_link($path)||!is_file($path)||!is_readable($path))throw new RuntimeException('Videooriginalen kan ikke verificeres');
+    $in=@fopen($path,'rb');if(!$in)throw new RuntimeException('Videooriginalen kan ikke læses');$out=null;
+    try {
+        $before=fstat($in);if(!$before)throw new RuntimeException('Videooriginalens oplysninger kan ikke læses');lychee_video_limit($before);$stat=lychee_video_stat($before);
+        $work=$p['_video_tasks'][$phase]??$p['_video_work']??null;
+        if(!is_array($work)||($work['phase']??null)!==$phase){$work=['phase'=>$phase,'stat'=>$stat,'offset'=>0];$p['_video_work']=$work;}
+        elseif(!is_array($work['stat']??null)||!lychee_video_same_stat($work['stat'],$stat))throw new RuntimeException('Videooriginalen er ændret siden den seneste portion; lav en ny prøvevisning');
+        $offset=$work['offset']??null;if(!is_int($offset)||$offset<0||$offset>$stat['size'])throw new RuntimeException('Videoens læseposition er ugyldig');
+        if($destination!==null){
+            if(is_link($destination)||is_dir($destination))throw new RuntimeException('Videoens planlagte målfil kræver manuel kontrol');
+            if(is_file($destination)){
+                $target=@stat($destination);$saved=$work['stage_stat']??null;
+                if(!$target||!is_array($saved)||(string)$target['dev']!==(string)($saved['dev']??'')||(string)$target['ino']!==(string)($saved['ino']??'')||(int)$target['nlink']!==1||$target['size']<$offset)throw new RuntimeException('Videoens ufærdige målfil kunne ikke verificeres');
+                if($target['size']===$offset&&(int)$target['mtime']!==(int)($saved['mtime']??-1))throw new RuntimeException('Videoens ufærdige målfil er ændret');
+                $out=@fopen($destination,'r+b');
+            }else{
+                if($offset!==0||isset($work['stage_stat']))throw new RuntimeException('Videoens ufærdige målfil mangler');
+                $out=@fopen($destination,'xb');
+                if($out&&!@chmod($destination,0600))throw new RuntimeException('Videoens private filrettigheder kunne ikke sikres');
+            }
+            if(!$out)throw new RuntimeException('Videooriginalen kunne ikke kopieres');
+            $opened=fstat($out);clearstatcache(true,$destination);$named=@stat($destination);
+            if(!$opened||!$named||!lychee_video_same_stat($opened,$named)||(int)$opened['nlink']!==1)throw new RuntimeException('Videoens målfil blev ændret');
+            if(isset($work['stage_stat'])&&((string)$opened['dev']!==(string)$work['stage_stat']['dev']||(string)$opened['ino']!==(string)$work['stage_stat']['ino']))throw new RuntimeException('Videoens målfil blev udskiftet');
+            // A killed request may have written beyond its last durable JSON
+            // offset. This is only this item's unregistered, single-link copy.
+            if(!@ftruncate($out,$offset)||fseek($out,$offset)!==0)throw new RuntimeException('Videoens ufærdige kopi kunne ikke genoptages');
+            $work['stage_stat']=lychee_video_stat(fstat($out));$p['_video_work']=$work;lychee_video_save($item,$p);
+        }
+        if(isset($work['result'])){
+            $result=$work['result'];
+            if($offset!==$stat['size']||!is_array($result)||!preg_match('/^[a-f0-9]{40}$/D',$result['sha1']??'')||!preg_match('/^[a-f0-9]{64}$/D',$result['digest']??''))throw new RuntimeException('Videoens kontrolsumdata er ugyldige');
+            return ['sha1'=>$result['sha1'],'digest'=>$result['digest'],'size'=>$stat['size'],'stat'=>$before];
+        }
+        $sha1=$offset?lychee_video_context($work['sha1']??null,40):hash_init('sha1');$sha256=$offset?lychee_video_context($work['sha256']??null,64):hash_init('sha256');
+        if(fseek($in,$offset)!==0)throw new RuntimeException('Videooriginalens læsning kunne ikke genoptages');
+        $budget=max(0,min(8*1024*1024,(int)($lychee_video_budget??8*1024*1024)));$remaining=min($budget,$stat['size']-$offset);
+        while($remaining>0){
+            $part=fread($in,min(1024*1024,$remaining));if($part===false||$part==='')throw new RuntimeException('Videooriginalen kunne ikke læses færdig');
+            $length=strlen($part);
+            if($out){$written=0;while($written<$length){$n=@fwrite($out,substr($part,$written));if($n===false||$n===0)throw new RuntimeException('Der mangler plads eller skriverettigheder til videokopien');$written+=$n;}}
+            hash_update($sha1,$part);hash_update($sha256,$part);$offset+=$length;$remaining-=$length;$lychee_video_budget=max(0,($lychee_video_budget??8*1024*1024)-$length);
+        }
+        if($out){if(!@fflush($out)||(function_exists('fsync')&&!@fsync($out)))throw new RuntimeException('Videokopiens seneste portion kunne ikke gemmes');$work['stage_stat']=lychee_video_stat(fstat($out));}
+        $after=fstat($in);clearstatcache(true,$path);$named=@stat($path);
+        if(!$after||!$named||!lychee_video_same_stat($before,$after)||!lychee_video_same_stat($before,$named))throw new RuntimeException('Videooriginalen blev ændret under læsningen');
+        $work['offset']=$offset;
+        if($offset<$stat['size']){
+            $work['sha1']=base64_encode(serialize($sha1));$work['sha256']=base64_encode(serialize($sha256));$p['_video_work']=$work;lychee_video_save($item,$p);throw new LycheeWorkPending();
+        }
+        $work['result']=['sha1'=>hash_final($sha1),'digest'=>hash_final($sha256)];unset($work['sha1'],$work['sha256']);$p['_video_work']=$work;lychee_video_save($item,$p);
+        return ['sha1'=>$work['result']['sha1'],'digest'=>$work['result']['digest'],'size'=>$stat['size'],'stat'=>$after];
+    }finally{if(is_resource($out))fclose($out);fclose($in);}
+}
+function lychee_video_poster(array $paths): void {
+    foreach([$paths[1],$paths[2]] as $path)if(is_link($path)||is_dir($path))throw new RuntimeException('En planlagt videovisningsfil kræver manuel kontrol');
+    $image=imagecreatetruecolor(1280,720);if(!$image)throw new RuntimeException('Videoens visningsbillede kunne ikke oprettes');
+    imagefill($image,0,0,imagecolorallocate($image,37,51,47));$ink=imagecolorallocate($image,236,239,226);
+    imagefilledellipse($image,640,360,150,150,imagecolorallocate($image,69,95,84));imagefilledpolygon($image,[625,325,625,395,682,360],$ink);
+    try{resize_image($image,1800,$paths[1],88);resize_image($image,600,$paths[2],80);}finally{unset($image);}
+}
+function lychee_video_copy_cleanup(array $p,array $paths,string $id): void {
+    if(one('SELECT id FROM photos WHERE id=?',[$id]))return;
+    if(lychee_move_migration_ready()&&one('SELECT id FROM lychee_import_move_files WHERE id=?',[$id]))return;
+    $path=$paths[0];clearstatcache(true,$path);$stat=@stat($path);$owned=$p['_video_work']['stage_stat']??null;
+    if($stat&&is_array($owned)&&!is_link($path)&&(int)$stat['nlink']===1&&(string)$stat['dev']===(string)($owned['dev']??'')&&(string)$stat['ino']===(string)($owned['ino']??''))@unlink($path);
+    foreach(array_slice($paths,1) as $path)if(is_file($path)&&!is_link($path))@unlink($path);
+}
+function lychee_copy_video_one(array $c,array $job,array $item,array $u,array $p): void {
+    global $db;
+    [$status,$error,$source]=lychee_safe_path($c,$p);
+    if($status!=='pending'){query('UPDATE lychee_import_items SET status=?,error=?,updated=? WHERE id=?',[$status,$error,stamp(),$item['id']]);return;}
+    lychee_video_info($source);
+    $album=one('SELECT * FROM lychee_import_albums WHERE job_id=? AND source_id=?',[$job['id'],$item['source_album_id']]);
+    if(!$album)throw new RuntimeException('Album findes ikke i prøvevisningen');$gallery=lychee_target_gallery($job,$album);
+    $id=$item['planned_photo_id']?:uid();if(!$item['planned_photo_id'])query('UPDATE lychee_import_items SET planned_photo_id=? WHERE id=?',[$id,$item['id']]);
+    if(one('SELECT id FROM photos WHERE id=?',[$id])||(lychee_move_migration_ready()&&one('SELECT id FROM lychee_import_move_files WHERE id=?',[$id])))throw new RuntimeException('Videoens planlagte målfil er allerede registreret; kræver manuel kontrol');
+    $paths=[image_path($id,'original'),image_path($id,'view'),image_path($id,'thumb')];$commitAttempted=false;
+    try{
+        $hash=lychee_video_hash($source,$p,$item,'copy',$paths[0]);$p=lychee_move_verify_metadata($p,$hash);unset($p['_moved_sha1']);$p['_transfer_mode']='copy';
+        $existing=one('SELECT id FROM photos WHERE gallery_id=? AND digest=?',[$gallery,$hash['digest']]);
+        if($existing){lychee_video_copy_cleanup($p,$paths,$id);query('UPDATE lychee_import_items SET status=\'duplicate\',target_photo_id=?,source_metadata=?,error=\'\',updated=? WHERE id=?',[$existing['id'],lychee_json($p),stamp(),$item['id']]);return;}
+        lychee_video_info($paths[0]);lychee_video_poster($paths);
+        $taken=lychee_taken($p);$lat=$p['latitude']??null;$lon=$p['longitude']??null;
+        if(!is_numeric($lat)||!is_numeric($lon)||!is_finite((float)$lat)||!is_finite((float)$lon)||abs((float)$lat)>90||abs((float)$lon)>180)$lat=$lon=null;
+        $filename=basename((string)$p['_short_path']);$title=mb_substr(trim((string)($p['title']??''))?:pathinfo($filename,PATHINFO_FILENAME),0,200);
+        $db->beginTransaction();
+        query('INSERT INTO photos(id,gallery_id,title,filename,mime,uploader,uploaded,taken,`precision`,place,lat,lon,digest) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$gallery,$title,mb_substr($filename,0,255),'video/mp4',$u['id'],stamp(),$taken,$taken?'exact':'unknown',mb_substr((string)($p['location']??''),0,200),$lat,$lon,$hash['digest']]);
+        query('UPDATE lychee_import_items SET status=\'imported\',target_photo_id=?,source_metadata=?,error=\'\',updated=? WHERE id=?',[$id,lychee_json($p),stamp(),$item['id']]);
+        $commitAttempted=true;
+        $db->commit(); // Lychee video copy receipt commit.
+    }catch(LycheeWorkPending $e){throw $e;}catch(Throwable $e){
+        if($commitAttempted)throw new LycheeCommitUncertain('Databasens bekræftelse mangler',0,$e);
+        if($db->inTransaction())$db->rollBack();lychee_video_copy_cleanup($p,$paths,$id);throw $e;
+    }
+}
+
 function lychee_move_original_dir(): string {
     return dirname(image_path(str_repeat('0',32),'original'));
 }
@@ -404,8 +603,24 @@ function lychee_move_source(array $c,string $relative,bool $allowMissingParent=f
     if(!$parent||($parent!==$c['uploads_root']&&!str_starts_with($parent,$c['uploads_root'].DIRECTORY_SEPARATOR))||$parent!==$directory||is_link($candidate))throw new RuntimeException('Originalens sti er ændret eller forlader den tilladte billedrod');
     return $candidate;
 }
-function lychee_move_verify_journal(array $file,array $p,string $anchor): array {
-    $hash=lychee_move_hash($anchor);
+function lychee_move_verify_journal(array $file,array $p,string $anchor,?array $item=null): array {
+    if(($p['type']??'')==='video/mp4'&&$item!==null){
+        if($file['state']==='ready'){
+            // Ready anchors are immutable private originals. The successful
+            // same-filesystem rename preserved the verified source inode. Do
+            // not read a multi-GiB video again for every album membership.
+            clearstatcache(true,$anchor);$stat=@stat($anchor);
+            if(is_link($anchor)||!is_file($anchor)||!is_readable($anchor)||!$stat||(string)$stat['dev']!==(string)$file['source_dev']||(string)$stat['ino']!==(string)$file['source_inode']||(string)$stat['size']!==(string)$file['size'])throw new LycheeMovePending('Den flyttede videooriginal kunne ikke verificeres. Importen kræver kontrol');
+            $saved=$p['_video_work']['stat']??null;
+            if(is_array($saved)&&(string)($saved['ino']??'')===(string)$stat['ino']&&(string)($saved['dev']??'')===(string)$stat['dev']&&!lychee_video_same_stat($saved,$stat))throw new LycheeMovePending('Den flyttede videooriginal er ændret. Importen kræver kontrol');
+            $hash=['sha1'=>$file['sha1'],'digest'=>$file['digest'],'size'=>(int)$stat['size'],'stat'=>$stat];
+        }else{
+            // A kill between rename and marking the journal ready requires a
+            // fresh, resumable verification of the sole surviving original.
+            $hash=lychee_video_hash($anchor,$p,$item,'recover-'.$file['id']);
+            if((string)$hash['stat']['dev']!==(string)$file['source_dev']||(string)$hash['stat']['ino']!==(string)$file['source_inode'])throw new LycheeMovePending('Den flyttede videooriginal har skiftet identitet. Importen kræver kontrol');
+        }
+    }else $hash=lychee_move_hash($anchor);
     if(!hash_equals($file['digest'],$hash['digest'])||!hash_equals($file['sha1'],$hash['sha1'])||(string)$file['size']!==(string)$hash['size'])throw new LycheeMovePending('Den flyttede original kunne ikke verificeres. Importen kræver kontrol før den fortsætter');
     try {return [$hash,lychee_move_verify_metadata($p,$hash)];}
     catch(Throwable $e){throw new LycheeMovePending('Den flyttede original stemmer ikke med prøvevisningen. Importen kræver kontrol',0,$e);}
@@ -423,6 +638,9 @@ function lychee_move_derivatives(string $input,array $info,array $paths): void {
         if(is_link($path)||is_dir($path))throw new RuntimeException('En planlagt visningsfil kræver manuel kontrol');
         if(is_file($path)&&!@unlink($path))throw new LycheeMovePending('En ufærdig visningsfil kunne ikke ryddes. Kontrollér skriverettigheder og genoptag flytningen');
     }
+    if(($info['mime']??'')==='video/mp4'){
+        try{lychee_video_poster($paths);}catch(Throwable $e){throw new LycheeMovePending('Videoens visningsbilleder kunne ikke gemmes. Kontrollér ledig plads og skriverettigheder, og genoptag flytningen',0,$e);}return;
+    }
     $im=match($info[2]){IMAGETYPE_JPEG=>@imagecreatefromjpeg($input),IMAGETYPE_PNG=>@imagecreatefrompng($input),IMAGETYPE_WEBP=>@imagecreatefromwebp($input)};
     if(!$im)throw new RuntimeException('Originalen kunne ikke afkodes');
     $ex=$info[2]===IMAGETYPE_JPEG?(@exif_read_data($input,'IFD0',true)?:[]):[];
@@ -434,13 +652,13 @@ function lychee_move_derivatives(string $input,array $info,array $paths): void {
 function lychee_move_one(array $c,array $job,array $item,array $u): void {
     global $db;
     $p=json_decode($item['source_metadata'],true,512,JSON_THROW_ON_ERROR);
-    $file=null;$anchor=null;$paths=[];$commitAttempted=false;$relocated=false;$renameAttempted=false;$id=null;
+    $file=null;$anchor=null;$paths=[];$commitAttempted=false;$relocated=false;$renameAttempted=false;$id=null;$video=($p['type']??'')==='video/mp4';
     try {
         // Check the journal before inspecting the old source filename: its
         // absence is expected once a previous request has relocated the file.
         $relative=lychee_move_relative($p['_move_relative']??$p['_short_path']??'');
         $file=one('SELECT * FROM lychee_import_move_files WHERE job_id=? AND source_path_hash=?',[$job['id'],hash('sha256',$relative)]);
-        if(($p['_storage_disk']??'')!=='images'||(int)($p['_variant_count']??0)!==1||!in_array($p['type']??'',['image/jpeg','image/png','image/webp'],true)) {
+        if(($p['_storage_disk']??'')!=='images'||(int)($p['_variant_count']??0)!==1||!in_array($p['type']??'',['image/jpeg','image/png','image/webp','video/mp4'],true)) {
             [$status,$error]=lychee_safe_path($c,$p);
             query('UPDATE lychee_import_items SET status=?,error=?,updated=? WHERE id=?',[$status,$error,stamp(),$item['id']]);return;
         }
@@ -461,18 +679,18 @@ function lychee_move_one(array $c,array $job,array $item,array $u): void {
             $sourceExists=file_exists($source)||is_link($source);
             if($anchorExists&&$sourceExists)throw new LycheeMovePending('Både kildens og den flyttede original findes. Importen er sat på pause, så ingen fil overskrives');
             if($anchorExists) {
-                [$hash,$p]=lychee_move_verify_journal($file,$p,$anchor);$relocated=true;$input=$anchor;
+                [$hash,$p]=lychee_move_verify_journal($file,$p,$anchor,$item);$relocated=true;$input=$anchor;
                 if(!@chmod($anchor,0600))throw new LycheeMovePending('Den flyttede original kan ikke sikres med private filrettigheder');
                 if($file['state']!=='ready'){query('UPDATE lychee_import_move_files SET state=\'ready\',updated=? WHERE id=?',[stamp(),$file['id']]);$file['state']='ready';}
             } else {
                 if($file['state']==='ready'||!$sourceExists)throw new LycheeMovePending('En registreret original kunne ikke findes. Importen kræver kontrol, før den fortsætter');
-                $hash=lychee_move_hash($source);$p=lychee_move_verify_metadata($p,$hash);$input=$source;
+                $hash=$video?lychee_video_hash($source,$p,$item,'source'):lychee_move_hash($source);$p=lychee_move_verify_metadata($p,$hash);$input=$source;
                 if(!hash_equals($file['digest'],$hash['digest'])||!hash_equals($file['sha1'],$hash['sha1'])||(string)$file['size']!==(string)$hash['size']||(string)$file['source_dev']!==(string)$hash['stat']['dev']||(string)$file['source_inode']!==(string)$hash['stat']['ino'])throw new LycheeMovePending('Originalen er ændret efter flytningen blev forberedt. Importen kræver kontrol');
             }
         } else {
-            $source=lychee_move_source($c,$relative);$hash=lychee_move_hash($source);$p=lychee_move_verify_metadata($p,$hash);$input=$source;
+            $source=lychee_move_source($c,$relative);$hash=$video?lychee_video_hash($source,$p,$item,'source'):lychee_move_hash($source);$p=lychee_move_verify_metadata($p,$hash);$input=$source;
         }
-        $info=lychee_move_image_info($input);
+        $info=$video?lychee_video_info($input):lychee_move_image_info($input);
         $album=one('SELECT * FROM lychee_import_albums WHERE job_id=? AND source_id=?',[$job['id'],$item['source_album_id']]);
         if(!$album)throw new RuntimeException('Album findes ikke i prøvevisningen');$gallery=lychee_target_gallery($job,$album);
         $id=$item['planned_photo_id']?:uid();
@@ -487,7 +705,7 @@ function lychee_move_one(array $c,array $job,array $item,array $u): void {
         }
         $existing=one('SELECT id FROM photos WHERE gallery_id=? AND digest=?',[$gallery,$hash['digest']]);
         if($existing) {
-            $known=lychee_move_hash(image_path($existing['id'],'original'));
+            $known=$video?lychee_video_hash(image_path($existing['id'],'original'),$p,$item,'duplicate-'.$existing['id']):lychee_move_hash(image_path($existing['id'],'original'));
             if(!hash_equals($hash['digest'],$known['digest']))throw new RuntimeException('Dublettens registrerede original kunne ikke verificeres');
         } else lychee_move_derivatives($input,$info,$paths);
 
@@ -495,7 +713,11 @@ function lychee_move_one(array $c,array $job,array $item,array $u): void {
             $targetStat=@stat(lychee_move_original_dir());
             if(!$targetStat||(string)$hash['stat']['dev']!==(string)$targetStat['dev'])throw new RuntimeException('Originalen og LexGalleri ligger på forskellige filsystemer; filen er ikke flyttet');
             if(!is_writable(dirname($source)))throw new RuntimeException('PHP kan ikke flytte filer fra originalens mappe');
-            $again=lychee_move_hash($source);
+            if($video){
+                clearstatcache(true,$source);$lastSource=@stat($source);
+                if(!$lastSource||!lychee_video_same_stat($hash['stat'],$lastSource))throw new RuntimeException('Videooriginalen blev ændret under forberedelsen; lav en ny prøvevisning');
+                $again=$hash;
+            }else $again=lychee_move_hash($source);
             if(!hash_equals($hash['digest'],$again['digest'])||!hash_equals($hash['sha1'],$again['sha1'])||$hash['stat']['ino']!==$again['stat']['ino']||$hash['stat']['dev']!==$again['stat']['dev']||$hash['stat']['mtime']!==$again['stat']['mtime'])throw new RuntimeException('Originalen blev ændret under forberedelsen; lav en ny prøvevisning');
             if(!$file) {
                 do {$anchorId=uid();$anchor=image_path($anchorId,'original');}
@@ -518,7 +740,13 @@ function lychee_move_one(array $c,array $job,array $item,array $u): void {
             $renameAttempted=true;
             if(!@rename($source,$anchor))throw new LycheeMovePending('Flytningen blev ikke bekræftet. Opdatér status og kontrollér filrettighederne, før du fortsætter');
             $relocated=true;
-            [$hash,$p]=lychee_move_verify_journal($file,$p,$anchor);
+            if($video){
+                // Native rename on the checked filesystem preserves bytes and
+                // inode. Check its result without a second full video read.
+                clearstatcache(true,$anchor);$renamed=@stat($anchor);
+                if(is_link($anchor)||!$renamed||!lychee_video_same_stat($again['stat'],$renamed))throw new LycheeMovePending('Den flyttede videooriginal kunne ikke bekræftes. Originalen er bevaret og kræver kontrol');
+                $hash['stat']=$renamed;
+            }else [$hash,$p]=lychee_move_verify_journal($file,$p,$anchor);
             if(!@chmod($anchor,0600))throw new LycheeMovePending('Den flyttede original kan ikke sikres med private filrettigheder');
             query('UPDATE lychee_import_move_files SET state=\'ready\',updated=? WHERE id=?',[stamp(),$file['id']]);$file['state']='ready';
         }
@@ -541,6 +769,7 @@ function lychee_move_one(array $c,array $job,array $item,array $u): void {
         $commitAttempted=true;
         $db->commit(); // Lychee move receipt commit.
     } catch(Throwable $e) {
+        if($e instanceof LycheeWorkPending)throw $e;
         if($commitAttempted)throw new LycheeCommitUncertain('Databasens bekræftelse mangler',0,$e);
         // A renamed original is never removed or moved back on failure. The
         // durable journal makes it recoverable after both exceptions and kills.

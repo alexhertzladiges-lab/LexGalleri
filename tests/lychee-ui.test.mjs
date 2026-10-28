@@ -5,7 +5,7 @@ import test from 'node:test';
 const source=fs.readFileSync(new URL('../public/static/app.js', import.meta.url),'utf8').replace(/\ninit\(\);\s*$/,'');
 function fixture(){
  const elements=new Map();
- const doc={currentScript:{src:'https://example.test/LexGalleri/static/app.js'},querySelector(q){if(!elements.has(q))elements.set(q,{innerHTML:'',style:{},addEventListener(){},close(){},showModal(){},open:false});return elements.get(q)},querySelectorAll(){return[]},documentElement:{style:{setProperty(){}}},body:{style:{}}};
+ const doc={currentScript:{src:'https://example.test/LexGalleri/static/app.js'},querySelector(q){if(!elements.has(q))elements.set(q,{innerHTML:'',style:{},listeners:new Map(),addEventListener(type,handler){this.listeners.set(type,handler)},close(){},showModal(){},open:false});return elements.get(q)},querySelectorAll(){return[]},documentElement:{style:{setProperty(){}}},body:{style:{}}};
  const ctx=vm.createContext({document:doc,URL,setTimeout,clearTimeout,console,FormData,Blob});vm.runInContext(source,ctx);
  vm.runInContext("me={admin:true};view='lychee';globalThis.draws=[];globalThis.messages=[];lycheeDraw=()=>draws.push('paint');toast=s=>messages.push(s)",ctx);
  return{ctx,elements,run:s=>vm.runInContext(s,ctx)};
@@ -144,4 +144,101 @@ test('a locked move preview displays the stored mode and moved-original count',(
  assert(html.includes('Overførselsmetode: <strong>Flyt originalerne</strong>'));
  assert(html.includes('<strong>4</strong> originaler flyttet'));
  assert(html.includes('Start flytning'));
+});
+
+function mediaPhoto(overrides={}){return{id:'photo-1',gallery_id:'gallery-1',mime:'video/mp4',title:'Video fra haven',taken:'2026-07-14T12:30',precision:'exact',place:'Haven',lat:null,lon:null,uploader_name:'Familien',uploaded:'2026-07-15T09:00:00Z',favorite:false,...overrides};}
+async function mediaFixture(rights,overrides={}){
+ const f=fixture(),calls=[];f.ctx.photo=mediaPhoto(overrides);f.ctx.testApi=async(...args)=>{calls.push(args);return{permissions:rights}};
+ f.run('api=globalThis.testApi;me={admin:false};photos=[photo]');await f.run('showPhoto(photo.id)');
+ return{...f,calls,html:f.elements.get('#modal').innerHTML};
+}
+test('gallery grids use lazy authenticated thumbnails and label videos without loading them',()=>{
+ const f=fixture();f.ctx.media=[mediaPhoto({title:'<script>Video</script>',taken:'<bad-date>'}),mediaPhoto({id:'photo-2',mime:'image/jpeg',title:'Et foto'})];
+ f.run('drawPhotos(media)');const html=f.elements.get('#photo-grid').innerHTML;
+ assert.equal((html.match(/class="video-badge"/g)||[]).length,1);
+ assert(html.includes('▶ Video'));
+ assert(html.includes('src="/LexGalleri/api/photos/photo-1/image"'));
+ assert.equal((html.match(/loading="lazy"/g)||[]).length,2);
+ assert(html.includes('&lt;script&gt;Video&lt;/script&gt;'));
+ assert(html.includes('&lt;bad'));
+ assert(!html.includes('<script>'));
+ assert(!html.includes('<video'));
+ assert(!html.includes('/video"'));
+});
+test('video playback renders native controls only with explicit permission and escapes displayed metadata',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{id:'photo-"<>&',title:'<img src=x onerror="bad">',taken:'<time>T12:30',import_source:{description:'<script>source</script>'}});
+ assert.match(f.html,/<video id="photo-video" controls playsinline preload="metadata"/);
+ assert(f.html.includes('poster="/LexGalleri/api/photos/photo-%22%3C%3E%26/image?size=view"'));
+ assert(f.html.includes('src="/LexGalleri/api/photos/photo-%22%3C%3E%26/video"'));
+ assert(f.html.includes('aria-label="&lt;img src=x onerror=&quot;bad&quot;&gt;"'));
+ assert(f.html.includes('&lt;time&gt; kl. 12:30'));
+ assert(f.html.includes('Hent original med metadata'));
+ assert(!f.html.includes('autoplay'));
+ assert(!f.html.includes('<img src=x'));
+ assert(!f.html.includes('<script>'));
+ assert.equal(f.calls.length,1);
+ assert.equal(f.calls[0][0],'/galleries/gallery-1/photos');
+});
+test('missing, denied, or truthy nonboolean video permission never renders a video source',async()=>{
+ for(const rights of [{},{video:false,download:true,gps:false},{video:false,download:false,gps:true},{video:'true',download:true,gps:true}]){
+  const f=await mediaFixture(rights);
+  assert(!f.html.includes('<video'));
+  assert(!f.html.includes('/video"'));
+  assert(f.html.includes('src="/LexGalleri/api/photos/photo-1/image?size=view"'));
+  assert(f.html.includes('Du har ikke adgang til at afspille denne video'));
+  assert(!f.elements.get('#photo-video')?.listeners.has('error'));
+  assert.equal(f.calls.length,1);
+  assert.equal(f.html.includes('Hent original med metadata'),!!(rights.download&&rights.gps));
+ }
+});
+test('ordinary photos retain the image viewer even when video playback is permitted',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg'});
+ assert(f.html.includes('<img src="/LexGalleri/api/photos/photo-1/image?size=view"'));
+ assert(f.html.includes('Historien bag billedet'));
+ assert(!f.html.includes('<video'));
+ assert(!f.html.includes('adgang til at afspille'));
+});
+test('native playback errors show a download suggestion only when original download is allowed',async()=>{
+ for(const rights of [{video:true,download:true,gps:true},{video:true,download:true,gps:false}]){
+  const f=await mediaFixture(rights),player=f.elements.get('#photo-video'),message=f.elements.get('#video-playback-error');
+  assert(f.html.includes('id="video-playback-error" class="media-notice" role="status" hidden'));
+  player.listeners.get('error')();
+  assert.equal(message.hidden,false);
+  assert(message.textContent.includes('Browseren kan ikke afspille denne video.'));
+  assert.equal(message.textContent.includes('Hent originalen'),!!(rights.download&&rights.gps));
+ }
+});
+test('closing or replacing the modal pauses video playback',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true});let pauses=0,renders=0;
+ f.elements.get('#photo-video').pause=()=>pauses++;f.ctx.testRender=async()=>renders++;f.run('render=globalThis.testRender');
+ f.elements.get('#modal').listeners.get('close')();
+ assert.equal(pauses,1);assert.equal(renders,1);
+ f.run("modal('En anden dialog','<p>Indhold</p>')");
+ assert.equal(pauses,2);
+});
+test('the import preview explains MP4 support before any transfer starts',()=>{
+ const data={configured:true,migration_needed:false,job:null};
+ assert(renderStatus(data).includes('JPEG, PNG, WebP og MP4-videoer kan importeres'));
+ assert(renderStatus(moveStatus('preview'),{transferMode:'move'}).includes('JPEG, PNG, WebP og MP4-videoer understøttes'));
+});
+test('active-file progress escapes its label and formats bounded MB and GB values',()=>{
+ const data=moveStatus('running');data.job.media_progress={label:'<img src=x> Kontrollerer video',done_bytes:512*1024**2,total_bytes:2*1024**3};
+ let html=renderStatus(data,{transferMode:'move'});
+ assert(html.includes('&lt;img src=x&gt; Kontrollerer video · 0,5 af 2 GB'));
+ assert(html.includes('max="2147483648" value="536870912" aria-label="Fremdrift for aktuel fil"'));
+ assert(!html.includes('<img src=x>'));
+ data.job.media_progress={label:'Kopierer video',done_bytes:3*1024**2,total_bytes:2*1024**2};html=renderStatus(data);
+ assert(html.includes('Kopierer video · 2 af 2 MB'));
+ assert(html.includes('max="2097152" value="2097152"'));
+ data.job.media_progress.done_bytes=-1;html=renderStatus(data);
+ assert(html.includes('Kopierer video · 0 af 2 MB'));
+ assert(html.includes('max="2097152" value="0"'));
+});
+test('invalid or unavailable active-file progress is omitted without changing transfer controls',()=>{
+ for(const media_progress of [null,{}, {label:'Video',done_bytes:1,total_bytes:0},{label:'Video',done_bytes:Infinity,total_bytes:1024},{label:'Video',done_bytes:1,total_bytes:NaN},{label:'Video',done_bytes:1,total_bytes:Number.MAX_SAFE_INTEGER+1},{label:'Video',done_bytes:1.5,total_bytes:1024}]){
+  const data=moveStatus('preview');data.job.media_progress=media_progress;const html=renderStatus(data,{transferMode:'move'});
+  assert(!html.includes('lychee-media-progress'));
+  assert(html.includes('Start flytning'));
+  assert(html.includes('id="lychee-confirm"'));
+ }
 });

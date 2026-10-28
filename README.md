@@ -4,7 +4,7 @@ Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatt
 
 **Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan derefter overføre de fire offentlige kodefiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
-Har du **Lychee 6.6.12**, kan admin importere fra database og lokale originaler uden eksport eller opgradering. Start med [Lychee-importvejledningen](LYCHEE-IMPORT.md); den kræver særskilt privat konfiguration og en migrering i LexGalleris database, før du laver prøvevisningen.
+Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og MP4-originaler uden eksport eller opgradering. Start med [Lychee-importvejledningen](LYCHEE-IMPORT.md); den kræver særskilt privat konfiguration og importtabeller i LexGalleris database, før du laver prøvevisningen.
 
 ## Funktioner
 
@@ -19,6 +19,7 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale originaler 
 - Første admin oprettes med en privat opsætningsnøgle. Installationen opretter selv databasens tabeller.
 - Sessionsfiler, billeder og konfiguration ligger uden for `public_html`.
 - Import fra Lychee 6.6.12 med prøvevisning og valg mellem kopiering og flytning af originaler. Flytning på samme filsystem genbruger originalens indhold mellem albummer.
+- MP4 fra Lychee afspilles med videokontroller på mobil og pc. Afspilning kræver både download- og GPS-adgang, fordi den bruger den uændrede original; admin har adgang.
 - Adgangskoder hashes med PHP `password_hash`; databaseforespørgsler bruger PDO-parametre. Loginforsøg begrænses i databasen på tværs af PHP-processer.
 
 ## Repositoryets mapper
@@ -43,6 +44,8 @@ Alle nye visuelle forslag, billeder og visualiseringer lægges i dette private G
 
 FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun `index.php`, `.htaccess`, `static/app.js` og `static/style.css`. Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages. Se [DEPLOYMENT.md](DEPLOYMENT.md).
 
+MP4-opdateringen kræver begge private programfiler: [app.php](private/app.php) og [lychee-import.php](private/lychee-import.php). Behold den udfyldte kildekonfiguration. Der er ingen ny SQL-migrering til MP4; flytning bruger fortsat `002` og `003`. Lad importen være pauset eller endnu ikke startet, indtil offentlige og private programfiler er opdateret til samme version. Et pauset job genoptages derefter som samme job. Se de præcise trin i [Lychee-importvejledningen](LYCHEE-IMPORT.md).
+
 ## Test
 
 PHP 8.4 med pdo_mysql, gd, exif, mbstring, zip og curl kræves for hele testen. Testen starter selv en lokal PHP-testserver, opretter en tilfældigt navngivet testdatabase og sletter kun den database bagefter. Brug en isoleret testdatabaseserver med en bruger, der må oprette testdatabaser. Testen læser aldrig den rigtige app-konfiguration.
@@ -57,12 +60,16 @@ CI kører også `php tests/lychee-import.php` med samme isolerede testindstillin
 
 `php tests/lychee-move.php` kontrollerer flytning uden ekstra originalkopier, delte originaler mellem albummer, filsystemgrænser og genoptagelse efter afbrudt flytning eller databasecommit. Testen flytter kun syntetiske filer i sit eget midlertidige område.
 
+`php tests/lychee-video.php` tester MP4-kopiering og flytning med syntetiske filer over 25 MiB, bytefremdrift og genoptagelse, filvalidering og størrelsesgrænsen på 2 GiB. Den kontrollerer også videoens GET/HEAD-svar, byteintervaller, If-Range og download-/GPS-rettigheder, herunder tilbagekaldelse.
+
 `node --test tests/ftps-client.test.mjs` kræver en lokal `lftp` og tester mappehåndtering mod en midlertidig FTP-testserver på localhost med syntetiske loginoplysninger. Den kontakter ikke webhotellet. CI installerer testklienten automatisk.
 
 ## Begrænsninger
 
-HEIC/video, kortvisning, kommentarer, personmærkning, offline/PWA, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb, MFA og adgangskodegendannelse er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt.
+HEIC, direkte videoupload, import af andre videoformater end MP4, kortvisning, kommentarer, personmærkning, offline/PWA, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb, MFA og adgangskodegendannelse er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt.
 
-Billedbehandling sker under upload og er begrænset af webhotellets PHP-hukommelse. Originaler må højst være 25 MB og 20 megapixel; den faktiske grænse kan være lavere ved et lavt memory_limit. Et almindeligt 12 MP mobilfoto bør kunne behandles med 256 MB PHP-hukommelse. Store mobilfotos kan kræve en nedskaleret eksport. Kameraets optagetid bevares uden en antaget tidszone; uploadtid er UTC.
+Billedbehandling sker under upload og er begrænset af webhotellets PHP-hukommelse. Billedoriginaler må højst være 25 MB og 20 megapixel; den faktiske grænse kan være lavere ved et lavt memory_limit. Et almindeligt 12 MP mobilfoto bør kunne behandles med 256 MB PHP-hukommelse. Store mobilfotos kan kræve en nedskaleret eksport. Kameraets optagetid bevares uden en antaget tidszone; uploadtid er UTC.
+
+Lychee-importen accepterer MP4 på højst 2 GiB på 64-bit PHP. Den behandler store filer i begrænsede datastykker og bevarer originalen uden genkodning; der kræves ingen ffmpeg. Videoer får et neutralt videomotiv. Afspilning afhænger af browserens understøttelse af filens kodek; originaldownload kan bruges, hvis den ikke kan afspilles. Gæster med kun se-adgang ser videomotiv og titel.
 
 Den gamle Python-version findes i Git-historikken, men bruges ikke til denne installation. Der er ingen automatisk migrering af data fra Python-prototypen. Repositoryet har fortsat ingen open source-licens.

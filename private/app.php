@@ -85,6 +85,45 @@ function image_path(string $id,string $suffix): string {
     $dir=['original'=>'originals','view'=>'previews','thumb'=>'thumbnails'][$suffix];
     return $private.'/'.$dir.'/'.$id.($suffix==='original'?'.bin':'.jpg');
 }
+// Parse decimal byte positions without overflowing PHP integers. Very large ends
+// and suffixes may be clamped; very large starts remain outside any stored file.
+function video_byte_number(string $digits): int {
+    $digits=ltrim($digits,'0');$limit=(string)PHP_INT_MAX;
+    if($digits==='')return 0;
+    return strlen($digits)>strlen($limit) || strlen($digits)===strlen($limit) && strcmp($digits,$limit)>0?PHP_INT_MAX:(int)$digits;
+}
+function video_byte_range(string $range,int $size): ?array {
+    if($size<1 || strlen($range)>1024 || !preg_match('/\Abytes=([0-9]*)-([0-9]*)\z/',$range,$m) || $m[1]==='' && $m[2]==='')return null;
+    if($m[1]==='') {$suffix=video_byte_number($m[2]);return $suffix>0?[max(0,$size-$suffix),$size-1]:null;}
+    $start=video_byte_number($m[1]);$end=$m[2]===''?$size-1:min($size-1,video_byte_number($m[2]));
+    return $start<$size && $end>=$start?[$start,$end]:null;
+}
+function stream_video(array $p,bool $head): never {
+    // The caller has checked both original-download and GPS permissions: an MP4
+    // can contain embedded location metadata, even when database GPS is hidden.
+    if($p['mime']!=='video/mp4')fail(404,'Video findes ikke');
+    $file=image_path($p['id'],'original');$handle=@fopen($file,'rb');
+    if(!$handle)fail(404,'Videofilen mangler');
+    $stat=fstat($handle);if(!$stat || !is_int($stat['size']) || $stat['size']<0){fclose($handle);fail(500,'Videofilen kunne ikke læses');}
+    $size=$stat['size'];$etag='"'.hash('sha256',(string)$p['digest']).'"';$start=0;$end=$size-1;$partial=false;
+    $range=$_SERVER['HTTP_RANGE']??null;$ifRange=$_SERVER['HTTP_IF_RANGE']??null;
+    if(!$head && $range!==null && ($ifRange===null || hash_equals($etag,$ifRange))) {
+        $selected=video_byte_range($range,$size);
+        if($selected===null){fclose($handle);http_response_code(416);header('Accept-Ranges: bytes');header('Content-Range: bytes */'.$size);header('Content-Length: 0');session_write_close();exit;}
+        [$start,$end]=$selected;$partial=true;
+    }
+    if($start>0 && fseek($handle,$start,SEEK_SET)!==0){fclose($handle);fail(500,'Videofilen kunne ikke læses');}
+    ini_set('zlib.output_compression','0');
+    http_response_code($partial?206:200);header('Content-Type: video/mp4');header('Accept-Ranges: bytes');header('ETag: '.$etag);
+    header("Content-Disposition: inline; filename=\"video.mp4\"; filename*=UTF-8''".rawurlencode($p['filename']));
+    if($partial)header('Content-Range: bytes '.$start.'-'.$end.'/'.$size);
+    $remaining=$size===0?0:$end-$start+1;header('Content-Length: '.$remaining);session_write_close();
+    if(!$head)while($remaining>0 && !connection_aborted()) {
+        $chunk=fread($handle,min(65536,$remaining));if($chunk===false || $chunk==='')break;
+        echo $chunk;$remaining-=strlen($chunk);flush();
+    }
+    fclose($handle);exit;
+}
 function fraction(mixed $v): float {
     if (is_string($v) && str_contains($v,'/')) { [$n,$d]=explode('/',$v,2); if (!(float)$d) throw new RuntimeException('GPS');return (float)$n/(float)$d; }
     return (float)$v;
@@ -181,7 +220,7 @@ function route(string $method,string $path): never {
                 }
                 unset($p['digest'],$p['filename'],$p['_import_metadata']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null;
             }
-            unset($p);send(['photos'=>$ps,'permissions'=>['upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps'])]]);
+            unset($p);send(['photos'=>$ps,'permissions'=>['upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
         }
         if ($method==='POST') {
             $f=upload_file(25*1024*1024);$tmp=$f['tmp_name'];$info=@getimagesize($tmp);
@@ -207,6 +246,9 @@ function route(string $method,string $path): never {
             } catch(Throwable $e) {foreach($paths as $p)if(is_file($p))unlink($p);if($e instanceof PDOException && $e->getCode()==='23000')fail(409,'Billedet findes allerede');throw $e;}
             send(['id'=>$id]);
         }
+    }
+    if (in_array($method,['GET','HEAD'],true) && preg_match('~^/photos/([a-f0-9]{32})/video$~D',$path,$m)) {
+        $p=photo($m[1],'download');access($p['gallery_id'],'gps');stream_video($p,$method==='HEAD');
     }
     if ($method==='GET' && preg_match('~^/photos/([a-f0-9]{32})/image$~D',$path,$m)) {
         $size=$_GET['size']??'thumb';if(!in_array($size,['thumb','view','original'],true))fail(400,'Ugyldig størrelse');
@@ -268,7 +310,7 @@ try {
         if(!is_dir($private.'/'.$folder) && !mkdir($private.'/'.$folder,0700,true))throw new RuntimeException('Privat mappe kan ikke oprettes');
     }
     header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');header('X-Frame-Options: DENY');header('Cache-Control: no-store');
-    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     $uri=parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);$method=$_SERVER['REQUEST_METHOD'];
     if(!is_string($uri) || ($uri!==$base && !str_starts_with($uri,$base.'/')))fail(404,'Ikke fundet');
     $path=substr($uri,strlen($base));

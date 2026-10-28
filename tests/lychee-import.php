@@ -118,8 +118,8 @@ SQL);
     li_jpeg($uploadsRoot.'/big/photo11.jpg',190,170,10);
     li_jpeg($temp.'/outside.jpg',200,10,10);
     symlink($temp.'/outside.jpg',$uploadsRoot.'/big/link.jpg');
-    file_put_contents($uploadsRoot.'/big/movie.mp4','test-only unsupported video');
-    $paths = [1=>'original/01/02/photo1.jpg',2=>'original/0a/0b/photo2.jpg',3=>'big/missing.jpg',4=>'big/movie.mp4',5=>'../outside.jpg',6=>'big/link.jpg',7=>'big/photo7.jpg',8=>'big/photo8.jpg',9=>'big/cloud.jpg',10=>'big/photo10.jpg',11=>'big/photo11.jpg',12=>'original/0c/missing-variant.jpg'];
+    file_put_contents($uploadsRoot.'/big/movie.webm','test-only unsupported video');
+    $paths = [1=>'original/01/02/photo1.jpg',2=>'original/0a/0b/photo2.jpg',3=>'big/missing.jpg',4=>'big/movie.webm',5=>'../outside.jpg',6=>'big/link.jpg',7=>'big/photo7.jpg',8=>'big/photo8.jpg',9=>'big/cloud.jpg',10=>'big/photo10.jpg',11=>'big/photo11.jpg',12=>'original/0c/missing-variant.jpg'];
     $sourceHashes = [];
     foreach ([1,2,7,8,10,11] as $n) $sourceHashes[$paths[$n]] = hash_file('sha256',$uploadsRoot.'/'.$paths[$n]);
     $outsideHash = hash_file('sha256',$temp.'/outside.jpg');
@@ -133,7 +133,7 @@ SQL);
         // recorded on an auto-rotated stream. Either documented SHA1 can match.
         if($n===8)$checksum=str_repeat('2',40);
         if($n===11){$checksum=str_repeat('0',40);$originalChecksum=str_repeat('3',40);}
-        $photoInsert->execute([$id,$n===1?'Manuelt rettet titel':'Lychee foto '.$n,'Manuelt rettet billedtekst '.$n,$n===8?8:7,$n===4?'video/mp4':'image/jpeg','familie,sommer','2001-02-03 04:05:06.000000',$n===8?'Europe/Copenhagen':'UTC','1999-01-01 00:00:00','UTC','55.70000000','12.60000000','København',$checksum,$originalChecksum,0,'2010-05-06 07:08:09.000000','2020-06-07 08:09:10.000000',$rootAlbum]);
+        $photoInsert->execute([$id,$n===1?'Manuelt rettet titel':'Lychee foto '.$n,'Manuelt rettet billedtekst '.$n,$n===8?8:7,$n===4?'video/webm':'image/jpeg','familie,sommer','2001-02-03 04:05:06.000000',$n===8?'Europe/Copenhagen':'UTC','1999-01-01 00:00:00','UTC','55.70000000','12.60000000','København',$checksum,$originalChecksum,0,'2010-05-06 07:08:09.000000','2020-06-07 08:09:10.000000',$rootAlbum]);
         if($n!==12)$variantInsert->execute([$id,$path,$n===9?'s3':'images',$exists?filesize($uploadsRoot.'/'.$path):123]);
         if ($n!==10) $membershipInsert->execute([$id,$childAlbum]); // photo10 is genuinely unsorted.
         if ($n===1) $membershipInsert->execute([$id,$rootAlbum]); // same photo belongs to two albums.
