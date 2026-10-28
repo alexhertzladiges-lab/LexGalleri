@@ -67,7 +67,38 @@ Medlemmet bruger derefter sin nye e-mail eller adgangskode ved næste login. Sen
 
 Under **Redigér gallerirettigheder** vælger du fortsat separat, hvilke gallerier medlemmet kan se, og om medlemmet må uploade, hente originaler og se GPS. Videoafspilning bruger originalen og kræver både download- og GPS-adgang.
 
+Gem adgang ved det enkelte galleri. Formularen viser, når den gemmer, når rettighederne er gemt, og hvis ændringen afvises. Nye ændringer markeres som ugemte, indtil du gemmer igen.
+
+Medlemmernes gallerioversigt indeholder kun de gallerier, de har adgang til. Listen hentes igen ved navigation, så tilbagekaldt adgang ikke bliver stående som et gammelt gallerikort. Administratorer ser alle gallerier.
+
+Gæster og medlemmer kan også vælge **Nyt galleri**. Et galleri oprettet af et medlem er fra start kun synligt for medlemmet selv og administratorer. Opretteren får adgang til at uploade, hente originaler og se GPS i sit nye galleri. Administratoren styrer fortsat deling med andre konti.
+
 Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Det kan bruges én gang og udløber efter syv dage. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
+
+## Slet et billede eller en video som admin
+
+Åbn billedet eller videoen, vælg **Info**, og vælg **Slet billede** eller **Slet video**. Bekræft med **Slet fra dette galleri**. Annullering bevarer mediet og det åbne vindue.
+
+Sletningen gælder den valgte placering i galleriet. Mediets egne original-, visnings- og miniaturefiler fjernes sammen med placeringens favoritter. Andre placeringer af samme medie og Lychees kildefiler ændres ikke; bevarede importoplysninger kan fortsat henvise til den tidligere import.
+
+### Aktivér sletning i en eksisterende installation
+
+Har du allerede profiler og Authenticator installeret, kræver denne opdatering kun den nye [private/app.php](private/app.php) samt de offentlige appfiler. Der skal ikke køres SQL til slettefunktionen.
+
+1. Gem en privat kopi af din nuværende `app.php` uden for webadgangen.
+2. Hent [private/app.php](private/app.php) fra GitHub med **Download raw file**, og erstat `/home/lexandkk/lexgalleri-private/app.php` med din egen filmanager.
+3. Behold den eksisterende konfiguration, `security.php`, Authenticator-nøgle, database og mediemapper.
+4. Opdatér galleriet med **Ctrl+F5** på pc. Sletteknappen vises først, når den private kode understøtter sletning, og du er logget ind som admin.
+
+Hvis serveren afviser en sletning, vises fejlen i det åbne medievindue. Følg fejlteksten ved en uafsluttet filoprydning, og forsøg igen; en sådan oprydning kan genoptages.
+
+## Slet en designpakke som admin
+
+Åbn **Design & udtryk**, og vælg **Slet pakke** ved den installerede pakke. Bekræft sletningen i kortet. Standardpakken kan ikke slettes.
+
+Sletter du den aktive pakke, går galleriet tilbage til standarddesignet. Sletning af en anden pakke bevarer det aktive design. Forhåndsvisning afsluttes, så siden viser det design, der faktisk er aktivt.
+
+Sletning af designpakker og medlemmers oprettelse af gallerier aktiveres med samme opdaterede [private/app.php](private/app.php) og offentlige appfiler som mediesletning. Der kræves ingen yderligere private programfiler eller SQL-migrering.
 
 ## Reservekoder og ny telefon
 
