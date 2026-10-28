@@ -96,7 +96,7 @@ test('mismatched new passwords and server duplicate-email failures do not imply 
   await assert.rejects(f.bindings.get('#account-edit')({name:'Datter',email:owner.email,password:'',password_confirmation:'',current_password:'admin-password',mfa_code:'123456'}),/allerede i brug/);assert.equal(f.messages.length,0);assert.equal(f.element('#modal').open,true);
 });
 test('closing account forms clears password and factor fields from the hidden dialog',()=>{
-  const f=fixture();f.run('editAccountProfile(member,false)');assert(f.element('#modal').innerHTML.includes('current_password'));f.element('#modal').listeners.get('close')();assert.equal(f.element('#modal').innerHTML,'');assert.equal(f.run('privateAccountDialog'),false);
+  const f=fixture();f.run('editAccountProfile(member,false)');assert(f.element('#modal').innerHTML.includes('current_password'));f.element('#modal').close();assert.equal(f.element('#modal').innerHTML,'');assert.equal(f.run('privateAccountDialog'),false);
 });
 test('own administrator profile shows security actions and replacing Authenticator enters the pending gate',async()=>{
   const f=fixture();f.ctx.profile={...owner,mfa_enabled:true,upload_count:0,galleries:[]};const html=f.run('profileMarkup(profile,true,{recovery_codes_remaining:8})');assert(html.includes('id="mfa-recovery-renew"'));assert(html.includes('id="mfa-replace"'));assert(html.includes('<strong>8</strong>'));

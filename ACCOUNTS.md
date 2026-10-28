@@ -75,22 +75,39 @@ Gæster og medlemmer kan også vælge **Nyt galleri**. Et galleri oprettet af et
 
 Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Det kan bruges én gang og udløber efter syv dage. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
 
-## Slet et billede eller en video som admin
+## Slet billeder og videoer som admin
 
-Åbn billedet eller videoen, vælg **Info**, og vælg **Slet billede** eller **Slet video**. Bekræft med **Slet fra dette galleri**. Annullering bevarer mediet og det åbne vindue.
+Kun administratorer kan gennemføre sletninger. Medlemmer og gæster kan markere egne uploads til godkendelse som beskrevet nedenfor. De kan ikke markere administratorens eller andre medlemmers uploads. Serveren kontrollerer ejerskab og godkendelse ved hvert forsøg.
+
+Åbn et galleri, og vælg **Slet billeder** over billedoversigten. Klik på de billeder og MP4-filer, der skal slettes; markeringerne vises direkte på miniaturebillederne. Vælg **Slet valgte**, gennemgå listen, og vælg **Bekræft sletning**. **Annullér** bevarer filerne. Du kan fortsat slette ét medie fra dets **Info**-panel.
+
+Hvis du ændrer søgning eller sortering, nulstilles markeringerne. Under sletningen behandles filerne én ad gangen. En fejl stopper resten af listen; de gennemførte sletninger bevares, og **Prøv igen** forsøger kun de resterende filer. **Stop efter denne fil**, Escape eller lukning af bekræftelsen stopper nye sletninger; en fil, som serveren allerede behandler, kan stadig blive slettet. Navigerer du væk eller logger ud, starter listen heller ikke flere sletninger.
 
 Sletningen gælder den valgte placering i galleriet. Mediets egne original-, visnings- og miniaturefiler fjernes sammen med placeringens favoritter. Andre placeringer af samme medie og Lychees kildefiler ændres ikke; bevarede importoplysninger kan fortsat henvise til den tidligere import.
 
 ### Aktivér sletning i en eksisterende installation
 
-Har du allerede profiler og Authenticator installeret, kræver denne opdatering kun den nye [private/app.php](private/app.php) samt de offentlige appfiler. Der skal ikke køres SQL til slettefunktionen.
+Har du allerede profiler og Authenticator installeret, kræver admins direkte sletning kun den nye [private/app.php](private/app.php) samt de offentlige appfiler. Medlemmers markeringer og godkendelse kræver desuden migrering 005 nedenfor.
 
 1. Gem en privat kopi af din nuværende `app.php` uden for webadgangen.
 2. Hent [private/app.php](private/app.php) fra GitHub med **Download raw file**, og erstat `/home/lexandkk/lexgalleri-private/app.php` med din egen filmanager.
 3. Behold den eksisterende konfiguration, `security.php`, Authenticator-nøgle, database og mediemapper.
 4. Opdatér galleriet med **Ctrl+F5** på pc. Sletteknappen vises først, når den private kode understøtter sletning, og du er logget ind som admin.
 
-Hvis serveren afviser en sletning, vises fejlen i det åbne medievindue. Følg fejlteksten ved en uafsluttet filoprydning, og forsøg igen; en sådan oprydning kan genoptages.
+Hvis serveren afviser en sletning, vises fejlen i den åbne bekræftelse. Følg fejlteksten ved en uafsluttet filoprydning, og forsøg igen; en sådan oprydning kan genoptages. Valg af flere filer kræver kun nye offentlige appfiler, når serverens status allerede viser `media_delete: true`.
+
+## Markering til sletning og admins godkendelse
+
+Et medlem åbner et galleri og vælger **Markér til sletning**. Kun medlemmets egne uploads kan vælges. Efter gennemgang af listen vælges **Send til godkendelse**. Billeder og MP4-filer bliver liggende og kan fortsat ses; deres miniaturebilleder får teksten **Markeret til sletning · afventer admin**. Importerede medier har administratoren som uploader og kan derfor ikke markeres af medlemmer.
+
+Admin åbner **Sletteønsker** i menuen. Hvert ønske viser filens titel, galleri og medlemmet, der markerede den. **Vis billede/video** åbner mediet. **Godkend sletning** kræver en bekræftelse, før filen fjernes fra dette galleri. **Afvis** kræver også bekræftelse og bevarer filen. Historikken gemmes, og medlemmet kan markere filen igen efter en afvisning. Hvis oprydningen af en godkendt sletning bliver afbrudt, bliver ønsket stående, så admin kan forsøge godkendelsen igen.
+
+Aktivér arbejdsgangen i en eksisterende installation:
+
+1. Hent [005_media_delete_requests.sql](private/migrations/005_media_delete_requests.sql), og importér den i **LexGalleris database** via phpMyAdmin. Migreringen kan køres igen. Den ændrer ikke Lychees database eller eksisterende mediefiler. Brug kun denne migrering til opdateringen; importér ikke hele `schema.sql`.
+2. Hent den nye [private/app.php](private/app.php), og erstat `/home/lexandkk/lexgalleri-private/app.php` med din egen filmanager. Behold konfigurationen, `security.php`, Authenticator-nøglen og billedmapperne.
+3. Installér de offentlige appfiler fra samme kodeversion via det eksisterende FTPS-workflow. Opdatér browseren med **Ctrl+F5**.
+4. `/lexgalleri/api/status` viser `media_delete_requests: true`, når den private kode og tabellen er klar. Indtil da er medlemmernes markeringer deaktiveret; admins eksisterende direkte sletning virker fortsat.
 
 ## Slet en designpakke som admin
 
