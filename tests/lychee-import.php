@@ -170,7 +170,8 @@ PHP;
     if($replacements!==1)throw new RuntimeException('Cannot inject precise lost-commit acknowledgement fault');
     file_put_contents($privateRoot.'/lychee-import.php',$module);
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8766);$origin='http://127.0.0.1:'.$httpPort;$env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
-    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable_cli=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    // cli-server's opcode cache must not retain a previous fixture config.
+    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable=0','-d','opcache.enable_cli=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start test server');
     $owner=li_client();$guest=li_client();$anonymous=li_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(li_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
@@ -188,6 +189,48 @@ PHP;
     $pdo->exec(file_get_contents($root.'/private/migrations/002_lychee_import.sql'));
     $status=li_ok(li_request($owner,'GET','/admin/lychee-import'),'Configured importer after owner migration');
     li_assert(($status['configured']??false)===true && ($status['migration_needed']??true)===false,'Private source config recognized');
+    // Exercise real driver errors against isolated accounts/databases. The API
+    // must explain the failure without returning PDO text or configuration data.
+    $expectSourceError=function(array $badConfig,int $mysqlCode,string $label)use($privateRoot,$owner,$sourcePassword,$sourceUser,$sourceName,$targetName,$host):void{
+        file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($badConfig,true).';');
+        $response=li_request($owner,'POST','/admin/lychee-import/scan',[]);
+        $detail=is_array($response[1])?(string)($response[1]['detail']??''):'';
+        li_assert($response[0]===400&&str_contains($detail,'MySQL '.$mysqlCode),$label.' has a precise safe MySQL code');
+        $privateValues=[$sourcePassword,$badConfig['db_password'],$sourceUser,$sourceName,$targetName,$host,'SQLSTATE['];
+        li_assert($detail!==''&&!array_filter($privateValues,fn($value)=>$value!==''&&str_contains($detail,$value)),$label.' excludes credentials, database names, host and raw PDO text');
+    };
+    $badConfig=$importConfig;$badConfig['db_password']='wrong-source-password-'.bin2hex(random_bytes(8));
+    $expectSourceError($badConfig,1045,'Wrong source password');
+    $badConfig=$importConfig;$badConfig['db_name']=$targetName;
+    $expectSourceError($badConfig,1044,'Source account lacks access to the selected database');
+    $pdo->exec('GRANT SELECT ON `'.$targetName.'`.* TO '.$quotedUser."@'%'");
+    try{
+        $expectSourceError($badConfig,1146,'Valid login points to LexGalleri instead of Lychee');
+    }finally{
+        $pdo->exec('REVOKE SELECT ON `'.$targetName.'`.* FROM '.$quotedUser."@'%'");
+    }
+    $badConfig=$importConfig;$badConfig['table_prefix']='missing_';
+    $expectSourceError($badConfig,1146,'Wrong source table prefix');
+    $pdo->exec('REVOKE SELECT ON `'.$sourceName.'`.* FROM '.$quotedUser."@'%'");
+    $pdo->exec('GRANT SELECT ON `'.$sourceName.'`.photos TO '.$quotedUser."@'%'");
+    try{
+        $expectSourceError($importConfig,1142,'Source account cannot read the version table');
+    }finally{
+        $pdo->exec('GRANT SELECT ON `'.$sourceName.'`.* TO '.$quotedUser."@'%'");
+        $pdo->exec('REVOKE SELECT ON `'.$sourceName.'`.photos FROM '.$quotedUser."@'%'");
+    }
+    $pdo->exec('REVOKE SELECT ON `'.$sourceName.'`.* FROM '.$quotedUser."@'%'");
+    $pdo->exec('GRANT SELECT ON `'.$sourceName.'`.configs TO '.$quotedUser."@'%'");
+    try{
+        $expectSourceError($importConfig,1142,'Source account logs in but cannot inventory albums');
+    }finally{
+        $pdo->exec('GRANT SELECT ON `'.$sourceName.'`.* TO '.$quotedUser."@'%'");
+        $pdo->exec('REVOKE SELECT ON `'.$sourceName.'`.configs FROM '.$quotedUser."@'%'");
+    }
+    file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($importConfig,true).';');
+    li_assert(li_source_snapshot($pdo,$sourceName)===$sourceSnapshot,'Failed source connections and reads leave source data unchanged');
+    li_assert(li_count($pdo,$targetName,'lychee_import_jobs')===0&&li_count($pdo,$targetName,'galleries')===0&&li_count($pdo,$targetName,'photos')===0,'Failed source connections and reads create no jobs, galleries or photos');
+    li_assert(!(glob($privateRoot.'/originals/*')?:[]),'Failed source connections and reads copy no originals');
     foreach(['filesystem root'=>'/','target private'=>$privateRoot,'ancestor of target'=>$temp,'target originals'=>$privateRoot.'/originals'] as $label=>$invalidRoot){
         $badConfig=$importConfig;$badConfig['uploads_root']=$invalidRoot;
         file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($badConfig,true).';');

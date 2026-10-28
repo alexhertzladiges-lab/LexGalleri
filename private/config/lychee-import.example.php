@@ -1,6 +1,7 @@
 <?php
 // OWNER installs as lexgalleri-private/config/lychee-import.php; never upload via public FTPS.
 // Use a separate MySQL user with SELECT only on the Lychee database.
+// Choose copy or move on the admin preview page; no transfer-mode setting is needed here.
 return [
     'enabled' => false, // Enable after configuration + target migration + backup.
     'expected_version' => '6.6.12',

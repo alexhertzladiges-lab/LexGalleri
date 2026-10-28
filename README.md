@@ -18,6 +18,7 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale originaler 
 - Admin kan installere designpakker som JSON eller ZIP, forhåndsvise og aktivere dem for alle.
 - Første admin oprettes med en privat opsætningsnøgle. Installationen opretter selv databasens tabeller.
 - Sessionsfiler, billeder og konfiguration ligger uden for `public_html`.
+- Import fra Lychee 6.6.12 med prøvevisning og valg mellem kopiering og flytning af originaler. Flytning på samme filsystem genbruger originalens indhold mellem albummer.
 - Adgangskoder hashes med PHP `password_hash`; databaseforespørgsler bruger PDO-parametre. Loginforsøg begrænses i databasen på tværs af PHP-processer.
 
 ## Repositoryets mapper
@@ -53,6 +54,8 @@ LEXGALLERI_TEST=1 TEST_DB_HOST=127.0.0.1 TEST_DB_USER=root TEST_DB_PASSWORD=test
 GitHub Actions er sat op til PHP 8.4 og MySQL 8.4. Testen kontrollerer installation, konti, invitationer, gallerirettigheder, direkte billedadgang, tilbagekaldelse, EXIF/GPS, orientering, originalbevarelse, metadata, favoritter og temaer. Browserudseendet og det konkrete webhotel skal stadig kontrolleres efter installation.
 
 CI kører også `php tests/lychee-import.php` med samme isolerede testindstillinger. Importtesten opretter to testdatabaser og en midlertidig kildebruger med kun SELECT; testkontoen skal derfor også kunne oprette brugere og tildele rettigheder. Alle testdata er syntetiske og ryddes op bagefter. `node --test tests/lychee-ui.test.mjs` kontrollerer blandt andet, at prøvevisning ikke starter kopiering, og at navigation og pause stopper nye portioner.
+
+`php tests/lychee-move.php` kontrollerer flytning uden ekstra originalkopier, delte originaler mellem albummer, filsystemgrænser og genoptagelse efter afbrudt flytning eller databasecommit. Testen flytter kun syntetiske filer i sit eget midlertidige område.
 
 `node --test tests/ftps-client.test.mjs` kræver en lokal `lftp` og tester mappehåndtering mod en midlertidig FTP-testserver på localhost med syntetiske loginoplysninger. Den kontakter ikke webhotellet. CI installerer testklienten automatisk.
 
