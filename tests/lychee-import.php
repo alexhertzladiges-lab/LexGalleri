@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/security-test-helper.php';
 /**
  * Isolated Lychee 6.6.12 -> LexGalleri integration test.
  * Creates two randomly named databases and one SELECT-only source account.
@@ -150,7 +151,7 @@ SQL);
     $importConfig=['enabled'=>true,'db_host'=>$host,'db_port'=>$port,'db_name'=>$sourceName,'db_user'=>$sourceUser,'db_password'=>$sourcePassword,'table_prefix'=>'','uploads_root'=>$uploadsRoot,'expected_version'=>'6.6.12'];
     file_put_contents($privateRoot.'/config/config.php','<?php return '.var_export($config,true).';');
     file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($importConfig,true).';');
-    copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
+    copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/security.php',$privateRoot.'/security.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
     if (!is_file($root.'/private/lychee-import.php')) throw new RuntimeException('Importer backend is not present yet');
     copy($root.'/private/lychee-import.php',$privateRoot.'/lychee-import.php');
     // Change only the temporary module before PHP starts; the one-shot fault is
@@ -176,7 +177,7 @@ PHP;
     $owner=li_client();$guest=li_client();$anonymous=li_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(li_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
     if(!$ready)throw new RuntimeException('Test server did not become ready');
-    li_ok(li_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Import admin','email'=>'import-admin@example.test','password'=>'long-import-password']),'Admin setup');
+    li_ok(security_test_complete_admin($owner,li_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Import admin','email'=>'import-admin@example.test','password'=>'long-import-password']),'li_request'),'Admin setup');
     $ownerId=li_request($owner,'GET','/me')[1]['id'];
     $pdo->exec('USE `'.$targetName.'`');
     $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'guest@example.test','Gæst',password_hash('long-guest-password',PASSWORD_DEFAULT)]);

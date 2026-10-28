@@ -1,5 +1,7 @@
 /private/config/config.php
 /private/config/lychee-import.php
+/private/config/mfa.key
+/private/config/mfa.key.lock
 /private/originals/
 /private/previews/
 /private/thumbnails/

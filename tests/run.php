@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/security-test-helper.php';
 // Creates and drops its own randomly named test database. Never uses the real app config.
 if(getenv('LEXGALLERI_TEST')!=='1')exit("Set LEXGALLERI_TEST=1 and TEST_DB_HOST/USER/PASSWORD to an isolated test database server.\n");
 $root=dirname(__DIR__);$temp=sys_get_temp_dir().'/lexgalleri-test-'.bin2hex(random_bytes(6));mkdir($temp,0700,true);mkdir($temp.'/config',0700);
@@ -19,7 +20,7 @@ function remove_tree(string $path):void {foreach(scandir($path) as $p){if($p==='
 try {
     $pdo->exec('CREATE DATABASE `'.$database.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$pdo->exec('USE `'.$database.'`');
     $config=['db_host'=>$host,'db_port'=>$port,'db_name'=>$database,'db_user'=>$dbuser,'db_password'=>$pw,'base_path'=>'/LexGalleri','secure_cookies'=>false,'setup_token'=>str_repeat('test-setup-',5)];
-    file_put_contents($temp.'/config/config.php','<?php return '.var_export($config,true).';');copy($root.'/private/app.php',$temp.'/app.php');copy($root.'/private/schema.sql',$temp.'/schema.sql');
+    file_put_contents($temp.'/config/config.php','<?php return '.var_export($config,true).';');copy($root.'/private/app.php',$temp.'/app.php');copy($root.'/private/security.php',$temp.'/security.php');copy($root.'/private/schema.sql',$temp.'/schema.sql');
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8765);$originBase='http://127.0.0.1:'.$httpPort;
     $env=getenv();$env['LEXGALLERI_PRIVATE']=$temp;
     $server=proc_open([PHP_BINARY,'-d','upload_max_filesize=25M','-d','post_max_size=26M','-d','memory_limit=256M','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
@@ -38,7 +39,7 @@ try {
     assertion(request($owner,'GET','/status')[1]['setup']===true,'Initial setup status');
     assertion(request($owner,'POST','/setup',['token'=>'wrong'])[0]===403,'Setup requires secret');
     $setup=['token'=>$config['setup_token'],'name'=>'Admin','email'=>'admin@example.test','password'=>'long-admin-password'];
-    $r=request($owner,'POST','/setup',$setup);assertion($r[0]===200,'Create first admin');
+    $r=request($owner,'POST','/setup',$setup);assertion($r[0]===200,'Create first admin');security_test_complete_admin($owner,$r,'request');
     assertion(request($owner,'POST','/setup',$setup)[0]===409,'No second first-admin setup');
     $g=request($owner,'POST','/galleries',['name'=>'Sommer','description'=>'Familien'])[1]['id'];
     $hidden=request($owner,'POST','/galleries',['name'=>'Kun admin'])[1]['id'];

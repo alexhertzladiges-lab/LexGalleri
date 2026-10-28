@@ -27,6 +27,7 @@ const publicFiles = [
   'service-worker.js',
   'static/pwa.js',
   'static/style.css',
+  'static/qrcode.js',
   'static/app.js',
   '.htaccess',
   'index.php',

@@ -35,7 +35,7 @@ async function fixture(){
       res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
       send('text/html; charset=utf-8',html);return;
     }
-    if(url.pathname===base+'/api/status'){json({setup:false});return;}
+    if(url.pathname===base+'/api/status'){json({setup:false,account_security_version:1,account_security_ready:true});return;}
     if(url.pathname===base+'/api/me'){json({id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
     if(url.pathname===base+'/api/theme'){json({version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'});return;}
     if(url.pathname===base+'/api/galleries'){json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:photos.length,cover:null}]);return;}

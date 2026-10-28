@@ -43,7 +43,7 @@ Dette kontrollerer FTPS-login, TLS-certifikat og krypteret listning af den offen
 
 Når du har kontrolleret kontoens rod, kører du samme workflow på `main` med **diagnostic_only slået fra**. PHP/MySQL-testene og deployplantestene på samme commit skal bestå, før overførslen begynder. Brug de offentlige og private programfiler fra samme kodeversion; hold en eventuel import på pause, indtil begge er opdateret.
 
-Kun følgende elleve offentlige appfiler overføres:
+Kun følgende tolv offentlige appfiler overføres:
 
 | Fra GitHub | Til FTPS-kontoens rod |
 |---|---|
@@ -56,10 +56,11 @@ Kun følgende elleve offentlige appfiler overføres:
 | `public/static/pwa.js` | `static/pwa.js` |
 | `public/static/style.css` | `static/style.css` |
 | `public/static/app.js` | `static/app.js` |
+| `public/static/qrcode.js` | `static/qrcode.js` |
 | `public/.htaccess` | `.htaccess` |
 | `public/index.php` | `index.php` |
 
-Ingen privat PHP-kode, schema.sql, konfiguration, familiebilleder, videoer, sessionsfiler eller database kopieres. Appikonerne i tabellen er offentlige programfiler. Der er ingen rekursiv synkronisering, sletning eller oprydning uden for de elleve appfiler. Den offentlige `static/`-mappe kan oprettes med rettigheder 755, og overførte filer får 644. Kontorodens egne rettigheder ændres ikke.
+Ingen privat PHP-kode, schema.sql, konfiguration, familiebilleder, videoer, sessionsfiler eller database kopieres. Appikonerne i tabellen er offentlige programfiler. Der er ingen rekursiv synkronisering, sletning eller oprydning uden for de tolv appfiler. Den offentlige `static/`-mappe kan oprettes med rettigheder 755, og overførte filer får 644. Kontorodens egne rettigheder ændres ikke.
 
 Webapp-opdateringen kræver også, at ejeren selv erstatter `private/app.php` i privatmappen fra samme kodeversion. Den tilføjer sidens manifest, ikoner og appscript. Behold den udfyldte konfiguration og databasen; denne ændring kræver ingen SQL-migrering. Se [webapp-vejledningen](WEBAPP.md).
 
@@ -69,9 +70,9 @@ Workflowet er manuelt; det starter ikke ved push eller pull requests. Det kører
 
 Der bruges **eksplicit FTPS** (`ftp://` plus `AUTH TLS`) med obligatorisk TLS på kontrol- og datakanaler, verificeret certifikat og kontrolleret værtsnavn. FTP-adgangskoden gives via lftp's miljøvariabel og skrives ikke i kommandolinjeargumenter eller de genererede planer.
 
-Alle elleve filer uploades først med midlertidige navne. Derefter aktiveres hver fil med FTP-rename. Ikoner, manifest og worker aktiveres før scripts og den offentlige indgangsfil, som aktiveres sidst. Serveren skal understøtte rename, der erstatter en eksisterende fil. Hvis den afviser det, stopper overførslen; der bruges ingen fallback, som sletter målfilen først.
+Alle tolv filer uploades først med midlertidige navne. Derefter aktiveres hver fil med FTP-rename. Ikoner, manifest og worker aktiveres før scripts og den offentlige indgangsfil, som aktiveres sidst. Serveren skal understøtte rename, der erstatter en eksisterende fil. Hvis den afviser det, stopper overførslen; der bruges ingen fallback, som sletter målfilen først.
 
-De elleve rename-operationer er ikke én samlet transaktion. En afbrudt forbindelse kan efterlade en blanding af kodeversioner eller skjulte `.lexgalleri-...`-filer. Genkør samme kodeversion eller gendan de offentlige filer fra backup. Oprydning af eventuelle midlertidige filer sker manuelt efter kontrol. Private data påvirkes ikke af dette workflow.
+De tolv rename-operationer er ikke én samlet transaktion. En afbrudt forbindelse kan efterlade en blanding af kodeversioner eller skjulte `.lexgalleri-...`-filer. Genkør samme kodeversion eller gendan de offentlige filer fra backup. Oprydning af eventuelle midlertidige filer sker manuelt efter kontrol. Private data påvirkes ikke af dette workflow.
 
 ## Efter overførsel
 
