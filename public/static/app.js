@@ -250,7 +250,7 @@ function bindPhotoDelete(photo){
       if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte sletningen.');
       if(account!==accountGeneration||!me)return;
       removeDeletedPhoto(photo,gallerySnapshot);
-      if(generation===photoViewerGeneration&&M.open)M.close();
+      if(generation===photoViewerGeneration&&M.open){stopPhotoVideo();M.close();}
       toast(photo.mime==='video/mp4'?'Videoen er slettet fra galleriet.':'Billedet er slettet fra galleriet.');
     }catch(error){if(generation===photoViewerGeneration&&account===accountGeneration){status.textContent='Kunne ikke slette: '+(error?.message||'Prøv igen.');status.classList.add('error');}}
     finally{pending=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);confirmation.setAttribute('aria-busy','false');}
