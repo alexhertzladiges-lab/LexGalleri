@@ -170,7 +170,8 @@ PHP;
     if($replacements!==1)throw new RuntimeException('Cannot inject precise lost-commit acknowledgement fault');
     file_put_contents($privateRoot.'/lychee-import.php',$module);
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8766);$origin='http://127.0.0.1:'.$httpPort;$env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
-    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable_cli=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    // cli-server's opcode cache must not retain a previous fixture config.
+    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable=0','-d','opcache.enable_cli=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start test server');
     $owner=li_client();$guest=li_client();$anonymous=li_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(li_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}

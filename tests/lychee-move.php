@@ -117,7 +117,8 @@ SQL);
     copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
     file_put_contents($privateRoot.'/lychee-import.php',lm_inject_commit_fault(file_get_contents($root.'/private/lychee-import.php')));
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8767);$origin='http://127.0.0.1:'.$httpPort;$env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
-    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable_cli=0','-d','display_errors=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    // cli-server's opcode cache must not retain a previous fixture config.
+    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable=0','-d','opcache.enable_cli=0','-d','display_errors=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start isolated move test server');
     $owner=lm_client();$guest=lm_client();$anonymous=lm_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(lm_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
@@ -276,7 +277,7 @@ SQL);
     // Start a separate process for the second installation, so SAPI/opcache
     // revalidation intervals cannot keep the first installation's main config.
     proc_terminate($server);proc_close($server);$server=null;
-    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable_cli=0','-d','display_errors=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    $server=proc_open([PHP_BINARY,'-d','memory_limit=256M','-d','opcache.enable=0','-d','opcache.enable_cli=0','-d','display_errors=0','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start isolated legacy-copy test server');
     $legacyOwner=lm_client();
     $legacyReady=false;
