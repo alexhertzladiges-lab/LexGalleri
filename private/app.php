@@ -87,6 +87,104 @@ function image_path(string $id,string $suffix): string {
     $dir=['original'=>'originals','view'=>'previews','thumb'=>'thumbnails'][$suffix];
     return $private.'/'.$dir.'/'.$id.($suffix==='original'?'.bin':'.jpg');
 }
+function media_delete_validate(string $directory): array {
+    if(is_link($directory)||is_link(dirname($directory))||!is_dir($directory))throw new RuntimeException('Slettekvitteringens placering kræver kontrol');
+    $names=['original.bin','view.jpg','thumb.jpg','receipt.json'];$entries=@scandir($directory);
+    if($entries===false)throw new RuntimeException('Slettekvitteringen kunne ikke læses');
+    foreach($entries as $name)if($name!=='.'&&$name!=='..'&&!in_array($name,$names,true))throw new RuntimeException('Slettekvitteringen kræver kontrol');
+    foreach($names as $name) {
+        $path=$directory.'/'.$name;clearstatcache(true,$path);
+        if(is_link($path)||file_exists($path)&&!is_file($path))throw new RuntimeException('Slettekvitteringen kræver kontrol');
+    }
+    return $entries;
+}
+function media_delete_cleanup(string $directory): void {
+    $entries=media_delete_validate($directory);$names=['original.bin','view.jpg','thumb.jpg','receipt.json'];
+    foreach($names as $name) {
+        $path=$directory.'/'.$name;
+        if(in_array($name,$entries,true)&&!@unlink($path))throw new RuntimeException('Slettede filer kunne ikke ryddes');
+    }
+    // All recorded media and the receipt are gone. A leftover empty directory
+    // contains no media and must not turn a completed deletion into a failure.
+    @rmdir($directory);
+}
+function delete_photo(string $id): void {
+    global $db,$private;
+    $lock='lexgalleri-delete-'.$id;
+    if(!(int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn())fail(409,'Filen er ved at blive slettet. Prøv igen.');
+    $directory=$private.'/.deletions/'.$id;$receipt=$directory.'/receipt.json';
+    $paths=['original.bin'=>image_path($id,'original'),'view.jpg'=>image_path($id,'view'),'thumb.jpg'=>image_path($id,'thumb')];
+    $commitAttempted=false;$committed=false;$journalReady=false;
+    try {
+        $db->beginTransaction();$photo=one('SELECT * FROM photos WHERE id=? FOR UPDATE',[$id]);
+        $root=$private.'/.deletions';
+        if(is_link($root)||file_exists($root)&&!is_dir($root)||is_link($directory)||file_exists($directory)&&!is_dir($directory))fail(409,'Filernes placering kræver kontrol før sletning.');
+        $journal=is_file($receipt)&&!is_link($receipt)?json_decode((string)file_get_contents($receipt),true):null;
+        if(is_dir($directory)&&($journal['version']??null)!==1&&count(scandir($directory)?:[])>2)fail(409,'En tidligere sletning kræver kontrol.');
+        if($journal!==null&&($journal['photo_id']??null)!==$id)fail(409,'En tidligere sletning kræver kontrol.');
+        $journalReady=($journal['version']??null)===1&&($journal['photo_id']??null)===$id;
+        if(!$photo) {
+            $db->rollBack();
+            // A committed delete can be retried after interrupted file cleanup.
+            if(($journal['photo_id']??null)!==$id)fail(404,'Foto eller video findes ikke.');
+            $committed=true;
+        } else {
+            if(!is_dir($root)&&!@mkdir($root,0700))fail(503,'Sletningen kunne ikke forberedes. Kontrollér private filrettigheder.');
+            if(!is_dir($directory)&&!@mkdir($directory,0700))fail(503,'Sletningen kunne ikke forberedes. Kontrollér private filrettigheder.');
+            if($journal===null) {
+                // Fixed paths and a durable receipt make an interrupted rename
+                // resumable without copying originals or guessing their state.
+                $encoded=json_encode(['version'=>1,'photo_id'=>$id,'photo'=>$photo,'created'=>stamp()],JSON_THROW_ON_ERROR);
+                $handle=@fopen($receipt,'xb');
+                if(!$handle)fail(503,'Slettekvitteringen kunne ikke gemmes. Prøv igen.');
+                try{if(fwrite($handle,$encoded)!==strlen($encoded)||!fflush($handle)||function_exists('fsync')&&!fsync($handle))throw new RuntimeException('Slettekvitteringen kunne ikke gemmes');$journalReady=true;}
+                catch(Throwable $error){@unlink($receipt);@rmdir($directory);throw $error;}
+                finally{fclose($handle);}
+            }
+            media_delete_validate($directory);
+            foreach($paths as $name=>$path) {
+                $staged=$directory.'/'.$name;clearstatcache(true,$path);clearstatcache(true,$staged);
+                if(is_link(dirname($path))||is_link($path)||file_exists($path)&&!is_file($path)||is_link($staged)||file_exists($staged)&&!is_file($staged)||is_file($path)&&is_file($staged))fail(409,'Filernes placering kræver kontrol før sletning.');
+                if(is_file($path)) {
+                    $sourceStat=@stat($path);$targetStat=@stat($directory);
+                    if(!$sourceStat||!$targetStat||$sourceStat['dev']!==$targetStat['dev'])fail(409,'Sletning kræver, at de private billedmapper ligger på samme filsystem.');
+                }
+            }
+            foreach($paths as $name=>$path)if(is_file($path)&&!@rename($path,$directory.'/'.$name))fail(503,'Filerne kunne ikke klargøres til sletning. Prøv igen.');
+            query('DELETE FROM favorites WHERE photo_id=?',[$id]);
+            if(one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='lychee_import_items'")) {
+                // Keep completed import receipts so a new preview does not
+                // resurrect a deliberately deleted gallery placement.
+                query('UPDATE lychee_import_items SET target_photo_id=NULL WHERE target_photo_id=?',[$id]);
+            }
+            query('DELETE FROM photos WHERE id=?',[$id]);
+            $commitAttempted=true;if(!$db->commit())throw new RuntimeException('Databasens slettebekræftelse mangler');$committed=true;
+        }
+        try{media_delete_cleanup($directory);}
+        catch(Throwable $error){error_log('LexGalleri media cleanup: '.$error->getMessage());fail(503,'Filen er fjernet fra galleriet, men filoprydningen er ikke afsluttet. Prøv Slet igen.');}
+    } catch(Throwable $error) {
+        if(!$committed) {
+            try{if($db->inTransaction())$db->rollBack();}catch(Throwable $rollback){error_log('LexGalleri delete rollback: '.$rollback->getMessage());}
+            if(!$commitAttempted&&$journalReady) {
+                $restored=true;
+                foreach($paths as $name=>$path) {
+                    $staged=$directory.'/'.$name;clearstatcache(true,$staged);clearstatcache(true,$path);
+                    if(is_link($staged)||file_exists($staged)&&!is_file($staged)){$restored=false;continue;}
+                    if(is_file($staged)&&(file_exists($path)||is_link($path)||!@rename($staged,$path)))$restored=false;
+                }
+                if($restored&&is_dir($directory)&&!is_link($directory)) {
+                    try{media_delete_cleanup($directory);}catch(Throwable $cleanup){error_log('LexGalleri delete staging: '.$cleanup->getMessage());}
+                }
+            }
+        }
+        // Never unlink staged originals after an uncertain database commit.
+        // The receipt and fixed filenames let a later DELETE resolve DB truth.
+        if($commitAttempted&&!$committed)fail(503,'Sletningen kunne ikke bekræftes. Prøv Slet igen.');
+        throw $error;
+    } finally {
+        try{query('SELECT RELEASE_LOCK(?)',[$lock]);}catch(Throwable $ignored){}
+    }
+}
 // Parse decimal byte positions without overflowing PHP integers. Very large ends
 // and suffixes may be clamped; very large starts remain outside any stored file.
 function video_byte_number(string $digits): int {
@@ -154,7 +252,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready()]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['media_delete'=>true,'theme_delete'=>true,'gallery_create'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -211,7 +309,15 @@ function route(string $method,string $path): never {
     }
     if ($method==='GET' && $path==='/me') send(safe_user($u));
     if ($method==='GET' && $path==='/galleries') send(rows('SELECT g.*,(SELECT count(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',[(int)$u['admin'],$u['id']]));
-    if ($method==='POST' && $path==='/galleries') {user(true);$b=body();$id=uid();query('INSERT INTO galleries VALUES(?,?,?,?)',[$id,text($b,'name',100,true),text($b,'description',1000),stamp()]);send(['id'=>$id]);}
+    if ($method==='POST' && $path==='/galleries') {
+        $b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);$id=uid();
+        $db->beginTransaction();
+        query('INSERT INTO galleries(id,name,description,created) VALUES(?,?,?,?)',[$id,$name,$description,stamp()]);
+        // The authenticated creator gets access only to this new gallery.
+        // Administrators already have full access through their existing role.
+        if(!$u['admin'])query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1)',[$id,$u['id']]);
+        $db->commit();send(['id'=>$id]);
+    }
     if (preg_match('~^/galleries/([a-f0-9]{32})/photos$~D',$path,$m)) {
         $g=$m[1];[$u,$a]=access($g,$method==='POST'?'upload':null);
         if ($method==='GET') {
@@ -262,6 +368,7 @@ function route(string $method,string $path): never {
         if($size==='original')header("Content-Disposition: attachment; filename=\"foto\"; filename*=UTF-8''".rawurlencode($p['filename']));
         session_write_close();readfile($file);exit;
     }
+    if ($method==='DELETE' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {user(true);delete_photo($m[1]);send(['ok'=>true]);}
     if ($method==='PATCH' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {
         user(true);photo($m[1]);$b=body();$taken=text($b,'taken',32);$precision=text($b,'precision',16,true);validate_date($taken,$precision);
         $lat=$b['lat']??null;$lon=$b['lon']??null;
@@ -297,10 +404,44 @@ function route(string $method,string $path): never {
         $id=uid();query('INSERT INTO themes VALUES(?,?)',[$id,json_encode($t,JSON_UNESCAPED_UNICODE)]);send(['id'=>$id,'theme'=>$t]);
     }
     if($method==='POST' && preg_match('~^/admin/themes/(default|[a-f0-9]{32})/activate$~D',$path,$m)) {
-        $t=$m[1]==='default'?json_encode(default_theme()):(one('SELECT document FROM themes WHERE id=?',[$m[1]])['document']??null);if(!$t)fail(404,'Tema findes ikke');
-        query('INSERT INTO settings(`key`,value) VALUES(\'theme\',?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[$t]);send(['ok'=>true]);
+        theme_transaction(function()use($m){
+            $t=$m[1]==='default'?json_encode(default_theme()):(one('SELECT document FROM themes WHERE id=? FOR UPDATE',[$m[1]])['document']??null);if(!$t)fail(404,'Tema findes ikke');
+            query('INSERT INTO settings(`key`,value) VALUES(\'theme\',?),(\'theme_package_id\',?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[$t,$m[1]]);return ['ok'=>true];
+        });send(['ok'=>true]);
+    }
+    if($method==='DELETE' && preg_match('~^/admin/themes/(default|[a-f0-9]{32})$~D',$path,$m)) {
+        if($m[1]==='default')fail(409,'Standarddesignet kan ikke slettes');
+        send(theme_transaction(function()use($m){
+            $package=one('SELECT document FROM themes WHERE id=? FOR UPDATE',[$m[1]]);if(!$package)fail(404,'Designpakken findes ikke');
+            $setting=one('SELECT value FROM settings WHERE `key`=\'theme\' FOR UPDATE');
+            $source=one('SELECT value FROM settings WHERE `key`=\'theme_package_id\' FOR UPDATE');
+            $active=$setting?validate_theme(json_decode($setting['value'],true,16,JSON_THROW_ON_ERROR)):default_theme();
+            $deleted=validate_theme(json_decode($package['document'],true,16,JSON_THROW_ON_ERROR));
+            // New activations retain identity even for equal package documents.
+            // Legacy settings without an ID can only be matched by snapshot.
+            $knownSource=$source && preg_match('/\A(?:default|[a-f0-9]{32})\z/D',$source['value']);
+            $reset=$setting!==null && ($knownSource?$source['value']===$m[1]:$active==$deleted);
+            if($reset){$active=default_theme();query('INSERT INTO settings(`key`,value) VALUES(\'theme\',?),(\'theme_package_id\',\'default\') ON DUPLICATE KEY UPDATE value=VALUES(value)',[json_encode($active,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR)]);}
+            query('DELETE FROM themes WHERE id=?',[$m[1]]);
+            return ['ok'=>true,'theme'=>$active,'reset_to_default'=>$reset];
+        }));
     }
     fail(404,'Ikke fundet');
+}
+
+// Serialize activation and deletion so an activation cannot retain a package
+// that another administrator deleted between reading it and saving its design.
+function theme_transaction(callable $operation): array {
+    global $db,$config;
+    $lock='lexgalleri-theme-'.substr(hash('sha256',$config['db_name']),0,32);
+    if((int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn()!==1)fail(409,'Designet ændres allerede. Prøv igen om lidt.');
+    try {
+        $db->beginTransaction();$result=$operation();$db->commit();return $result;
+    } catch(Throwable $error) {
+        if($db->inTransaction())$db->rollBack();throw $error;
+    } finally {
+        try{query('SELECT RELEASE_LOCK(?)',[$lock]);}catch(Throwable $error){error_log('LexGalleri theme lock: '.$error->getMessage());}
+    }
 }
 
 // Bootstrap: private configuration, session files and photos never live in public_html.

@@ -5,6 +5,7 @@ let me,galleries=[],photos=[],current=null,view='galleries',permissions={},theme
 let photoViewerGeneration=0;
 let photoViewerNavigation=null;
 let accountGeneration=0,profileGeneration=0,privateAccountDialog=false;
+let navigationGeneration=0,serverCapabilities={};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,method='GET',body){const opt={method};if(body instanceof FormData)opt.body=body;else if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body)}const r=await fetch(BASE+'/api'+path,opt);let b;try{b=await r.json()}catch{throw Error('Serveren kunne ikke svare')}if(!r.ok){const error=Error(b.detail||'Der opstod en fejl');error.status=r.status;throw error}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',4500)}
@@ -18,7 +19,7 @@ function modal(title,html,photo=false){
 }
 function formHandler(id,fn){$(id).onsubmit=async e=>{e.preventDefault();const btn=$('button[type=submit]',e.target);if(btn)btn.disabled=true;try{await fn(Object.fromEntries(new FormData(e.target)))}catch(err){const out=$('.error',e.target);if(out)out.textContent=err.message;else toast(err.message)}finally{if(btn)btn.disabled=false}}}
 function clearAccountWorkspace(){
-  accountGeneration++;profileGeneration++;stopLycheeView();stopPhotoVideo();galleries=[];photos=[];current=null;view='galleries';
+  accountGeneration++;profileGeneration++;navigationGeneration++;photoViewerGeneration++;stopLycheeView();stopPhotoVideo();galleries=[];photos=[];current=null;view='galleries';
   if(M.open)M.close();M.innerHTML='';privateAccountDialog=false;
 }
 async function accountSignOut(){
@@ -71,14 +72,104 @@ function recoveryCodesView(codes,continueWith){
   $('#recovery-logout').onclick=()=>{codes=[];return accountSignOut()};
 }
 function auth(setup=false,invite=null,prefill=''){clearAccountWorkspace();me=null;A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Kun for jer</div><h1>${setup?'Et hjem til jeres minder.':invite?'Du er inviteret.':'Velkommen hjem.'}</h1><p class="muted">${setup?'Opret familiens administrator for at komme i gang.':invite?'Vælg en adgangskode på mindst 12 tegn. Har du allerede en konto, skal du bruge dens adgangskode.':'Log ind og find tilbage til de øjeblikke, I deler.'}</p><form id="auth">${setup?'<label>Opsætningsnøgle<input name="token" type="password" required></label><label>Dit navn<input name="name" autocomplete="name" required></label>':''}${invite?'':`<label>E-mail<input name="email" type="email" autocomplete="email" value="${esc(prefill)}" required></label>`}<label>Adgangskode<input name="password" type="password" autocomplete="${setup||invite?'new-password':'current-password'}" minlength="${setup||invite?12:1}" required></label><div class="error" role="alert"></div><button type="submit">${setup?'Opret familiearkiv':invite?'Acceptér invitation':'Log ind'} →</button></form><p class="muted" style="font-size:12px;margin-top:26px">Private billeder. Fælles minder.</p></div>`;formHandler('#auth',async b=>{if(invite)b.token=invite;const result=await api(setup?'/setup':invite?'/accept':'/login','POST',b);await authResult(result,true)})}
-async function init(){try{const s=await api('/status');if(s.account_security_version!==1||(!s.setup&&s.account_security_ready!==true))return accountMaintenance();const token=new URLSearchParams(location.search).get('invite');if(token)return auth(false,token);if(s.setup)return auth(true);try{me=await api('/me')}catch(error){if(error.status&&error.status!==401)throw error;let pending;try{pending=await api('/mfa/status')}catch(problem){if(problem.status&&![401,404].includes(problem.status))throw problem;return auth()}return mfaGate(pending)}await start()}catch(e){A.innerHTML='<div class="login"><h1>Kunne ikke starte</h1><p>'+esc(e.message)+'</p></div>'}}
-async function start(){applyTheme(await api('/theme'));galleries=await api('/galleries');shell();await render()}
-function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?'<button data-view="people">♧ &nbsp; Familie & gæster</button><button data-view="design">◐ &nbsp; Design</button>':''}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{stopLycheeView();view=b.dataset.view;current=null;render().catch(e=>toast(e.message))});const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
-async function render(){if(view!=='lychee')stopLycheeView();document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const C=$('#content');if(view==='galleries'&&!current){C.innerHTML=`<div class="heading"><div><div class="eyebrow">Saml på øjeblikkene</div><h1 style="margin:12px 0">Jeres gallerier</h1><p class="muted">Små hverdage. Store oplevelser. Alt det, I gerne vil huske.</p></div>${me.admin?'<button id="new-gallery">＋ Nyt galleri</button>':''}</div><div class="tools"><input id="search-gallery" placeholder="Søg i gallerier…" aria-label="Søg i gallerier"><span class="muted">${galleries.length} gallerier · privat adgang</span></div><div id="gallery-grid" class="grid"></div>`;const draw=()=>{$('#gallery-grid').innerHTML=galleries.filter(g=>g.name.toLowerCase().includes($('#search-gallery').value.toLowerCase())).map(g=>`<article class="card"><button data-gallery="${g.id}">${g.cover?`<img class="cover" src="${BASE}/api/photos/${g.cover}/image" loading="lazy" alt="">`:'<div class="cover placeholder">◈</div>'}<div class="card-body"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description||'Et sted til jeres minder')}</p><span class="badge">${g.count} billeder</span> <span class="badge">🔒 Begrænset adgang</span></div></button></article>`).join('')||'<div class="empty"><h2>Her begynder minderne</h2><p>Gallerier vises her, når de er oprettet og delt med dig.</p></div>';document.querySelectorAll('[data-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.gallery))};draw();$('#search-gallery').oninput=draw;if($('#new-gallery'))$('#new-gallery').onclick=newGallery;
-}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){C.innerHTML='<p>Henter dine billeder…</p>';photos=(await Promise.all(galleries.map(g=>api('/galleries/'+g.id+'/photos')))).flatMap(x=>x.photos);if(view==='favorites')photos=photos.filter(p=>p.favorite);photos.sort((a,b)=>(b.taken||b.uploaded).localeCompare(a.taken||a.uploaded));C.innerHTML=`<div class="heading"><div><div class="eyebrow">${view==='timeline'?'På tværs af gallerier':'Dine udvalgte øjeblikke'}</div><h1>${view==='timeline'?'Tidslinjen':'Favoritter'}</h1><p class="muted" id="photo-count">${photos.length} billeder, du har adgang til</p></div></div><div id="photo-grid" class="photo-grid"></div>`;drawPhotos(photos)}else if(view==='profile'){await profileView()}else if(view==='people'){await peopleView()}else if(view==='design'){await designView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
-function newGallery(){modal('Et nyt kapitel',`<div class="dialog-content"><form id="new"><label>Galleriets navn<input name="name" required maxlength="100" placeholder="Fx Sommer ved Vesterhavet"></label><label>Beskrivelse<textarea name="description" rows="3" maxlength="1000"></textarea></label><p class="muted">Kun admin har adgang fra start. Del det bagefter med familien.</p><div class="error"></div><button type="submit">Opret galleri</button></form></div>`);formHandler('#new',async b=>{await api('/galleries','POST',b);galleries=await api('/galleries');M.close();await render()})}
-async function openGallery(id){current=galleries.find(g=>g.id===id);await render()}
-async function galleryView(){const b=await api('/galleries/'+current.id+'/photos');photos=b.photos;permissions=b.permissions;$('#content').innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 style="margin:12px 0">${esc(current.name)}</h1><p class="muted">${esc(current.description)} · ${photos.length} billeder</p></div>${permissions.upload?'<button id="upload">＋ Tilføj billeder</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp" hidden>':''}</div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><div id="upload-status" role="status"></div><div id="photo-grid" class="photo-grid"></div>`;$('#back').onclick=()=>{current=null;render()};drawPhotos(photos);const filter=()=>{const q=$('#search-photo').value.toLowerCase(),key=$('#sort').value;drawPhotos(photos.filter(p=>[p.title,p.place,p.uploader_name].join(' ').toLowerCase().includes(q)).sort((a,b)=>(b[key]||'').localeCompare(a[key]||'')))};$('#search-photo').oninput=filter;$('#sort').onchange=filter;if($('#upload')){$('#upload').onclick=()=>$('#files').click();$('#files').onchange=async e=>{const files=[...e.target.files],errors=[];$('#upload').disabled=true;for(let i=0;i<files.length;i++){$('#upload-status').textContent=`Uploader ${i+1} af ${files.length}: ${files[i].name}`;const f=new FormData();f.append('file',files[i]);try{await api('/galleries/'+current.id+'/photos','POST',f)}catch(err){errors.push(files[i].name+': '+err.message)}}await galleryView();galleries=await api('/galleries');toast(errors.length?errors.join(' · '):`${files.length} billeder uploadet`)}}}
+async function init(){try{const s=await api('/status');serverCapabilities=s.capabilities&&typeof s.capabilities==='object'?s.capabilities:{};if(s.account_security_version!==1||(!s.setup&&s.account_security_ready!==true))return accountMaintenance();const token=new URLSearchParams(location.search).get('invite');if(token)return auth(false,token);if(s.setup)return auth(true);try{me=await api('/me')}catch(error){if(error.status&&error.status!==401)throw error;let pending;try{pending=await api('/mfa/status')}catch(problem){if(problem.status&&![401,404].includes(problem.status))throw problem;return auth()}return mfaGate(pending)}await start()}catch(e){A.innerHTML='<div class="login"><h1>Kunne ikke starte</h1><p>'+esc(e.message)+'</p></div>'}}
+async function start(){const generation=++navigationGeneration,account=accountGeneration;const theme=await api('/theme');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;const list=await api('/galleries');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;applyTheme(theme);galleries=list;shell();await render()}
+function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?'<button data-view="people">♧ &nbsp; Familie & gæster</button><button data-view="design">◐ &nbsp; Design</button>':''}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
+async function render(){if(view!=='lychee')stopLycheeView();document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const C=$('#content');if(view==='galleries'&&!current){C.innerHTML=`<div class="heading"><div><div class="eyebrow">Saml på øjeblikkene</div><h1 style="margin:12px 0">Jeres gallerier</h1><p class="muted">Små hverdage. Store oplevelser. Alt det, I gerne vil huske.</p></div>${me.admin||serverCapabilities.gallery_create===true?'<button id="new-gallery">＋ Nyt galleri</button>':''}</div><div class="tools"><input id="search-gallery" placeholder="Søg i gallerier…" aria-label="Søg i gallerier"><span class="muted">${galleries.length} gallerier · privat adgang</span></div><div id="gallery-grid" class="grid"></div>`;const draw=()=>{$('#gallery-grid').innerHTML=galleries.filter(g=>g.name.toLowerCase().includes($('#search-gallery').value.toLowerCase())).map(g=>`<article class="card"><button data-gallery="${g.id}">${g.cover?`<img class="cover" src="${BASE}/api/photos/${g.cover}/image" loading="lazy" alt="">`:'<div class="cover placeholder">◈</div>'}<div class="card-body"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description||'Et sted til jeres minder')}</p><span class="badge">${g.count} billeder</span> <span class="badge">🔒 Begrænset adgang</span></div></button></article>`).join('')||'<div class="empty"><h2>Her begynder minderne</h2><p>Gallerier vises her, når de er oprettet og delt med dig.</p></div>';document.querySelectorAll('[data-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.gallery))};draw();$('#search-gallery').oninput=draw;if($('#new-gallery'))$('#new-gallery').onclick=newGallery;
+}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){await collectionView()}else if(view==='profile'){await profileView()}else if(view==='people'){await peopleView()}else if(view==='design'){await designView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
+function newGallery(){
+  const account=accountGeneration;
+  modal('Et nyt kapitel',`<div class="dialog-content"><form id="new"><label>Galleriets navn<input name="name" required maxlength="100" placeholder="Fx Sommer ved Vesterhavet"></label><label>Beskrivelse<textarea name="description" rows="3" maxlength="1000"></textarea></label><p class="muted">${me.admin?'Kun admin har adgang fra start. Del det bagefter med familien.':'Du og admin har adgang fra start. Admin kan dele galleriet med familien.'}</p><div class="error" role="alert"></div><button type="submit">Opret galleri</button></form></div>`);
+  const generation=photoViewerGeneration;
+  formHandler('#new',async fields=>{
+    await api('/galleries','POST',fields);
+    if(account!==accountGeneration||!me)return;
+    if(generation!==photoViewerGeneration){toast('Galleriet er oprettet.');return;}
+    M.close();await refreshGalleryView('galleries');
+    if(account===accountGeneration&&me)toast('Galleriet er oprettet.');
+  });
+}
+function galleryRequestActive(generation,account,requestView,requestGallery){
+  return generation===navigationGeneration&&account===accountGeneration&&view===requestView&&current===requestGallery&&!!me;
+}
+function navigateView(nextView){
+  if(['galleries','timeline','favorites'].includes(nextView))return refreshGalleryView(nextView);
+  navigationGeneration++;photoViewerGeneration++;stopLycheeView();view=nextView;current=null;
+  return render().catch(error=>toast(error.message));
+}
+async function refreshGalleryView(nextView='galleries'){
+  const generation=++navigationGeneration,account=accountGeneration;
+  photoViewerGeneration++;stopLycheeView();view=nextView;current=null;photos=[];permissions={};galleries=[];
+  if(M.open)M.close();
+  const content=$('#content');content.innerHTML='<p role="status">Henter dine gallerier…</p>';
+  try{
+    const list=await api('/galleries');
+    if(!galleryRequestActive(generation,account,nextView,null))return;
+    if(!Array.isArray(list))throw Error('Serveren kunne ikke bekræfte dine gallerier.');
+    galleries=list;await render();
+  }catch(error){
+    if(!galleryRequestActive(generation,account,nextView,null))return;
+    galleries=[];photos=[];permissions={};
+    content.innerHTML='<div class="panel"><h2>Gallerierne kunne ikke hentes</h2><p class="error" role="alert">'+esc(error.message)+'</p><button id="gallery-retry" type="button">Prøv igen</button></div>';
+    $('#gallery-retry').onclick=()=>refreshGalleryView(nextView);
+  }
+}
+async function collectionView(){
+  const generation=navigationGeneration,account=accountGeneration,requestView=view,content=$('#content');
+  photos=[];content.innerHTML='<p role="status">Henter dine billeder…</p>';
+  const results=await Promise.all(galleries.map(async gallery=>{
+    try{return{gallery_id:gallery.id,photos:(await api('/galleries/'+gallery.id+'/photos')).photos};}
+    catch(error){if(error.status===403||error.status===404)return{gallery_id:gallery.id,photos:[],revoked:true};throw error;}
+  }));
+  if(!galleryRequestActive(generation,account,requestView,null))return;
+  const revoked=new Set(results.filter(result=>result.revoked).map(result=>result.gallery_id));
+  galleries=galleries.filter(gallery=>!revoked.has(gallery.id));photos=results.flatMap(result=>result.photos);
+  if(view==='favorites')photos=photos.filter(photo=>photo.favorite);
+  photos.sort((a,b)=>(b.taken||b.uploaded).localeCompare(a.taken||a.uploaded));
+  content.innerHTML=`<div class="heading"><div><div class="eyebrow">${view==='timeline'?'På tværs af gallerier':'Dine udvalgte øjeblikke'}</div><h1>${view==='timeline'?'Tidslinjen':'Favoritter'}</h1><p class="muted" id="photo-count">${photos.length} billeder, du har adgang til</p></div></div><div id="photo-grid" class="photo-grid"></div>`;
+  drawPhotos(photos);
+}
+async function galleryAccessLost(){
+  const account=accountGeneration;await refreshGalleryView('galleries');
+  if(account===accountGeneration&&me&&view==='galleries'&&!current)toast('Du har ikke længere adgang til dette galleri.');
+}
+async function openGallery(id){
+  const gallery=galleries.find(gallery=>gallery.id===id);if(!gallery)return refreshGalleryView('galleries');
+  navigationGeneration++;photoViewerGeneration++;view='galleries';current=gallery;
+  try{await render();}catch(error){$('#content').innerHTML='<p class="error" role="alert">'+esc(error.message)+'</p>';}
+}
+async function galleryView(){
+  const requestGallery=current,generation=navigationGeneration,account=accountGeneration,requestView=view,content=$('#content');
+  photos=[];permissions={};content.innerHTML='<p role="status">Henter billeder…</p>';
+  let result;
+  try{result=await api('/galleries/'+requestGallery.id+'/photos');}
+  catch(error){
+    if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
+    if(error.status===403||error.status===404){await galleryAccessLost();return;}
+    throw error;
+  }
+  if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
+  photos=result.photos;permissions=result.permissions;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted">${esc(requestGallery.description)} · <span id="gallery-media-count">${photos.length} billeder</span></p></div>${permissions.upload?'<button id="upload">＋ Tilføj billeder</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp" hidden>':''}</div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><div id="upload-status" role="status"></div><div id="photo-grid" class="photo-grid"></div>`;
+  $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
+  const filter=()=>{const q=$('#search-photo').value.toLowerCase(),key=$('#sort').value;drawPhotos(photos.filter(photo=>[photo.title,photo.place,photo.uploader_name].join(' ').toLowerCase().includes(q)).sort((a,b)=>(b[key]||'').localeCompare(a[key]||'')));};
+  $('#search-photo').oninput=filter;$('#sort').onchange=filter;
+  if($('#upload')){
+    const upload=$('#upload'),status=$('#upload-status');upload.onclick=()=>$('#files').click();
+    $('#files').onchange=async event=>{
+      const files=[...event.target.files],errors=[];upload.disabled=true;
+      for(let i=0;i<files.length;i++){
+        status.textContent=`Uploader ${i+1} af ${files.length}: ${files[i].name}`;
+        const form=new FormData();form.append('file',files[i]);
+        try{await api('/galleries/'+requestGallery.id+'/photos','POST',form);}catch(error){errors.push(files[i].name+': '+error.message);}
+      }
+      if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
+      await galleryView();
+      const list=await api('/galleries');if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
+      galleries=list;toast(errors.length?errors.join(' · '):`${files.length} billeder uploadet`);
+    };
+  }
+}
 function date(p){return p.taken?(p.precision==='circa'?'ca. ':'')+p.taken.replace('T',' kl. '):'Dato ukendt'}
 function photoPath(p){return BASE+'/api/photos/'+encodeURIComponent(String(p.id??''))}
 function photoMedia(p,rights){
@@ -93,7 +184,7 @@ function bindPhotoVideo(p,rights){
   if(!player||!message)return;
   player.addEventListener('error',()=>{message.textContent='Browseren kan ikke afspille denne video.'+(rights.download&&rights.gps?' Hent originalen for at åbne den i en anden afspiller.':' Prøv en anden browser.');message.hidden=false});
 }
-function drawPhotos(ps){$('#photo-grid').innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span></button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>showPhoto(b.dataset.photo))}
+function drawPhotos(ps){$('#photo-grid').innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span></button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>showPhoto(b.dataset.photo).catch(error=>toast(error.message)))}
 // Keep the thumbnail elements and their loaded image bytes when a favorite is
 // changed in the viewer. Closing a dialog never needs to rebuild this grid.
 function updatePhotoCard(p){
@@ -118,13 +209,60 @@ function lycheePhotoProvenance(p){
   const fields=[['Lychee-ejer',sourceText(source.owner_name)||'Ikke angivet'],['Billed-id i Lychee',sourceText(source.source_photo_id)],['Beskrivelse',sourceText(source.description)],['Tags',sourceText(source.tags)],['Registreret i Lychee',sourceText(source.created_at)],['Optagetid i Lychee',sourceText(source.taken_at)],['Oprindelig tidszone',sourceText(source.taken_at_orig_tz)]];
   return `<details class="lychee-provenance"><summary>Fra Lychee${source.version?' '+esc(source.version):''}</summary><p class="muted">Registreringer bevaret ved import. Lychee-ejeren er ikke nødvendigvis den oprindelige uploader. I LexGalleri står administratoren, der udførte overførslen, som uploader.</p><dl>${fields.filter(([,value])=>value!=='').map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl></details>`;
 }
+function photoDeleteMarkup(photo){
+  if(!me?.admin||serverCapabilities.media_delete!==true)return '';
+  const video=photo.mime==='video/mp4';
+  return `<div class="media-delete"><button class="secondary" id="delete-photo" type="button">${video?'Slet video':'Slet billede'}</button><div id="delete-photo-confirm" class="media-delete-confirm" hidden><p>Vil du slette ${video?'videoen':'billedet'} <strong>${esc(photo.title)}</strong> fra dette galleri? Handlingen kan ikke fortrydes her.</p><p id="delete-photo-status" role="status" aria-live="polite" aria-atomic="true"></p><div class="media-delete-actions"><button id="delete-photo-submit" class="danger" type="button">Slet fra dette galleri</button><button id="delete-photo-cancel" class="secondary" type="button">Annullér</button></div></div></div>`;
+}
+function removeDeletedPhoto(photo,gallerySnapshot){
+  photos=photos.filter(item=>item.id!==photo.id);
+  const gallery=galleries.find(item=>item.id===photo.gallery_id);
+  if(gallery){
+    if(gallery===gallerySnapshot)gallery.count=Math.max(0,(Number(gallery.count)||0)-1);
+    if(gallery.cover===photo.id)gallery.cover=photos.filter(item=>item.gallery_id===photo.gallery_id).sort((a,b)=>(b.uploaded||'').localeCompare(a.uploaded||''))[0]?.id||null;
+  }
+  for(const button of document.querySelectorAll('[data-photo]'))if(button.dataset.photo===photo.id)button.closest('.photo')?.remove();
+  const count=$('#photo-count');if(count)count.textContent=photos.length+' billeder, du har adgang til';
+  const galleryCount=$('#gallery-media-count');if(galleryCount&&current?.id===photo.gallery_id)galleryCount.textContent=photos.length+' billeder';
+  for(const button of document.querySelectorAll('[data-gallery]')){
+    if(button.dataset.gallery!==photo.gallery_id||!gallery)continue;
+    const badge=$('.card-body .badge',button);if(badge)badge.textContent=gallery.count+' billeder';
+    const cover=$('img.cover',button);
+    if(cover){if(gallery.cover)cover.src=BASE+'/api/photos/'+encodeURIComponent(gallery.cover)+'/image';else cover.outerHTML='<div class="cover placeholder">◈</div>';}
+  }
+  const grid=$('#photo-grid');if(grid&&!grid.querySelector('[data-photo]'))grid.innerHTML='<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';
+}
+function bindPhotoDelete(photo){
+  if(!me?.admin||serverCapabilities.media_delete!==true)return;
+  const trigger=$('#delete-photo');if(!trigger)return;
+  const confirmation=$('#delete-photo-confirm'),submit=$('#delete-photo-submit'),cancel=$('#delete-photo-cancel'),status=$('#delete-photo-status');
+  const generation=photoViewerGeneration,account=accountGeneration;let pending=false;
+  trigger.onclick=()=>{confirmation.hidden=false;trigger.hidden=true;status.textContent='';confirmation.scrollIntoView?.({block:'nearest'});submit.focus?.();};
+  cancel.onclick=()=>{if(pending)return;confirmation.hidden=true;trigger.hidden=false;trigger.focus?.({preventScroll:true});};
+  submit.onclick=async()=>{
+    if(pending)return;pending=true;
+    const gallerySnapshot=galleries.find(item=>item.id===photo.gallery_id);
+    const buttons=Array.from(M.querySelectorAll('button')).filter(button=>button.id!=='close-modal').map(button=>[button,button.disabled]);
+    buttons.forEach(([button])=>button.disabled=true);confirmation.setAttribute('aria-busy','true');status.textContent='Sletter…';status.classList.remove('error');
+    try{
+      const result=await api('/photos/'+encodeURIComponent(photo.id),'DELETE');
+      if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte sletningen.');
+      if(account!==accountGeneration||!me)return;
+      removeDeletedPhoto(photo,gallerySnapshot);
+      if(generation===photoViewerGeneration&&M.open)M.close();
+      toast(photo.mime==='video/mp4'?'Videoen er slettet fra galleriet.':'Billedet er slettet fra galleriet.');
+    }catch(error){if(generation===photoViewerGeneration&&account===accountGeneration){status.textContent='Kunne ikke slette: '+(error?.message||'Prøv igen.');status.classList.add('error');}}
+    finally{pending=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);confirmation.setAttribute('aria-busy','false');}
+  };
+}
 function photoDetails(p,rights){
-  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div><h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}</div>`;
+  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div><h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}${photoDeleteMarkup(p)}</div>`;
 }
 async function showPhoto(id){
-  const generation=++photoViewerGeneration,requestView=view,requestGallery=current,p=photos.find(p=>p.id===id);if(!p)return;
-  const b=await api('/galleries/'+p.gallery_id+'/photos');
-  if(generation!==photoViewerGeneration||view!==requestView||current!==requestGallery)return;
+  const generation=++photoViewerGeneration,account=accountGeneration,requestView=view,requestGallery=current,p=photos.find(p=>p.id===id);if(!p)return;
+  let b;try{b=await api('/galleries/'+p.gallery_id+'/photos');}
+  catch(error){if(generation!==photoViewerGeneration||account!==accountGeneration||view!==requestView||current!==requestGallery)return;if(error.status===403||error.status===404){await galleryAccessLost();return;}throw error;}
+  if(generation!==photoViewerGeneration||account!==accountGeneration||view!==requestView||current!==requestGallery)return;
   const rights=b.permissions,previousFocus=document.activeElement?.id;
   modal('Billedvisning',`<div class="viewer"><div class="photo-stage">${photoMedia(p,rights)}<button class="photo-nav photo-prev" id="prev" type="button" aria-label="Forrige billede" title="Forrige billede"><span aria-hidden="true">‹</span></button><button class="photo-nav photo-next" id="next" type="button" aria-label="Næste billede" title="Næste billede"><span aria-hidden="true">›</span></button></div>${photoDetails(p,rights)}</div>`,true);
   bindPhotoVideo(p,rights);
@@ -139,6 +277,7 @@ async function showPhoto(id){
   const navigate=async index=>{if(index<0||index>=sequence.length)return;try{await showPhoto(sequence[index])}catch(error){toast(error.message)}};
   prev.onclick=()=>navigate(i-1);next.onclick=()=>navigate(i+1);photoViewerNavigation={prev,next};
   if($('#edit-photo'))$('#edit-photo').onclick=()=>editPhoto(p);
+  bindPhotoDelete(p);
   // Replacing an open dialog removes its focused button. Restore focus inside
   // the viewer so consecutive arrow-key presses continue to reach the dialog.
   const focused=['prev','next','photo-info-toggle'].includes(previousFocus)?$('#'+previousFocus):infoButton;
@@ -225,7 +364,34 @@ function galleryAccessForm(user,data){
   });
 }
 function inviteForm(){modal('Invitér en gæst',`<div class="dialog-content"><form id="invite-form"><label>Navn<input name="name" required></label><label>E-mail<input type="email" name="email" required></label><label>Galleri<select name="gallery_id" required>${galleries.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></label>${[['upload','Må uploade billeder'],['download','Må hente originaler'],['gps','Må se præcise GPS-positioner']].map(([k,n])=>`<label class="check"><input type="checkbox" name="${k}">${n}</label>`).join('')}<div class="error"></div><button type="submit">Opret invitationslink</button></form></div>`);formHandler('#invite-form',async b=>{for(const k of ['upload','download','gps'])b[k]=b[k]==='on';const v=await api('/admin/invitations','POST',b);modal('Invitationen er klar',`<div class="dialog-content"><p>Send dette link privat til gæsten. Det kan bruges én gang og udløber efter 7 dage.</p><label>Personligt invitationslink<input id="invite-link" readonly value="${esc(location.origin+v.path)}"></label><button id="copy-link">Kopiér link</button></div>`);$('#copy-link').onclick=async()=>{try{await navigator.clipboard.writeText($('#invite-link').value);toast('Link kopieret')}catch{$('#invite-link').select()}}})}
-async function designView(){themes=await api('/admin/themes');$('#content').innerHTML=`<div class="heading"><div><div class="eyebrow">Gør arkivet til jeres</div><h1>Design & udtryk</h1><p class="muted">Installér en designpakke, prøv den, og aktivér den for hele familien.</p></div><button id="theme-upload">＋ Upload designpakke</button><input id="theme-file" type="file" accept=".json,.zip" hidden></div><div class="grid">${themes.map(x=>`<article class="card"><div class="theme-swatch" style="background:${x.theme.colors.background}">${Object.values(x.theme.colors).map(v=>`<span style="background:${v};border:1px solid #8883"></span>`).join('')}</div><div class="theme-card"><h2>${esc(x.theme.name)}</h2><p class="muted">${x.theme.font==='serif'?'Klassisk':'Enkel'} typografi · ${x.theme.radius}px hjørner</p><button class="secondary" data-preview="${x.id}">Forhåndsvis</button><button data-activate="${x.id}">Aktivér</button></div></article>`).join('')}</div><div class="panel" style="margin-top:25px"><h2>Jeres egen designpakke</h2><p>En JSON-fil eller en ZIP med én fil: <code>theme.json</code>. Pakken styrer fire farver, skrifttype, hjørner og afstand. Admin kan skifte tilbage til standardtemaet når som helst.</p><button id="download-theme" class="secondary">↓ Hent eksempelpakke</button> <button id="cancel-preview" class="secondary">Gendan aktivt design</button><p class="muted" style="margin-top:15px">Forhåndsvisning gælder kun denne side, indtil du aktiverer temaet.</p></div>`;document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>{applyTheme(themes.find(t=>t.id===b.dataset.preview).theme);toast('Forhåndsvisning · ikke aktiveret')});document.querySelectorAll('[data-activate]').forEach(b=>b.onclick=async()=>{try{await api('/admin/themes/'+b.dataset.activate+'/activate','POST');applyTheme(await api('/theme'));toast('Designet er aktiveret for alle')}catch(e){toast(e.message)}});$('#cancel-preview').onclick=async()=>applyTheme(await api('/theme'));$('#theme-upload').onclick=()=>$('#theme-file').click();$('#theme-file').onchange=async e=>{if(!e.target.files[0])return;const f=new FormData();f.append('file',e.target.files[0]);try{await api('/admin/themes','POST',f);await designView();toast('Designpakke installeret. Klar til forhåndsvisning.')}catch(err){toast(err.message)}};$('#download-theme').onclick=()=>{const blob=new Blob([JSON.stringify(themes[0].theme,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='theme.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}}
+function themeDeleteMarkup(packageItem){
+  if(!me?.admin||serverCapabilities.theme_delete!==true||packageItem.id==='default')return '';
+  return `<div class="theme-delete"><button class="secondary" data-theme-delete="${esc(packageItem.id)}" type="button">Slet pakke</button><div class="theme-delete-confirm" data-theme-delete-confirm="${esc(packageItem.id)}" hidden><p>Vil du slette designpakken <strong>${esc(packageItem.theme.name)}</strong>? Hvis pakken er aktiv, skiftes der til standarddesignet. Sletningen kan ikke fortrydes her.</p><p class="theme-delete-status" data-theme-delete-status="${esc(packageItem.id)}" role="status" aria-live="polite" aria-atomic="true"></p><div class="theme-delete-actions"><button class="danger" data-theme-delete-submit="${esc(packageItem.id)}" type="button">Slet pakken</button><button class="secondary" data-theme-delete-cancel="${esc(packageItem.id)}" type="button">Annullér</button></div></div></div>`;
+}
+function bindThemeDelete(){
+  if(!me?.admin||serverCapabilities.theme_delete!==true)return;
+  document.querySelectorAll('[data-theme-delete]').forEach(trigger=>{
+    const card=trigger.closest('[data-theme-card]'),id=trigger.dataset.themeDelete,confirmation=$('[data-theme-delete-confirm]',card),submit=$('[data-theme-delete-submit]',card),cancel=$('[data-theme-delete-cancel]',card),status=$('[data-theme-delete-status]',card);
+    let pending=false;
+    trigger.onclick=()=>{confirmation.hidden=false;trigger.hidden=true;status.textContent='';confirmation.scrollIntoView?.({block:'nearest'});submit.focus?.();};
+    cancel.onclick=()=>{if(pending)return;confirmation.hidden=true;trigger.hidden=false;trigger.focus?.({preventScroll:true});};
+    submit.onclick=async()=>{
+      if(pending)return;pending=true;
+      const account=accountGeneration,buttons=Array.from(card.querySelectorAll('button')).map(button=>[button,button.disabled]);
+      buttons.forEach(([button])=>button.disabled=true);confirmation.setAttribute('aria-busy','true');status.textContent='Sletter designpakken…';status.classList.remove('error');
+      try{
+        const result=await api('/admin/themes/'+encodeURIComponent(id),'DELETE');
+        if(result?.ok!==true||!result.theme||typeof result.theme!=='object')throw Error('Serveren kunne ikke bekræfte sletningen.');
+        if(account!==accountGeneration||!me)return;
+        themes=themes.filter(item=>item.id!==id);card.remove();applyTheme(result.theme);
+        const message=result.reset_to_default?'Pakken er slettet. Standarddesignet er nu aktivt.':'Pakken er slettet. Det aktive design er bevaret.';
+        const feedback=$('#theme-delete-feedback');if(feedback)feedback.textContent=message;toast(message);
+      }catch(error){if(account===accountGeneration){status.textContent='Kunne ikke slette designpakken: '+(error?.message||'Prøv igen.');status.classList.add('error');}}
+      finally{pending=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);confirmation.setAttribute('aria-busy','false');}
+    };
+  });
+}
+async function designView(){const generation=navigationGeneration,account=accountGeneration,requestView=view,requestGallery=current;const list=await api('/admin/themes');if(!galleryRequestActive(generation,account,requestView,requestGallery))return;themes=list;$('#content').innerHTML=`<div class="heading"><div><div class="eyebrow">Gør arkivet til jeres</div><h1>Design & udtryk</h1><p class="muted">Installér en designpakke, prøv den, og aktivér den for hele familien.</p></div><button id="theme-upload">＋ Upload designpakke</button><input id="theme-file" type="file" accept=".json,.zip" hidden></div><p id="theme-delete-feedback" class="theme-delete-feedback" role="status" aria-live="polite" aria-atomic="true"></p><div class="grid" id="theme-grid">${themes.map(x=>`<article class="card" data-theme-card="${esc(x.id)}"><div class="theme-swatch" style="background:${x.theme.colors.background}">${Object.values(x.theme.colors).map(v=>`<span style="background:${v};border:1px solid #8883"></span>`).join('')}</div><div class="theme-card"><h2>${esc(x.theme.name)}</h2><p class="muted">${x.theme.font==='serif'?'Klassisk':'Enkel'} typografi · ${x.theme.radius}px hjørner</p><button class="secondary" data-preview="${x.id}">Forhåndsvis</button><button data-activate="${x.id}">Aktivér</button>${themeDeleteMarkup(x)}</div></article>`).join('')}</div><div class="panel" style="margin-top:25px"><h2>Jeres egen designpakke</h2><p>En JSON-fil eller en ZIP med én fil: <code>theme.json</code>. Pakken styrer fire farver, skrifttype, hjørner og afstand. Admin kan skifte tilbage til standardtemaet når som helst.</p><button id="download-theme" class="secondary">↓ Hent eksempelpakke</button> <button id="cancel-preview" class="secondary">Gendan aktivt design</button><p class="muted" style="margin-top:15px">Forhåndsvisning gælder kun denne side, indtil du aktiverer temaet.</p></div>`;bindThemeDelete();document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>{applyTheme(themes.find(t=>t.id===b.dataset.preview).theme);toast('Forhåndsvisning · ikke aktiveret')});document.querySelectorAll('[data-activate]').forEach(b=>b.onclick=async()=>{try{await api('/admin/themes/'+b.dataset.activate+'/activate','POST');applyTheme(await api('/theme'));toast('Designet er aktiveret for alle')}catch(e){toast(e.message)}});$('#cancel-preview').onclick=async()=>applyTheme(await api('/theme'));$('#theme-upload').onclick=()=>$('#theme-file').click();$('#theme-file').onchange=async e=>{if(!e.target.files[0])return;const f=new FormData();f.append('file',e.target.files[0]);try{await api('/admin/themes','POST',f);await designView();toast('Designpakke installeret. Klar til forhåndsvisning.')}catch(err){toast(err.message)}};$('#download-theme').onclick=()=>{const blob=new Blob([JSON.stringify(themes[0].theme,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='theme.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}}
 // Lychee import is driven in small, explicitly requested batches in this tab.
 // Leaving this view invalidates the loop; an already requested batch may finish.
 let lycheeGeneration=0,lycheeSession=null;

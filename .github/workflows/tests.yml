@@ -42,6 +42,9 @@ jobs:
         run: |
           php tests/run.php
           php tests/account-security.php
+          php tests/media-delete.php
+          php tests/theme-delete.php
+          php tests/gallery-create.php
           php tests/routing.php
           php tests/lychee-import.php
           php tests/lychee-move.php
