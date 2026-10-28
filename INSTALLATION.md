@@ -70,9 +70,16 @@ Du kan enten overføre de offentlige filer selv med FTPS eller lade [GitHub-work
 /home/lexandkk/public_html/LexGalleri/
 ├── .htaccess
 ├── index.php
+├── manifest.webmanifest
+├── service-worker.js
 └── static/
     ├── app.js
-    └── style.css
+    ├── style.css
+    ├── pwa.js
+    ├── icon.svg
+    ├── icon-192.png
+    ├── icon-512.png
+    └── apple-touch-icon.png
 ```
 
 Det er **indholdet af `public/`**, der lægges i målmappen — ikke en ekstra `public/`-mappe og ikke hele repositoryet. Husk den skjulte `.htaccess`. Offentlige mapper: normalt 755. Offentlige filer: normalt 644.
@@ -89,9 +96,15 @@ Opret et testgalleri, upload et ufølsomt testfoto, og prøv en gæsteinvitation
 
 ## 6. Opdatering og backup
 
-GitHub/vores FTPS-konto opdaterer **kun de fire offentlige filer**. Hvis en ny kodeversion også ændrer `private/app.php` eller `private/schema.sql`, får du en vejledning og lægger selv de relevante private filer ind fra samme version. Nye databaseskemaer skal have særskilt migreringsvejledning; upload af schema.sql alene opgraderer ikke en allerede installeret database.
+GitHub/vores FTPS-konto opdaterer **kun de elleve offentlige appfiler** i oversigten ovenfor. Hvis en ny kodeversion også ændrer `private/app.php` eller `private/schema.sql`, får du en vejledning og lægger selv de relevante private filer ind fra samme version. Nye databaseskemaer skal have særskilt migreringsvejledning; upload af schema.sql alene opgraderer ikke en allerede installeret database.
+
+Til webapp-opdateringen erstatter du selv [private/app.php](private/app.php) på `/home/lexandkk/lexgalleri-private/app.php`. Den tilføjer henvisningerne til manifest, ikoner og webappens script. Behold din udfyldte `config/config.php`, importkonfiguration, database og private medier. Der kræves ingen ny SQL-migrering. Hold en eventuel import pauset, indtil offentlige og private programfiler er fra samme version, og genoptag derefter samme job.
 
 Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**. SQL alene indeholder ingen billeder. Hold appen ude af brug under manuel samlet backup/gendannelse, opbevar kopier privat/krypteret, og afprøv gendannelse separat. Sessionsmappen kan udelades; brugerne skal så logge ind igen efter gendannelse.
+
+## Installér webappen på mobil eller pc
+
+Når begge dele er opdateret, åbner du galleriets HTTPS-adresse i browseren og opdaterer siden. Følg [WEBAPP.md](WEBAPP.md) for **Installér app** på Android/pc eller **Føj til hjemmeskærm** i Safari på iPhone/iPad. Den installerede webapp bruger de samme konti og gallerirettigheder; du opretter ingen ny database eller konto. Visning af billeder og videoer kræver internetforbindelse.
 
 ## Import fra Lychee 6.6.12
 

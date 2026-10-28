@@ -310,13 +310,13 @@ try {
         if(!is_dir($private.'/'.$folder) && !mkdir($private.'/'.$folder,0700,true))throw new RuntimeException('Privat mappe kan ikke oprettes');
     }
     header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');header('X-Frame-Options: DENY');header('Cache-Control: no-store');
-    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     $uri=parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);$method=$_SERVER['REQUEST_METHOD'];
     if(!is_string($uri) || ($uri!==$base && !str_starts_with($uri,$base.'/')))fail(404,'Ikke fundet');
     $path=substr($uri,strlen($base));
     if($path==='' || $path==='/') {
         header('Content-Type: text/html; charset=utf-8');$asset=htmlspecialchars($base,ENT_QUOTES,'UTF-8');
-        echo '<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#416c57"><title>LexGalleri · Vores fælles minder</title><link rel="stylesheet" href="'.$asset.'/static/style.css"><script src="'.$asset.'/static/app.js" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';exit;
+        echo '<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#416c57"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="LexGalleri"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>LexGalleri · Vores fælles minder</title><link rel="manifest" href="'.$asset.'/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="'.$asset.'/static/icon.svg"><link rel="apple-touch-icon" sizes="180x180" href="'.$asset.'/static/apple-touch-icon.png"><link rel="stylesheet" href="'.$asset.'/static/style.css?v=20261028-pwa"><script src="'.$asset.'/static/app.js?v=20261028-pwa" defer></script><script src="'.$asset.'/static/pwa.js?v=20261028-pwa" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';exit;
     }
     if(!str_starts_with($path,'/api/'))fail(404,'Ikke fundet');
     if((int)($_SERVER['CONTENT_LENGTH']??0)>26*1024*1024)fail(413,'Upload er for stor');

@@ -27,5 +27,5 @@ LFTP_PASSWORD="$FTPS_PASSWORD" lftp --env-password -u "$FTPS_USERNAME" -p "$FTPS
 if [[ "${1:-}" == "--diagnose" ]]; then
   echo 'FTPS-login, TLS og offentlig kontorod kontrolleret. Ingen filer er overført.'
 else
-  echo 'De fire offentlige kodefiler er overført. Kontrollér HTTPS-adressen og log ind.'
+  echo 'De offentlige appfiler er overført. Kontrollér HTTPS-adressen og log ind.'
 fi

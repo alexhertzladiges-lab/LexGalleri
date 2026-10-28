@@ -16,7 +16,21 @@ export function connection(env) {
 // Every destination is relative to the FTP account root. The owner restricts that
 // account to /home/lexandkk/public_html/LexGalleri in the hosting control panel.
 // There is no private-directory parameter, probe, directory traversal or upload.
-const publicFiles = ['static/style.css', 'static/app.js', '.htaccess', 'index.php'];
+// App metadata and icons activate before the scripts and entry point that use
+// them. This is an explicit allowlist, never a recursive public-directory sync.
+const publicFiles = [
+  'static/icon.svg',
+  'static/icon-192.png',
+  'static/icon-512.png',
+  'static/apple-touch-icon.png',
+  'manifest.webmanifest',
+  'service-worker.js',
+  'static/pwa.js',
+  'static/style.css',
+  'static/app.js',
+  '.htaccess',
+  'index.php',
+];
 const q = s => '"' + s + '"';
 export function plan(env, root = process.cwd(), diagnostic = false) {
   connection(env);
@@ -52,7 +66,7 @@ export function plan(env, root = process.cwd(), diagnostic = false) {
     f.staged = f.target.slice(0, slash + 1) + '.lexgalleri-' + tag + '-' + f.target.slice(slash + 1);
     lines.push('put ' + q(f.source) + ' -o ' + q(f.staged), 'chmod 644 ' + q(f.staged));
   }
-  // Stage all four public files before activation; no forced rename or deletion.
+  // Stage every allowlisted public file before activation; no forced rename or deletion.
   for (const f of files) lines.push('mv ' + q(f.staged) + ' ' + q(f.target));
   lines.push('bye');
   return lines.join('\n') + '\n';

@@ -86,7 +86,7 @@ Importtabellerne tilføjes med disse filer:
 
 Skift derefter `'enabled' => false` til `'enabled' => true` i din private `config/lychee-import.php`.
 
-De offentlige og private programfiler skal være fra samme kodeversion. [FTPS-workflowet](DEPLOYMENT.md) overfører fortsat kun `index.php`, `.htaccess`, `static/app.js` og `static/style.css`. Det overfører hverken den private PHP-kode, konfigurationen eller SQL-migreringen. Når de offentlige filer er deployet, installerer du selv de tilhørende private programfiler. **Lad importen være pauset eller endnu ikke startet, indtil begge dele er opdateret**, og opdatér derefter status.
+De offentlige og private programfiler skal være fra samme kodeversion. [FTPS-workflowet](DEPLOYMENT.md) overfører kun de elleve offentlige appfiler, inklusive webappens manifest, service worker og ikoner. Det overfører hverken den private PHP-kode, konfigurationen eller SQL-migreringen. Når de offentlige filer er deployet, installerer du selv de tilhørende private programfiler. **Lad importen være pauset eller endnu ikke startet, indtil begge dele er opdateret**, og opdatér derefter status.
 
 ## 5. Lav prøvevisningen
 

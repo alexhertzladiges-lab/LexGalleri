@@ -1,0 +1,27 @@
+{
+  "id": "./",
+  "name": "LexGalleri",
+  "short_name": "LexGalleri",
+  "description": "Familiens private billeder og fælles minder.",
+  "lang": "da",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f2",
+  "theme_color": "#416c57",
+  "icons": [
+    {
+      "src": "static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
