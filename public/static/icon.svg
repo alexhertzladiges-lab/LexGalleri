@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LexGalleri</title>
+  <rect width="512" height="512" fill="#416c57"/>
+  <path d="M256 104 408 256 256 408 104 256Z" fill="#f7f6f2"/>
+  <path d="M256 147 365 256 256 365 147 256Z" fill="#416c57"/>
+  <path d="m181 284 54-59 40 39 31-29 38 49Z" fill="#f7f6f2"/>
+  <circle cx="284" cy="207" r="17" fill="#d8c9ad"/>
+</svg>

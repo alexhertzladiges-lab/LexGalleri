@@ -2,7 +2,7 @@
 
 Privat familiefotogalleri til et almindeligt PHP-webhotel. Denne version erstatter den tidligere Python/FastAPI-prototype. Der kræves ingen Python, Node, Composer, Docker eller vedvarende serverproces i drift.
 
-**Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan derefter overføre de fire offentlige kodefiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
+**Start med [INSTALLATION.md](INSTALLATION.md).** Du installerer selv private filer og konfiguration; vores FTPS-konto har kun adgang til den offentlige galleri-mappe. [Deploy offentlige filer fra GitHub via FTPS](DEPLOYMENT.md) kan overføre de offentlige appfiler med et klik. Koden er målrettet PHP 8.4 og MySQL 8 / MariaDB 10.6+. Frontend er almindelig JavaScript og CSS uden eksterne tjenester.
 
 Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og MP4-originaler uden eksport eller opgradering. Start med [Lychee-importvejledningen](LYCHEE-IMPORT.md); den kræver særskilt privat konfiguration og importtabeller i LexGalleris database, før du laver prøvevisningen.
 
@@ -15,6 +15,8 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 - Originaler bevares uændret. Download kræver både download- og GPS-adgang, fordi originalen kan indeholde GPS.
 - Redigér titel, sted, koordinater og datopræcision: tidspunkt, dag, måned, år, cirka år eller ukendt.
 - Tidslinje, søgning, favoritter og mobiltilpasset billedvisning.
+- Billeder åbnes oven på oversigten. Lukning bevarer miniaturer, søgning, sortering og position uden at genindlæse hele galleriet.
+- Installerbar webapp på mobil og pc med eget ikon og appvindue. Se [WEBAPP.md](WEBAPP.md); billeder og videoer kræver internetforbindelse.
 - Admin kan installere designpakker som JSON eller ZIP, forhåndsvise og aktivere dem for alle.
 - Første admin oprettes med en privat opsætningsnøgle. Installationen opretter selv databasens tabeller.
 - Sessionsfiler, billeder og konfiguration ligger uden for `public_html`.
@@ -42,7 +44,9 @@ Alle nye visuelle forslag, billeder og visualiseringer lægges i dette private G
 
 ## FTPS og private filer
 
-FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun `index.php`, `.htaccess`, `static/app.js` og `static/style.css`. Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages. Se [DEPLOYMENT.md](DEPLOYMENT.md).
+FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun de elleve offentlige kode-, manifest- og ikonfiler, som er oplistet i [DEPLOYMENT.md](DEPLOYMENT.md). Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages.
+
+Webapp-opdateringen kræver, at ejeren erstatter [private/app.php](private/app.php) med samme version som de offentlige filer. Behold eksisterende konfiguration, database og private medier; der er ingen SQL-migrering til webappen. Se [WEBAPP.md](WEBAPP.md) for opdatering og installation på telefonen.
 
 MP4-opdateringen kræver begge private programfiler: [app.php](private/app.php) og [lychee-import.php](private/lychee-import.php). Behold den udfyldte kildekonfiguration. Der er ingen ny SQL-migrering til MP4; flytning bruger fortsat `002` og `003`. Lad importen være pauset eller endnu ikke startet, indtil offentlige og private programfiler er opdateret til samme version. Et pauset job genoptages derefter som samme job. Se de præcise trin i [Lychee-importvejledningen](LYCHEE-IMPORT.md).
 
@@ -64,9 +68,13 @@ CI kører også `php tests/lychee-import.php` med samme isolerede testindstillin
 
 `node --test tests/ftps-client.test.mjs` kræver en lokal `lftp` og tester mappehåndtering mod en midlertidig FTP-testserver på localhost med syntetiske loginoplysninger. Den kontakter ikke webhotellet. CI installerer testklienten automatisk.
 
+`node --test tests/webapp.test.mjs` kontrollerer installation, appikoner og adskillelse mellem offlinebesked og private data. `node --test tests/webapp-browser.test.mjs` bruger Node 22+ og en lokal Chrome/Chromium til at kontrollere billedlukning, netværkskald, mobilvisning og webappen i en rigtig browser uden npm-pakker. Sæt eventuelt `TEST_BROWSER` til browserens sti. CI kræver browserkontrollen; lokalt springes den over, hvis ingen browser findes.
+
 ## Begrænsninger
 
-HEIC, direkte videoupload, import af andre videoformater end MP4, kortvisning, kommentarer, personmærkning, offline/PWA, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb, MFA og adgangskodegendannelse er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt.
+HEIC, direkte videoupload, import af andre videoformater end MP4, kortvisning, kommentarer, personmærkning, offlineadgang til familiearkivet, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb, MFA og adgangskodegendannelse er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt.
+
+Webappen kræver HTTPS og understøttelse i browseren. Den installeres fra browseren og distribueres ikke gennem App Store eller Google Play. Uden forbindelse vises kun en generisk forbindelsesbesked; privat HTML, API-svar, billeder og videoer gemmes ikke i service workerens offlinecache.
 
 Billedbehandling sker under upload og er begrænset af webhotellets PHP-hukommelse. Billedoriginaler må højst være 25 MB og 20 megapixel; den faktiske grænse kan være lavere ved et lavt memory_limit. Et almindeligt 12 MP mobilfoto bør kunne behandles med 256 MB PHP-hukommelse. Store mobilfotos kan kræve en nedskaleret eksport. Kameraets optagetid bevares uden en antaget tidszone; uploadtid er UTC.
 

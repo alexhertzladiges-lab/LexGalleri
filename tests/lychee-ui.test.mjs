@@ -212,9 +212,86 @@ test('closing or replacing the modal pauses video playback',async()=>{
  const f=await mediaFixture({video:true,download:true,gps:true});let pauses=0,renders=0;
  f.elements.get('#photo-video').pause=()=>pauses++;f.ctx.testRender=async()=>renders++;f.run('render=globalThis.testRender');
  f.elements.get('#modal').listeners.get('close')();
- assert.equal(pauses,1);assert.equal(renders,1);
+ assert.equal(pauses,1);assert.equal(renders,0);
  f.run("modal('En anden dialog','<p>Indhold</p>')");
  assert.equal(pauses,2);
+});
+test('closing the photo overlay keeps loaded thumbnails, search, sort and scroll without requests',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg'});
+ f.run("view='galleries';current={id:'gallery-1'}");
+ const grid=f.elements.get('#photo-grid')||f.run("$('#photo-grid')"),search=f.run("$('#search-photo')"),sort=f.run("$('#sort')");
+ const image={src:'/LexGalleri/api/photos/photo-1/image',complete:true};grid.innerHTML='<article>Loaded thumbnail</article>';grid.images=[image];grid.scrollTop=830;search.value='sommer';sort.value='uploaded';
+ let renders=0;f.ctx.testRender=async()=>renders++;f.run('render=globalThis.testRender');const initialCalls=f.calls.length;
+ f.elements.get('#modal').listeners.get('close')();
+ assert.equal(renders,0);assert.equal(f.calls.length,initialCalls);
+ assert.equal(f.elements.get('#photo-grid'),grid);assert.equal(grid.images[0],image);assert.equal(grid.innerHTML,'<article>Loaded thumbnail</article>');
+ assert.equal(search.value,'sommer');assert.equal(sort.value,'uploaded');assert.equal(grid.scrollTop,830);
+});
+test('the close button uses the same lightweight close behavior as native Escape',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true});let closes=0,renders=0;
+ f.ctx.testRender=async()=>renders++;f.run('render=globalThis.testRender');const initialCalls=f.calls.length;
+ f.elements.get('#modal').close=()=>{closes++;f.elements.get('#modal').listeners.get('close')()};
+ f.elements.get('#close-modal').onclick();
+ assert.equal(closes,1);assert.equal(renders,0);assert.equal(f.calls.length,initialCalls);
+});
+test('toggling a favorite updates its caption without replacing the loaded image or viewer',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg'});f.run("view='galleries';current={id:'gallery-1'}");
+ const title={textContent:''},details={textContent:''},caption={children:[title,details]},image={complete:true};
+ const button={dataset:{photo:'photo-1'},querySelector:q=>q==='.caption'?caption:null,image};
+ f.ctx.document.querySelectorAll=q=>q==='[data-photo]'?[button]:[];
+ const modal=f.elements.get('#modal'),html=modal.innerHTML;let replacements=0;
+ Object.defineProperty(modal,'innerHTML',{get:()=>html,set:()=>replacements++});
+ await f.elements.get('#favorite').onclick();
+ assert.equal(f.ctx.photo.favorite,true);assert.equal(details.textContent,'♥ 2026');assert.equal(title.textContent,'Video fra haven');
+ assert.equal(button.image,image);assert.equal(replacements,0);assert.equal(f.calls.length,2);assert.equal(f.calls[1][0],'/photos/photo-1/favorite');
+ assert.equal(f.elements.get('#favorite').textContent,'♥ Fjern favorit');
+});
+test('unfavoriting removes only that card on close and leaves the other thumbnail loaded',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{mime:'image/jpeg',favorite:true});
+ f.ctx.other=mediaPhoto({id:'photo-2',favorite:true});f.run("view='favorites';current=null;photos.push(other)");
+ const removed=[],image1={complete:true},image2={complete:true};
+ const buttons=['photo-1','photo-2'].map((id,i)=>({dataset:{photo:id},image:i?image2:image1,querySelector:()=>({children:[{},{}]}),closest:()=>({remove:()=>removed.push(id)})}));
+ f.ctx.document.querySelectorAll=q=>q==='[data-photo]'?buttons:[];
+ const grid=f.run("$('#photo-grid')");grid.innerHTML='Two existing thumbnail nodes';
+ await f.elements.get('#favorite').onclick();assert.deepEqual(removed,[]);
+ f.elements.get('#modal').listeners.get('close')();
+ assert.deepEqual(removed,['photo-1']);assert.equal(buttons[1].image,image2);assert.equal(grid.innerHTML,'Two existing thumbnail nodes');
+ assert.equal(f.run('photos.length'),1);assert.equal(f.calls.length,2);assert.equal(f.elements.get('#photo-count').textContent,'1 billeder, du har adgang til');
+});
+test('a favorite toggled off and on before closing retains the same card',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true},{favorite:true});f.run("view='favorites';current=null");
+ let removed=0;const button={dataset:{photo:'photo-1'},querySelector:()=>({children:[{},{}]}),closest:()=>({remove:()=>removed++})};
+ f.ctx.document.querySelectorAll=q=>q==='[data-photo]'?[button]:[];
+ await f.elements.get('#favorite').onclick();await f.elements.get('#favorite').onclick();
+ f.elements.get('#modal').listeners.get('close')();assert.equal(removed,0);assert.equal(f.run('photos.length'),1);assert.equal(f.ctx.photo.favorite,true);assert.equal(f.calls.length,3);
+});
+test('a delayed favorite request cannot change the next photo dialog or submit twice',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true});const first=f.elements.get('#favorite');let finish,calls=0;
+ f.ctx.delayedApi=()=>{calls++;return new Promise(resolve=>{finish=resolve})};f.run('api=globalThis.delayedApi');
+ const pending=first.onclick();assert.equal(first.disabled,true);await first.onclick();assert.equal(calls,1);
+ const next={textContent:'♡ Gem som favorit'};f.elements.set('#favorite',next);
+ finish({});await pending;
+ assert.equal(first.textContent,'♥ Fjern favorit');assert.equal(first.disabled,false);assert.equal(next.textContent,'♡ Gem som favorit');assert.equal(f.ctx.photo.favorite,true);
+});
+test('closing during a delayed next-photo request never reopens the viewer or loads another image',async()=>{
+ for(const close of ['close','cancel','button']){
+  const f=await mediaFixture({video:true,download:true,gps:true});f.ctx.other=mediaPhoto({id:'photo-2',title:'Next photo'});f.run('photos.push(other)');
+  let finish,opens=0;f.ctx.delayedApi=()=>new Promise(resolve=>{finish=resolve});f.run('api=globalThis.delayedApi');
+  const dialog=f.elements.get('#modal'),original=dialog.innerHTML;dialog.showModal=()=>opens++;
+  const pending=f.elements.get('#next').onclick();
+  if(close==='button')f.elements.get('#close-modal').onclick();else dialog.listeners.get(close)();
+  finish({permissions:{video:true,download:true,gps:true}});await pending;
+  assert.equal(dialog.innerHTML,original);assert.equal(opens,0);
+ }
+});
+test('an older photo request cannot replace a newer dialog or a changed gallery',async()=>{
+ for(const replace of ['dialog','gallery']){
+  const f=await mediaFixture({video:true,download:true,gps:true});let finish;
+  f.ctx.delayedApi=()=>new Promise(resolve=>{finish=resolve});f.run('api=globalThis.delayedApi');const pending=f.run('showPhoto(photo.id)');
+  if(replace==='dialog')f.run("modal('Ny dialog','<p>Behold dette indhold</p>')");else f.run("current={id:'another-gallery'}");
+  const currentHtml=f.elements.get('#modal').innerHTML;finish({permissions:{video:true}});await pending;
+  assert.equal(f.elements.get('#modal').innerHTML,currentHtml);
+ }
 });
 test('the import preview explains MP4 support before any transfer starts',()=>{
  const data={configured:true,migration_needed:false,job:null};

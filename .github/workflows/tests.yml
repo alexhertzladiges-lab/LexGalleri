@@ -45,7 +45,15 @@ jobs:
           php tests/lychee-move.php
           php tests/lychee-video.php
       - run: node --check public/static/app.js
+      - run: node --check public/static/pwa.js
+      - run: node --check public/service-worker.js
       - run: node --test tests/ftps-plan.test.mjs
       - run: node --test tests/ftps-client.test.mjs
       - run: node --test tests/lychee-ui.test.mjs
+      - run: node --test tests/webapp.test.mjs
+      - name: Browser checks with Chrome
+        run: |
+          task_browser_binary="$(command -v google-chrome || command -v chromium)"
+          test -n "$task_browser_binary"
+          TEST_BROWSER="$task_browser_binary" node --test tests/webapp-browser.test.mjs
       - run: bash -n scripts/deploy-ftps.sh

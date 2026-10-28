@@ -41,18 +41,27 @@ Dette kontrollerer FTPS-login, TLS-certifikat og krypteret listning af den offen
 
 ## Dernæst: overfør de offentlige filer
 
-Når du har kontrolleret kontoens rod og selv installeret de private filer, kører du samme workflow på `main` med **diagnostic_only slået fra**. PHP/MySQL-testene og deployplantestene på samme commit skal bestå, før overførslen begynder.
+Når du har kontrolleret kontoens rod, kører du samme workflow på `main` med **diagnostic_only slået fra**. PHP/MySQL-testene og deployplantestene på samme commit skal bestå, før overførslen begynder. Brug de offentlige og private programfiler fra samme kodeversion; hold en eventuel import på pause, indtil begge er opdateret.
 
-Kun følgende fire filer overføres:
+Kun følgende elleve offentlige appfiler overføres:
 
 | Fra GitHub | Til FTPS-kontoens rod |
 |---|---|
+| `public/static/icon.svg` | `static/icon.svg` |
+| `public/static/icon-192.png` | `static/icon-192.png` |
+| `public/static/icon-512.png` | `static/icon-512.png` |
+| `public/static/apple-touch-icon.png` | `static/apple-touch-icon.png` |
+| `public/manifest.webmanifest` | `manifest.webmanifest` |
+| `public/service-worker.js` | `service-worker.js` |
+| `public/static/pwa.js` | `static/pwa.js` |
 | `public/static/style.css` | `static/style.css` |
 | `public/static/app.js` | `static/app.js` |
 | `public/.htaccess` | `.htaccess` |
 | `public/index.php` | `index.php` |
 
-Ingen privat PHP-kode, schema.sql, konfiguration, billeder, sessionsfiler eller database kopieres. Der er ingen rekursiv synkronisering, sletning eller oprydning uden for de fire kodefiler. Den offentlige `static/`-mappe kan oprettes med rettigheder 755, og overførte filer får 644. Kontorodens egne rettigheder ændres ikke.
+Ingen privat PHP-kode, schema.sql, konfiguration, familiebilleder, videoer, sessionsfiler eller database kopieres. Appikonerne i tabellen er offentlige programfiler. Der er ingen rekursiv synkronisering, sletning eller oprydning uden for de elleve appfiler. Den offentlige `static/`-mappe kan oprettes med rettigheder 755, og overførte filer får 644. Kontorodens egne rettigheder ændres ikke.
+
+Webapp-opdateringen kræver også, at ejeren selv erstatter `private/app.php` i privatmappen fra samme kodeversion. Den tilføjer sidens manifest, ikoner og appscript. Behold den udfyldte konfiguration og databasen; denne ændring kræver ingen SQL-migrering. Se [webapp-vejledningen](WEBAPP.md).
 
 Workflowet er manuelt; det starter ikke ved push eller pull requests. Det kører kun fra `main`, og overførsler køres én ad gangen. Der kræves ingen SSH-shelladgang. Node og lftp bruges kun på GitHub-runneren; webhotellet behøver kun PHP/MySQL.
 
@@ -60,12 +69,12 @@ Workflowet er manuelt; det starter ikke ved push eller pull requests. Det kører
 
 Der bruges **eksplicit FTPS** (`ftp://` plus `AUTH TLS`) med obligatorisk TLS på kontrol- og datakanaler, verificeret certifikat og kontrolleret værtsnavn. FTP-adgangskoden gives via lftp's miljøvariabel og skrives ikke i kommandolinjeargumenter eller de genererede planer.
 
-Alle fire filer uploades først med midlertidige navne. Derefter aktiveres hver fil med FTP-rename. Serveren skal understøtte rename, der erstatter en eksisterende fil. Hvis den afviser det, stopper overførslen; der bruges ingen fallback, som sletter målfilen først.
+Alle elleve filer uploades først med midlertidige navne. Derefter aktiveres hver fil med FTP-rename. Ikoner, manifest og worker aktiveres før scripts og den offentlige indgangsfil, som aktiveres sidst. Serveren skal understøtte rename, der erstatter en eksisterende fil. Hvis den afviser det, stopper overførslen; der bruges ingen fallback, som sletter målfilen først.
 
-De fire rename-operationer er ikke én samlet transaktion. En afbrudt forbindelse kan efterlade en blanding af kodeversioner eller skjulte `.lexgalleri-...`-filer. Genkør samme kodeversion eller gendan de offentlige filer fra backup. Oprydning af eventuelle midlertidige filer sker manuelt efter kontrol. Private data påvirkes ikke af dette workflow.
+De elleve rename-operationer er ikke én samlet transaktion. En afbrudt forbindelse kan efterlade en blanding af kodeversioner eller skjulte `.lexgalleri-...`-filer. Genkør samme kodeversion eller gendan de offentlige filer fra backup. Oprydning af eventuelle midlertidige filer sker manuelt efter kontrol. Private data påvirkes ikke af dette workflow.
 
 ## Efter overførsel
 
-Åbn din HTTPS-adresse med `/LexGalleri/`, log ind og kontroller et ufølsomt foto. Første opsætning kræver de private filer og databasen fra installationsvejledningen. Et grønt GitHub-testjob eller en vellykket offentlig filoverførsel beviser ikke, at den private installation virker.
+Åbn din HTTPS-adresse med `/LexGalleri/`, genindlæs siden, log ind og kontroller et ufølsomt foto. Åbn og luk billedet; oversigten skal blive liggende uden ny hentning af alle miniaturer. Følg [WEBAPP.md](WEBAPP.md) for installation på mobilen, og kontrollér også opstart fra hjemmeskærmen. Første opsætning kræver de private filer og databasen fra installationsvejledningen. Et grønt GitHub-testjob eller en vellykket offentlig filoverførsel beviser ikke, at den private installation eller en konkret mobilbrowser virker.
 
-Planens fil-liste, adgangsgrænse, TLS-krav og rækkefølge testes automatisk. Rigtig FTPS-login, serverens rettigheder og rename-funktion er endnu ikke afprøvet på webhotellet.
+Planens fil-liste, adgangsgrænse, TLS-krav og rækkefølge testes automatisk. En gennemført offentlig overførsel kontrollerer FTPS-login og de nødvendige filoperationer; ejeren kontrollerer derefter selve galleriet og appinstallationen på sit domæne.

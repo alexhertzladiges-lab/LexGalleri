@@ -27,6 +27,14 @@ try {
     $owner=client();$guest=client();$stranger=client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
     if(!$ready)throw new RuntimeException('Server unavailable: '.file_get_contents($temp.'/server.log'));
+    $page=client();curl_setopt($page,CURLOPT_URL,$originBase.'/LexGalleri/?invite=synthetic-private-token');curl_setopt($page,CURLOPT_HEADER,true);$html=curl_exec($page);$headerSize=curl_getinfo($page,CURLINFO_HEADER_SIZE);$headers=substr($html,0,$headerSize);$document=substr($html,$headerSize);
+    assertion(curl_getinfo($page,CURLINFO_RESPONSE_CODE)===200 && str_contains($document,'rel="manifest" href="/LexGalleri/manifest.webmanifest"'),'Public app document links a subdirectory manifest');
+    assertion(str_contains($document,'apple-mobile-web-app-capable') && str_contains($document,'/static/apple-touch-icon.png') && str_contains($document,'viewport-fit=cover'),'App document supports iOS installation and safe areas');
+    assertion(str_contains($document,'/static/pwa.js?v=') && !str_contains($document,'synthetic-private-token'),'Installer loads without copying invitation tokens into the document');
+    assertion(str_contains($headers,"worker-src 'self'") && str_contains($headers,"manifest-src 'self'") && str_contains($headers,'no-store'),'App document retains private caching and same-origin worker policy');
+    curl_setopt($page,CURLOPT_HEADER,false);curl_setopt($page,CURLOPT_URL,$originBase.'/LexGalleri/manifest.webmanifest');$manifest=json_decode(curl_exec($page),true);
+    assertion(curl_getinfo($page,CURLINFO_RESPONSE_CODE)===200 && $manifest['display']==='standalone' && $manifest['start_url']==='./','Anonymous browser can load public installation metadata');
+    curl_close($page);
     assertion(request($owner,'GET','/status')[1]['setup']===true,'Initial setup status');
     assertion(request($owner,'POST','/setup',['token'=>'wrong'])[0]===403,'Setup requires secret');
     $setup=['token'=>$config['setup_token'],'name'=>'Admin','email'=>'admin@example.test','password'=>'long-admin-password'];
