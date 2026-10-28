@@ -21,9 +21,12 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture(){
+async function fixture({permissions=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const galleryId='a'.repeat(32);
+  const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
+  let holdGrantWrites=false;
+  let grants=[{user_id:memberId,gallery_id:galleryId,upload:0,download:0,gps:0}];
   const photos=Array.from({length:60},(_,index)=>({
     id:(index+1).toString(16).padStart(32,'0'),gallery_id:galleryId,
     title:'Familie '+String(index+1).padStart(2,'0'),mime:'image/jpeg',
@@ -46,7 +49,20 @@ async function fixture(){
     if(url.pathname===base+'/api/status'){json({setup:false,account_security_version:1,account_security_ready:true});return;}
     if(url.pathname===base+'/api/me'){json({id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
     if(url.pathname===base+'/api/theme'){json({version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'});return;}
-    if(url.pathname===base+'/api/galleries'){json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:photos.length,cover:null}]);return;}
+    if(url.pathname===base+'/api/galleries'){json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:photos.length,cover:null},...(permissions?[{id:otherGalleryId,name:'Et andet galleri',description:'Kun genererede testdata',count:0,cover:null}]:[])]);return;}
+    if(permissions&&url.pathname===base+'/api/admin/users'){
+      json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}],grants});return;
+    }
+    if(permissions&&url.pathname===base+'/api/admin/grants'&&req.method==='PUT'){
+      let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);grantWrites.push(fields);
+      const finish=error=>{
+        if(error){json({detail:error},503);return;}
+        grants=grants.filter(grant=>grant.user_id!==fields.user_id||grant.gallery_id!==fields.gallery_id);
+        if(fields.view)grants.push({user_id:fields.user_id,gallery_id:fields.gallery_id,upload:Number(fields.upload),download:Number(fields.download),gps:Number(fields.gps)});
+        json({ok:true});
+      };
+      if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
+    }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
       json(denied?{detail:'Du har ikke adgang'}:{photos,permissions:{upload:false,download:true,gps:true,video:true}},denied?403:200);return;
     }
@@ -68,7 +84,8 @@ async function fixture(){
     json({detail:'Ikke fundet'},404);
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-  return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,photoId:photos[0].id,
+  return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,grantWrites,
+    holdGrantWrites:()=>{holdGrantWrites=true;},releaseGrantWrite:error=>{assert(pendingGrantWrites.length,'a grant request must be pending');pendingGrantWrites.shift()(error);},
     deny:()=>{denied=true;},disconnect:()=>{disconnected=true;},
     close:()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}),
   };
@@ -231,6 +248,87 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
       const offline=await run("({text:document.body.textContent,retry:document.querySelector('a').getAttribute('href')})");
       assert(!offline.text.includes('PRIVATE_TEST_TOKEN'));assert(!offline.text.includes('Familie 01'));assert.equal(offline.retry,base+'/');
       assert.deepEqual(await run('caches.keys()'),[]);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: gallery permissions report pending, saved and failed changes inside the open dialog',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
+},async t=>{
+  const site=await fixture({permissions:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const form=id=>'document.querySelector('+JSON.stringify('.grant[data-g="'+id+'"]')+')';
+    const first=form(site.galleryId),second=form(site.otherGalleryId);
+    const feedback=form=>form+".querySelector('.grant-feedback')";
+    const state=(form,name)=>feedback(form)+'.dataset.state==='+JSON.stringify(name);
+    const reopen=async()=>{
+      await run("new Promise(resolve=>{const dialog=document.querySelector('#modal');dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();})");
+      await run('document.querySelector('+JSON.stringify('[data-user="'+site.memberId+'"]')+').click()');
+      await wait('!!'+first,'reopened permission forms');
+    };
+    const visible=async(form,scroll=true)=>{
+      if(scroll)await run(feedback(form)+".scrollIntoView({block:'center'})");
+      return run("(()=>{const element="+feedback(form)+",rect=element.getBoundingClientRect(),style=getComputedStyle(element),top=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);return{insideModal:element.closest('dialog').matches(':modal'),visible:rect.width>0&&rect.height>0&&rect.top>=0&&rect.bottom<=innerHeight&&style.display!=='none'&&style.visibility==='visible'&&(top===element||element.contains(top)),text:element.textContent,role:element.getAttribute('role'),live:element.getAttribute('aria-live')};})()");
+    };
+    const waitForWrites=async count=>{
+      const until=Date.now()+5000;while(site.grantWrites.length<count&&Date.now()<until)await pause(20);
+      assert.equal(site.grantWrites.length,count,'save must send exactly one request');
+    };
+    await call('Page.navigate',{url:site.origin+base+'/'});
+    await wait("!!document.querySelector('[data-gallery]')",'gallery startup');
+    await run("document.querySelector('[data-view=people]').click()");
+    await wait('!!document.querySelector('+JSON.stringify('[data-user="'+site.memberId+'"]')+')','member administration');
+    await run('document.querySelector('+JSON.stringify('[data-user="'+site.memberId+'"]')+').click()');
+    await wait('!!'+first,'permission forms');site.holdGrantWrites();
+
+    await t.test('pending requests disable their controls and only a successful response confirms the save',async()=>{
+      await run(first+'.querySelector("button[type=submit]").scrollIntoView({block:"end"})');
+      await run('(()=>{const f='+first+';f.elements.upload.click();f.requestSubmit();f.requestSubmit();})()');
+      await wait(state(first,'saving'),'pending permission save');await waitForWrites(1);
+      const pending=await run('(()=>{const f='+first+';return{busy:f.getAttribute("aria-busy"),disabled:[...f.querySelectorAll("input,button[type=submit]")].every(element=>element.disabled),text:f.querySelector(".grant-feedback").textContent,otherEnabled:!'+second+'.querySelector("button[type=submit]").disabled};})()');
+      assert.equal(pending.busy,'true');assert(pending.disabled&&pending.otherEnabled);assert.equal(pending.text,'Gemmer rettigheder…');
+      assert.deepEqual(site.grantWrites[0],{user_id:site.memberId,gallery_id:site.galleryId,view:true,upload:true,download:false,gps:false});
+      site.releaseGrantWrite();await wait(state(first,'success'),'acknowledged permission save');
+      const saved=await visible(first,false);assert(saved.insideModal&&saved.visible,'saved feedback must be visible above the native dialog backdrop without scrolling after save');
+      assert.equal(saved.text,'Rettighederne er gemt.');assert.equal(saved.role,'status');assert.equal(saved.live,'polite');
+      assert(await run(first+'.getAttribute("aria-busy")==="false"&&![...'+first+'.querySelectorAll("input,button[type=submit]")].some(element=>element.disabled)'));
+      assert.equal(site.requests.filter(path=>path===base+'/api/admin/users').length,1,'an acknowledged save must not depend on a second admin-list request');
+      await reopen();assert(await run(first+'.elements.upload.checked&&'+first+'.elements.view.checked'),'reopening must retain the acknowledged rights');
+    });
+
+    await t.test('new edits clear stale success, failed writes remain visible and retry can succeed',async()=>{
+      await run(first+'.elements.upload.click()');
+      await wait(state(first,'changed'),'unsaved permission change');assert.equal(await run(feedback(first)+'.textContent'),'Ændringerne er ikke gemt.');
+      await run(first+'.requestSubmit()');await wait(state(first,'saving'),'second permission save');await waitForWrites(2);
+      site.releaseGrantWrite('Midlertidig forbindelsesfejl');await wait(state(first,'error'),'failed permission save');
+      const failed=await visible(first);assert(failed.insideModal&&failed.visible);assert.equal(failed.text,'Rettighederne kunne ikke gemmes: Midlertidig forbindelsesfejl');
+      assert(await run('!'+first+'.querySelector("button[type=submit]").disabled&&!'+first+'.elements.upload.checked'),'failure must allow retry and retain the attempted values');
+      await reopen();assert(await run(first+'.elements.upload.checked'),'a failed write must not alter the acknowledged rights');
+      await run(first+'.elements.upload.click();'+first+'.requestSubmit()');await wait(state(first,'saving'),'permission retry');await waitForWrites(3);
+      site.releaseGrantWrite();await wait(state(first,'success'),'successful permission retry');
+      await run(first+'.elements.gps.click()');await wait(state(first,'changed'),'editing after saved feedback');
+      assert.equal(await run(feedback(first)+'.textContent'),'Ændringerne er ikke gemt.');
+    });
+
+    await t.test('each gallery keeps its own status and the confirmation remains visible on mobile',async()=>{
+      await run(second+'.elements.view.click();'+second+'.elements.upload.click();'+second+'.requestSubmit()');
+      await wait(state(second,'saving'),'other gallery save');await waitForWrites(4);
+      assert(await run(state(first,'changed')),'saving another gallery must not replace the first gallery status');
+      site.releaseGrantWrite();await wait(state(second,'success'),'other gallery confirmation');
+      assert(await run(state(first,'changed')));
+      await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:2,mobile:true});
+      const mobile=await visible(second);assert(mobile.insideModal&&mobile.visible,'mobile confirmation must be readable inside the open dialog');
+      assert(await run('document.querySelector("#modal").getBoundingClientRect().right<=innerWidth'));
+      await reopen();assert(await run('!'+first+'.elements.upload.checked&&!'+first+'.elements.gps.checked&&'+second+'.elements.view.checked&&'+second+'.elements.upload.checked'),'only acknowledged changes must survive reopening');
+    });
+
+    await t.test('removing gallery access is acknowledged and reflected when the dialog is reopened',async()=>{
+      await run(first+'.elements.view.click();'+first+'.requestSubmit()');await wait(state(first,'saving'),'gallery access removal');await waitForWrites(5);
+      site.releaseGrantWrite();await wait(state(first,'success'),'gallery removal confirmation');
+      assert((await visible(first)).visible);await reopen();
+      assert(await run('[...'+first+'.querySelectorAll("input")].every(element=>!element.checked)'),'removed access must reopen without stale permissions');
+      assert(await run(second+'.elements.view.checked&&'+second+'.elements.upload.checked'),'removal must not affect the other gallery');
     });
   }finally{if(browser)await browser.close();await site.close();}
 });
