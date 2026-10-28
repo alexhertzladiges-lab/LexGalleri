@@ -3,13 +3,19 @@ const BASE=new URL(document.currentScript.src).pathname.replace(/\/static\/app\.
 const $=(q,el=document)=>el.querySelector(q),A=$('#app'),M=$('#modal');
 let me,galleries=[],photos=[],current=null,view='galleries',permissions={},themes=[],activeTheme;
 let photoViewerGeneration=0;
+let photoViewerNavigation=null;
 let accountGeneration=0,profileGeneration=0,privateAccountDialog=false;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,method='GET',body){const opt={method};if(body instanceof FormData)opt.body=body;else if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body)}const r=await fetch(BASE+'/api'+path,opt);let b;try{b=await r.json()}catch{throw Error('Serveren kunne ikke svare')}if(!r.ok){const error=Error(b.detail||'Der opstod en fejl');error.status=r.status;throw error}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',4500)}
 function applyTheme(t){activeTheme=t;for(const[k,v]of Object.entries(t.colors))document.documentElement.style.setProperty('--'+k,v);document.documentElement.style.setProperty('--radius',t.radius+'px');document.documentElement.style.setProperty('--gap',t.density==='compact'?'12px':'22px');document.body.style.fontFamily=t.font==='serif'?'Georgia,serif':'Arial,sans-serif'}
 function stopPhotoVideo(){$('#photo-video')?.pause?.()}
-function modal(title,html){photoViewerGeneration++;privateAccountDialog=false;stopPhotoVideo();M.innerHTML=`<div class="dialog-head"><h2>${esc(title)}</h2><button class="secondary" id="close-modal" aria-label="Luk">✕</button></div>${html}`;$('#close-modal').onclick=()=>{photoViewerGeneration++;M.close()};if(!M.open)M.showModal()}
+function modal(title,html,photo=false){
+  photoViewerGeneration++;photoViewerNavigation=null;privateAccountDialog=false;stopPhotoVideo();
+  M.classList?.toggle('photo-dialog',photo);M.classList?.remove('photo-info-open');M.setAttribute?.('aria-labelledby','modal-title');
+  M.innerHTML=`<div class="dialog-head${photo?' photo-toolbar':''}"><h2 id="modal-title"${photo?' class="photo-viewer-title"':''}>${esc(title)}</h2>${photo?'<button class="secondary" id="photo-info-toggle" type="button" aria-expanded="false" aria-controls="photo-info"><span aria-hidden="true">ⓘ</span> Info</button>':''}<button class="secondary" id="close-modal" type="button" aria-label="Luk">✕</button></div>${html}`;
+  $('#close-modal').onclick=()=>{photoViewerGeneration++;M.close()};if(!M.open)M.showModal();
+}
 function formHandler(id,fn){$(id).onsubmit=async e=>{e.preventDefault();const btn=$('button[type=submit]',e.target);if(btn)btn.disabled=true;try{await fn(Object.fromEntries(new FormData(e.target)))}catch(err){const out=$('.error',e.target);if(out)out.textContent=err.message;else toast(err.message)}finally{if(btn)btn.disabled=false}}}
 function clearAccountWorkspace(){
   accountGeneration++;profileGeneration++;stopLycheeView();stopPhotoVideo();galleries=[];photos=[];current=null;view='galleries';
@@ -112,7 +118,38 @@ function lycheePhotoProvenance(p){
   const fields=[['Lychee-ejer',sourceText(source.owner_name)||'Ikke angivet'],['Billed-id i Lychee',sourceText(source.source_photo_id)],['Beskrivelse',sourceText(source.description)],['Tags',sourceText(source.tags)],['Registreret i Lychee',sourceText(source.created_at)],['Optagetid i Lychee',sourceText(source.taken_at)],['Oprindelig tidszone',sourceText(source.taken_at_orig_tz)]];
   return `<details class="lychee-provenance"><summary>Fra Lychee${source.version?' '+esc(source.version):''}</summary><p class="muted">Registreringer bevaret ved import. Lychee-ejeren er ikke nødvendigvis den oprindelige uploader. I LexGalleri står administratoren, der udførte overførslen, som uploader.</p><dl>${fields.filter(([,value])=>value!=='').map(([label,value])=>`<dt>${label}</dt><dd>${esc(value)}</dd>`).join('')}</dl></details>`;
 }
-async function showPhoto(id){const generation=++photoViewerGeneration,requestView=view,requestGallery=current;const p=photos.find(p=>p.id===id);if(!p)return;const b=await api('/galleries/'+p.gallery_id+'/photos');if(generation!==photoViewerGeneration||view!==requestView||current!==requestGallery)return;const rights=b.permissions;modal(p.title,`<div class="viewer">${photoMedia(p,rights)}<div class="details"><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div><h2 style="margin-top:14px">${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo">Redigér oplysninger</button></p>':''}<div class="row" style="margin-top:24px"><button class="secondary" id="prev">← Forrige</button><button class="secondary" id="next">Næste →</button></div></div></div>`);bindPhotoVideo(p,rights);const favoriteButton=$('#favorite');favoriteButton.onclick=async()=>{if(favoriteButton.disabled)return;favoriteButton.disabled=true;try{await api('/photos/'+p.id+'/favorite','POST');p.favorite=!p.favorite;favoriteButton.textContent=p.favorite?'♥ Fjern favorit':'♡ Gem som favorit';updatePhotoCard(p)}catch(err){toast(err.message)}finally{favoriteButton.disabled=false}};const i=photos.indexOf(p);$('#prev').disabled=i===0;$('#next').disabled=i===photos.length-1;$('#prev').onclick=()=>showPhoto(photos[i-1].id);$('#next').onclick=()=>showPhoto(photos[i+1].id);if($('#edit-photo'))$('#edit-photo').onclick=()=>editPhoto(p)}
+function photoDetails(p,rights){
+  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div><h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}</div>`;
+}
+async function showPhoto(id){
+  const generation=++photoViewerGeneration,requestView=view,requestGallery=current,p=photos.find(p=>p.id===id);if(!p)return;
+  const b=await api('/galleries/'+p.gallery_id+'/photos');
+  if(generation!==photoViewerGeneration||view!==requestView||current!==requestGallery)return;
+  const rights=b.permissions,previousFocus=document.activeElement?.id;
+  modal('Billedvisning',`<div class="viewer"><div class="photo-stage">${photoMedia(p,rights)}<button class="photo-nav photo-prev" id="prev" type="button" aria-label="Forrige billede" title="Forrige billede"><span aria-hidden="true">‹</span></button><button class="photo-nav photo-next" id="next" type="button" aria-label="Næste billede" title="Næste billede"><span aria-hidden="true">›</span></button></div>${photoDetails(p,rights)}</div>`,true);
+  bindPhotoVideo(p,rights);
+  const infoButton=$('#photo-info-toggle'),infoPanel=$('#photo-info');let infoOpen=false;infoPanel.hidden=true;
+  infoButton.onclick=()=>{infoOpen=!infoOpen;infoPanel.hidden=!infoOpen;infoButton.setAttribute?.('aria-expanded',String(infoOpen));M.classList?.toggle('photo-info-open',infoOpen)};
+  const favoriteButton=$('#favorite');
+  favoriteButton.onclick=async()=>{if(favoriteButton.disabled)return;favoriteButton.disabled=true;try{await api('/photos/'+p.id+'/favorite','POST');p.favorite=!p.favorite;favoriteButton.textContent=p.favorite?'♥ Fjern favorit':'♡ Gem som favorit';updatePhotoCard(p)}catch(err){toast(err.message)}finally{favoriteButton.disabled=false}};
+  const available=new Set(photos.map(photo=>photo.id));
+  const visibleIds=Array.from(document.querySelectorAll('[data-photo]'),button=>button.dataset.photo).filter(photoId=>available.has(photoId));
+  const sequence=visibleIds.includes(p.id)?visibleIds:photos.map(photo=>photo.id);
+  const i=sequence.indexOf(p.id),prev=$('#prev'),next=$('#next');prev.disabled=i<=0;next.disabled=i<0||i===sequence.length-1;
+  const navigate=async index=>{if(index<0||index>=sequence.length)return;try{await showPhoto(sequence[index])}catch(error){toast(error.message)}};
+  prev.onclick=()=>navigate(i-1);next.onclick=()=>navigate(i+1);photoViewerNavigation={prev,next};
+  if($('#edit-photo'))$('#edit-photo').onclick=()=>editPhoto(p);
+  // Replacing an open dialog removes its focused button. Restore focus inside
+  // the viewer so consecutive arrow-key presses continue to reach the dialog.
+  const focused=['prev','next','photo-info-toggle'].includes(previousFocus)?$('#'+previousFocus):infoButton;
+  (focused&&!focused.disabled?focused:infoButton).focus?.({preventScroll:true});
+}
+function photoViewerKeydown(event){
+  if(!photoViewerNavigation||!M.open||event.defaultPrevented||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
+  if(event.target?.closest?.('input, textarea, select, [contenteditable], video'))return;
+  const button=event.key==='ArrowLeft'?photoViewerNavigation.prev:event.key==='ArrowRight'?photoViewerNavigation.next:null;
+  if(!button||button.disabled)return;event.preventDefault();return button.onclick();
+}
 function editPhoto(p){modal('Redigér billedets historie',`<div class="dialog-content"><form id="edit"><label>Titel<input name="title" value="${esc(p.title)}" required></label><div class="row"><label>Datopræcision<select name="precision">${[['unknown','Ukendt'],['exact','Dato og klokkeslæt'],['day','Dag'],['month','Måned'],['year','År'],['circa','Cirka år']].map(([v,n])=>`<option value="${v}" ${p.precision===v?'selected':''}>${n}</option>`).join('')}</select></label><label>Dato<input name="taken" value="${esc(p.taken)}" placeholder="2026-07-14T12:30"></label></div><p class="muted">Formater: 2026-07-14T12:30 · 2026-07-14 · 2026-07 · 2026. Tom ved ukendt dato.</p><label>Sted<input name="place" value="${esc(p.place)}"></label><div class="row"><label>Breddegrad<input name="lat" type="number" step="any" min="-90" max="90" value="${p.lat??''}"></label><label>Længdegrad<input name="lon" type="number" step="any" min="-180" max="180" value="${p.lon??''}"></label></div><div class="error"></div><button type="submit">Gem oplysninger</button></form></div>`);formHandler('#edit',async b=>{b.lat=b.lat===''?null:Number(b.lat);b.lon=b.lon===''?null:Number(b.lon);await api('/photos/'+p.id,'PATCH',b);M.close();await render();toast('Oplysninger gemt')})}
 function profileMarkup(profile,own,security){
   const count=Number(profile.upload_count),uploads=Number.isSafeInteger(count)&&count>=0?count:0;
@@ -289,6 +326,7 @@ async function lycheeAction(session,action){
   finally{if(lycheeActive(session)){session.busy=false;lycheeDraw(session)}}
 }
 
-M.addEventListener('cancel',()=>{photoViewerGeneration++});
-M.addEventListener('close',()=>{photoViewerGeneration++;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
+M.addEventListener('keydown',photoViewerKeydown);
+M.addEventListener('cancel',()=>{photoViewerGeneration++;photoViewerNavigation=null});
+M.addEventListener('close',()=>{photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
 init();

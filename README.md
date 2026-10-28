@@ -17,6 +17,7 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 - Originaler bevares uændret. Download kræver både download- og GPS-adgang, fordi originalen kan indeholde GPS.
 - Redigér titel, sted, koordinater og datopræcision: tidspunkt, dag, måned, år, cirka år eller ukendt.
 - Tidslinje, søgning, favoritter og mobiltilpasset billedvisning.
+- Billedvisning med pile oven på billedet og én Info-knap til oplysninger og handlinger. Se [visningen på pc og mobil](docs/design/compact-viewer.md).
 - Billeder åbnes oven på oversigten. Lukning bevarer miniaturer, søgning, sortering og position uden at genindlæse hele galleriet.
 - Installerbar webapp på mobil og pc med eget ikon og appvindue. Se [WEBAPP.md](WEBAPP.md); billeder og videoer kræver internetforbindelse.
 - Admin kan installere designpakker som JSON eller ZIP, forhåndsvise og aktivere dem for alle.

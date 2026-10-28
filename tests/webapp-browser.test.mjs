@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
-import {readFile, mkdtemp, rm} from 'node:fs/promises';
+import {readFile, mkdtemp, rm, mkdir, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -14,6 +14,12 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const binary=[process.env.TEST_BROWSER,process.env.CHROME_BIN,'/usr/bin/chromium','/usr/bin/google-chrome','/opt/google/chrome/chrome'].find(path=>path && existsSync(path));
 const base='/LexGalleri';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function screenshot(call,name){
+  if(!process.env.LEXGALLERI_VIEWER_SCREENSHOTS)return;
+  await mkdir(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,{recursive:true});
+  const capture=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+  await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
+}
 
 async function fixture(){
   const requests=[];let denied=false, disconnected=false;
@@ -24,6 +30,8 @@ async function fixture(){
     place:'Syntetisk test',uploader_name:'Testkonto',uploaded:'2020-01-01T00:00:'+String(index%60).padStart(2,'0')+'Z',
     taken:'',precision:'unknown',lat:null,lon:null,favorite:false,
   }));
+  photos[0].mime='video/mp4';
+  const video=Buffer.from((await readFile(join(root,'tests','fixtures','tiny.mp4.b64'),'utf8')).replace(/\s/g,''),'base64');
   const html='<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>LexGalleri browser test</title><link rel="manifest" href="'+base+'/manifest.webmanifest"><link rel="apple-touch-icon" href="'+base+'/static/apple-touch-icon.png"><link rel="stylesheet" href="'+base+'/static/style.css"><script src="'+base+'/static/app.js" defer></script><script src="'+base+'/static/pwa.js" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';
   const server=createServer(async(req,res)=>{
     const url=new URL(req.url,'http://localhost');requests.push(url.pathname+url.search);
@@ -40,11 +48,15 @@ async function fixture(){
     if(url.pathname===base+'/api/theme'){json({version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'});return;}
     if(url.pathname===base+'/api/galleries'){json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:photos.length,cover:null}]);return;}
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
-      json(denied?{detail:'Du har ikke adgang'}:{photos,permissions:{upload:false,download:false,gps:false,video:false}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos,permissions:{upload:false,download:true,gps:true,video:true}},denied?403:200);return;
     }
     if(new RegExp('^'+base+'/api/photos/[a-f0-9]{32}/image$').test(url.pathname)){
       if(denied){json({detail:'Du har ikke adgang'},403);return;}
-      send('image/svg+xml','<svg xmlns="http://www.w3.org/2000/svg" width="120" height="100"><rect width="120" height="100" fill="#416c57"/></svg>');return;
+      send('image/svg+xml','<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#dce9e2"/><circle cx="925" cy="180" r="80" fill="#e5be77"/><path d="M0 480 285 180 650 520 930 310 1200 510V800H0Z" fill="#779c8a"/><path d="M0 580 340 390 620 650 950 455 1200 610V800H0Z" fill="#416c57"/><path d="M0 620Q380 565 620 680T1200 650V800H0Z" fill="#83aab1"/><path d="M0 735Q390 650 700 740T1200 720V800H0Z" fill="#c3d5ce"/></svg>');return;
+    }
+    if(new RegExp('^'+base+'/api/photos/[a-f0-9]{32}/video$').test(url.pathname)){
+      if(denied){json({detail:'Du har ikke adgang'},403);return;}
+      res.setHeader('Accept-Ranges','bytes');send('video/mp4',video);return;
     }
     const files=new Map([
       [base+'/manifest.webmanifest',['manifest.webmanifest','application/manifest+json']],
@@ -100,6 +112,7 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
   const site=await fixture();let browser;
   try{
     browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const closePhoto=()=>run("new Promise(resolve=>{const dialog=document.querySelector('#modal');if(!dialog.open){resolve(true);return;}dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();})");
     await call('Page.navigate',{url:site.origin+base+'/'});
     await wait("!!document.querySelector('[data-gallery]')",'gallery startup');
     await run("document.querySelector('[data-gallery]').click()");
@@ -109,6 +122,21 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
     await run("const opener=document.querySelectorAll('[data-photo]')[8];opener.scrollIntoView({block:'center'});opener.focus({preventScroll:true});window.__grid=document.querySelector('#photo-grid');window.__images=[...__grid.querySelectorAll('img')];window.__scroll=scrollY;opener.click()");
     await wait("document.querySelector('#modal').open",'photo overlay');
     await wait("document.querySelector('#modal img').complete",'large photo');
+    await t.test('compact viewer overlays accessible arrows and keeps metadata collapsed without reloading media',async()=>{
+      const layout=await run("(()=>{const stage=document.querySelector('.photo-stage'),image=stage.querySelector('img'),panel=document.querySelector('#photo-info'),toggle=document.querySelector('#photo-info-toggle');const rect=stage.getBoundingClientRect(),media=image.getBoundingClientRect();window.__viewerMedia=image;return{compact:document.querySelector('#modal').classList.contains('photo-dialog'),hidden:panel.hidden,display:getComputedStyle(panel).display,expanded:toggle.getAttribute('aria-expanded'),controls:toggle.getAttribute('aria-controls'),arrows:['prev','next'].map(id=>{const button=document.getElementById(id),r=button.getBoundingClientRect();return{width:r.width,height:r.height,inside:stage.contains(button)&&r.left>=rect.left&&r.right<=rect.right&&r.top>=rect.top&&r.bottom<=rect.bottom,insideMedia:r.left+r.width/2>=media.left&&r.right-r.width/2<=media.right&&r.top+r.height/2>=media.top&&r.bottom-r.height/2<=media.bottom,label:button.getAttribute('aria-label'),text:button.textContent.trim()};})};})()");
+      assert(layout.compact);assert(layout.hidden);assert.equal(layout.display,'none');assert.equal(layout.expanded,'false');assert.equal(layout.controls,'photo-info');
+      for(const arrow of layout.arrows){assert(arrow.width>=44&&arrow.height>=44,'overlay arrows must remain usable touch targets');assert(arrow.inside&&arrow.insideMedia,'arrow centers must be inside the displayed media');assert(arrow.label&&arrow.text.length<=2,'arrows use accessible labels rather than a space-consuming text row');}
+      await screenshot(call,'compact-viewer-desktop.png');
+      const before=site.requests.filter(path=>path.includes('/image?size=view')||path.endsWith('/photos')).length;
+      await run("document.querySelector('#photo-info-toggle').click()");
+      const info=await run("({hidden:document.querySelector('#photo-info').hidden,expanded:document.querySelector('#photo-info-toggle').getAttribute('aria-expanded'),same:__viewerMedia===document.querySelector('.photo-stage img'),text:document.querySelector('#photo-info').textContent,actionInside:!!document.querySelector('#photo-info #favorite')&&!!document.querySelector('#photo-info #edit-photo'),arrowsOutside:!document.querySelector('#photo-info #prev,#photo-info #next')})");
+      assert.equal(info.hidden,false);assert.equal(info.expanded,'true');assert(info.same&&info.actionInside&&info.arrowsOutside);
+      for(const label of ['Optaget','Sted','Uploadet af','Uploadtidspunkt','Testkonto'])assert(info.text.includes(label));
+      await screenshot(call,'compact-viewer-info.png');
+      await run("document.querySelector('#photo-info-toggle').click()");
+      assert(await run("document.querySelector('#photo-info').hidden&&__viewerMedia===document.querySelector('.photo-stage img')"));
+      assert.equal(site.requests.filter(path=>path.includes('/image?size=view')||path.endsWith('/photos')).length,before,'Info must not fetch or recreate the photo or gallery');
+    });
     const countsBefore=new Map();for(const request of site.requests.filter(path=>/\/api\/photos\/[^/]+\/image$/.test(path)))countsBefore.set(request,(countsBefore.get(request)||0)+1);
     const apiBefore=site.requests.filter(path=>path.endsWith('/photos')).length;
     await run("document.querySelector('#close-modal').click()");
@@ -126,6 +154,39 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
       await wait("!document.querySelector('#modal').open",'Escape close');await pause(100);
       assert(await run("__grid===document.querySelector('#photo-grid')"));
       assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);
+    });
+    await t.test('overlay and keyboard arrows respect endpoints and leave editing fields alone',async()=>{
+      await run("document.querySelectorAll('[data-photo]')[0].click()");await wait("document.querySelector('#modal').open",'first photo');
+      assert.equal(await run("document.querySelector('#prev').disabled"),true);
+      let before=site.requests.filter(path=>path.endsWith('/photos')).length;
+      await run("document.querySelector('#prev').click()");await pause(50);assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before,'disabled previous arrow must not request an invalid image');
+      await run("window.__firstMedia=document.querySelector('.photo-stage img');document.querySelector('#modal').focus()");
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+      await wait("document.querySelector('.photo-stage img')!==__firstMedia",'keyboard next photo');assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before+1);assert(await run("document.querySelector('#photo-info').hidden"),'the next photo starts with its information collapsed');
+      await run("window.__secondMedia=document.querySelector('.photo-stage img');document.querySelector('#modal').focus()");
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37,nativeVirtualKeyCode:37});
+      await wait("document.querySelector('.photo-stage img')!==__secondMedia",'keyboard previous photo');assert.equal(await run("document.querySelector('#prev').disabled"),true);
+      await run("document.querySelector('#photo-info-toggle').click();document.querySelector('#edit-photo').click()");await wait("!!document.querySelector('#edit')",'photo metadata editor');
+      before=site.requests.filter(path=>path.endsWith('/photos')).length;
+      await run("document.querySelector('#edit input[name=title]').focus()");
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});await pause(50);
+      assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);assert(await run("!!document.querySelector('#edit')&&!document.querySelector('#modal').classList.contains('photo-dialog')"));
+      await closePhoto();
+      await run("document.querySelectorAll('[data-photo]')[59].click()");await wait("document.querySelector('#modal').open&&!!document.querySelector('#photo-video')",'last photo/video');
+      assert.equal(await run("document.querySelector('#next').disabled"),true);
+      before=site.requests.filter(path=>path.endsWith('/photos')).length;await run("document.querySelector('#next').click()");await pause(50);assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);
+      await closePhoto();
+    });
+    await t.test('video Info preserves the player and native video keyboard controls',async()=>{
+      await run("document.querySelector('[data-photo=\""+site.photoId+"\"]').click()");await wait("document.querySelector('#modal').open&&!!document.querySelector('#photo-video')&&document.querySelector('#photo-video').readyState>=2",'video metadata');
+      await run("window.__video=document.querySelector('#photo-video');window.__pauseCalls=0;window.__nativePause=__video.pause.bind(__video);__video.pause=()=>{__pauseCalls++;__nativePause();};__video.currentTime=0.25");
+      await wait("document.querySelector('#photo-video').currentTime>=0.2",'video seek');const before=site.requests.filter(path=>path.endsWith('/video')||path.endsWith('/photos')).length;
+      await run("document.querySelector('#photo-info-toggle').click()");
+      assert(await run("__video===document.querySelector('#photo-video')&&__video.currentTime>=0.2&&__pauseCalls===0"));
+      await run("document.querySelector('#photo-info-toggle').click();__video.focus()");
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});await pause(50);
+      assert(await run("__video===document.querySelector('#photo-video')&&__pauseCalls===0"));assert.equal(site.requests.filter(path=>path.endsWith('/video')||path.endsWith('/photos')).length,before);
+      await closePhoto();
     });
     await t.test('installation help is independent of the photo dialog and preserves the gallery',async()=>{
       await wait("!!document.querySelector('#pwa-install')",'installation button');
@@ -149,6 +210,12 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
       await run("document.querySelector('#pwa-install').click()");await wait("document.querySelector('#pwa-install-help').open",'mobile installation help');
       const help=await run("({left:document.querySelector('#pwa-install-help').getBoundingClientRect().left,right:document.querySelector('#pwa-install-help').getBoundingClientRect().right,width:innerWidth})");assert(help.left>=0 && help.right<=help.width);
       await run("document.querySelector('#pwa-install-help button').click()");
+      await run("document.querySelectorAll('[data-photo]')[8].click()");await wait("document.querySelector('#modal').open&&document.querySelector('.photo-stage img')?.complete",'mobile photo viewer');
+      const viewer=await run("(()=>{const dialog=document.querySelector('#modal').getBoundingClientRect(),stage=document.querySelector('.photo-stage').getBoundingClientRect();return{width:innerWidth,left:dialog.left,right:dialog.right,hidden:document.querySelector('#photo-info').hidden,arrows:['prev','next'].map(id=>{const b=document.getElementById(id),r=b.getBoundingClientRect(),top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{width:r.width,height:r.height,inside:r.left>=stage.left&&r.right<=stage.right&&r.top>=stage.top&&r.bottom<=stage.bottom,clickable:top===b||b.contains(top)};})};})()");
+      assert(viewer.left>=0&&viewer.right<=viewer.width&&viewer.hidden);for(const arrow of viewer.arrows)assert(arrow.width>=44&&arrow.height>=44&&arrow.inside&&arrow.clickable,'mobile overlay arrows must be visible and tappable inside the image');
+      await screenshot(call,'compact-viewer-mobile.png');
+      await run("document.querySelector('#photo-info-toggle').click()");assert.equal(await run("document.querySelector('#photo-info').hidden"),false);
+      assert(await run("document.querySelector('#modal').getBoundingClientRect().right<=innerWidth"));await closePhoto();
     });
     await t.test('controlled requests recheck revocation and create no offline private cache',async()=>{
       await wait("!!navigator.serviceWorker.controller",'service worker control');

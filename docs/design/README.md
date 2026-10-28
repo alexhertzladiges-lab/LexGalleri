@@ -2,4 +2,4 @@
 
 Alle nye designforslag, billeder og visualiseringer til LexGalleri skal gemmes i dette private repository og deles med ejeren via direkte GitHub-links.
 
-PHP-omskrivningen viderefører den eksisterende responsive brugerflade. Der er ikke tilføjet nye skærmdesignforslag eller genereret screenshots i denne ændring. Familiens rigtige billeder må ikke lægges i Git.
+Se [den kompakte billedvisning på pc og mobil](compact-viewer.md) med pile oven på billedet og én Info-knap. Skærmbillederne bruger kun et syntetisk testgalleri. Familiens rigtige billeder og personlige Authenticator-koder må ikke lægges i Git.
