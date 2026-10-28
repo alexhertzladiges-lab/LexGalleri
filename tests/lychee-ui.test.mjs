@@ -11,6 +11,32 @@ function fixture(){
  return{ctx,elements,run:s=>vm.runInContext(s,ctx)};
 }
 function status(state){return{configured:true,migration_needed:false,source_version:'6.6.12',job:{id:'job-1',state,totals:{photos:1,pending:state==='completed'?0:1,imported:state==='completed'?1:0},preview:[]}}}
+function renderStatus(data){
+ const f=fixture();vm.runInContext(source.slice(source.indexOf('function lycheeDraw('),source.indexOf('async function lycheeLoop(')),f.ctx);f.ctx.job=data;f.run("lycheeGeneration=5;globalThis.session={generation:5,cancelled:false,busy:false,stopRequested:false,error:'',data:job};lycheeDraw(session)");return f.elements.get('#lychee-import').innerHTML;
+}
+test('unconfigured importer explains both files without claiming database tables are missing', () => {
+ const html=renderStatus({configured:false,migration_needed:true,source_version:'6.6.12',job:null});
+ assert(html.includes('Gør importøren klar'));
+ assert(html.includes('<code>lychee-import.php</code>'));
+ assert(html.includes('<code>config/lychee-import.php</code>'));
+ assert(html.includes('ved siden af <code>app.php</code>'));
+ assert(html.includes('<code>true</code> uden anførselstegn'));
+ assert(!html.includes('Importtabellerne mangler'));
+ assert(!html.includes('data-lychee="scan"'));
+});
+test('configured importer shows a confirmed missing database migration', () => {
+ const html=renderStatus({configured:true,migration_needed:true,source_version:'6.6.12',job:null});
+ assert(html.includes('Importtabellerne mangler'));
+ assert(!html.includes('Gør importøren klar'));
+ assert(!html.includes('data-lychee="scan"'));
+});
+test('configured importer with installed tables offers the initial preview', () => {
+ const html=renderStatus({configured:true,migration_needed:false,source_version:'6.6.12',job:null});
+ assert(html.includes('Lav prøvevisning'));
+ assert(html.includes('data-lychee="scan"'));
+ assert(!html.includes('Importtabellerne mangler'));
+ assert(!html.includes('Gør importøren klar'));
+});
 test('status preview does not start copying', async () => {
  const f=fixture(),calls=[];f.ctx.testApi=async(...args)=>{calls.push(args);return status('preview')};f.run('api=globalThis.testApi');await f.run('lycheeView()');assert.equal(calls.length,1);assert.equal(calls[0][0],'/admin/lychee-import');
 });
