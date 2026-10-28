@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/security-test-helper.php';
 /**
  * Destructive operations are confined to synthetic fixtures in a random temp
  * directory and two random test databases. Never loads production config.
@@ -114,7 +115,7 @@ SQL);
     $importConfig=['enabled'=>true,'expected_version'=>'6.6.12','db_host'=>$host,'db_port'=>$port,'db_name'=>$sourceName,'db_user'=>$sourceUser,'db_password'=>$sourcePassword,'table_prefix'=>'','uploads_root'=>$uploadsRoot];
     file_put_contents($privateRoot.'/config/config.php','<?php return '.var_export($config,true).';');
     file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($importConfig,true).';');
-    copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
+    copy($root.'/private/app.php',$privateRoot.'/app.php');copy($root.'/private/security.php',$privateRoot.'/security.php');copy($root.'/private/schema.sql',$privateRoot.'/schema.sql');
     file_put_contents($privateRoot.'/lychee-import.php',lm_inject_commit_fault(file_get_contents($root.'/private/lychee-import.php')));
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8767);$origin='http://127.0.0.1:'.$httpPort;$env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
     // cli-server's opcode cache must not retain a previous fixture config.
@@ -123,7 +124,7 @@ SQL);
     $owner=lm_client();$guest=lm_client();$anonymous=lm_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(lm_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
     if(!$ready)throw new RuntimeException('Move test server did not become ready');
-    lm_ok(lm_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Move admin','email'=>'move-admin@example.test','password'=>'long-move-password']),'Create move test admin');
+    lm_ok(security_test_complete_admin($owner,lm_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Move admin','email'=>'move-admin@example.test','password'=>'long-move-password']),'lm_request'),'Create move test admin');
     $ownerId=lm_request($owner,'GET','/me')[1]['id'];$pdo->exec('USE `'.$targetName.'`');
     $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'move-guest@example.test','Guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
     lm_ok(lm_request($guest,'POST','/login',['email'=>'move-guest@example.test','password'=>'long-guest-password']),'Move test guest login');
@@ -283,7 +284,7 @@ SQL);
     $legacyReady=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(lm_request($legacyOwner,'GET','/status')[0]===200){$legacyReady=true;break;}}catch(Throwable){}}
     if(!$legacyReady)throw new RuntimeException('Legacy-copy test server did not become ready');
-    lm_ok(lm_request($legacyOwner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Legacy copy admin','email'=>'legacy-copy@example.test','password'=>'long-legacy-password']),'Create an isolated legacy-copy target');
+    lm_ok(security_test_complete_admin($legacyOwner,lm_request($legacyOwner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Legacy copy admin','email'=>'legacy-copy@example.test','password'=>'long-legacy-password']),'lm_request'),'Create an isolated legacy-copy target');
     $pdo->exec('USE `'.$legacyTargetName.'`');$pdo->exec(file_get_contents($root.'/private/migrations/002_lychee_import.sql'));
     $legacy=lm_ok(lm_request($legacyOwner,'POST','/admin/lychee-import/scan',[]),'Inventory a legacy copy job without move tables');$legacy=lm_steps($legacyOwner,$legacy,'preview');
     $legacyJob=$legacy['job']['id'];

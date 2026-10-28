@@ -41,6 +41,7 @@ jobs:
           TEST_DB_PASSWORD: test-only-password
         run: |
           php tests/run.php
+          php tests/account-security.php
           php tests/lychee-import.php
           php tests/lychee-move.php
           php tests/lychee-video.php
@@ -50,10 +51,21 @@ jobs:
       - run: node --test tests/ftps-plan.test.mjs
       - run: node --test tests/ftps-client.test.mjs
       - run: node --test tests/lychee-ui.test.mjs
+      - run: node --test tests/account-ui.test.mjs
       - run: node --test tests/webapp.test.mjs
       - name: Browser checks with Chrome
         run: |
           task_browser_binary="$(command -v google-chrome || command -v chromium)"
           test -n "$task_browser_binary"
           TEST_BROWSER="$task_browser_binary" node --test tests/webapp-browser.test.mjs
+      - name: Account login and profile browser checks
+        env:
+          LEXGALLERI_TEST: '1'
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: test-only-password
+        run: |
+          task_browser_binary="$(command -v google-chrome || command -v chromium)"
+          test -n "$task_browser_binary"
+          TEST_BROWSER="$task_browser_binary" node --test tests/account-browser.test.mjs
       - run: bash -n scripts/deploy-ftps.sh

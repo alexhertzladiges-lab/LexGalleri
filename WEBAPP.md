@@ -9,9 +9,9 @@ Appen skal åbnes via **HTTPS**, og webhotellets offentlige og private programfi
 ## Opdatér en eksisterende installation
 
 1. Sæt en eventuel igangværende import på pause.
-2. Lad [FTPS-workflowet](DEPLOYMENT.md) overføre de elleve offentlige appfiler fra den nye kodeversion. Det overfører ikke private programfiler eller konfiguration.
-3. Hent [private/app.php](private/app.php) fra samme version i GitHub med **Download raw file**. Erstat selv `/home/lexandkk/lexgalleri-private/app.php` gennem webhotellets filmanager eller din egen fulde filadgang.
-4. Behold dine eksisterende filer i `config/`, Lychee-importmodulet, databasen og private medier. Der er ingen ny SQL-migrering til webappen.
+2. Lad [FTPS-workflowet](DEPLOYMENT.md) overføre de tolv offentlige appfiler fra den nye kodeversion. Det overfører ikke private programfiler eller konfiguration.
+3. Hent [private/app.php](private/app.php) og [private/security.php](private/security.php) fra samme version i GitHub med **Download raw file**. Læg begge i `/home/lexandkk/lexgalleri-private/` gennem webhotellets filmanager eller din egen fulde filadgang.
+4. Behold dine eksisterende filer i `config/`, Lychee-importmodulet, databasen og private medier. Kommer du fra en udgave uden Authenticator, skal du også installere [004_account_security.sql](private/migrations/004_account_security.sql) i LexGalleris database efter [kontovejledningen](ACCOUNTS.md). Selve webappen kræver ingen yderligere SQL.
 5. Opdatér browsersiden på galleriets HTTPS-adresse; på pc kan du bruge **Ctrl+F5**. Genoptag derefter et pauset importjob som det samme job.
 
 Privat og offentlig kode kan installeres i den rækkefølge, din adgang tillader. Vent med at bruge den nye webapp og genoptage importen, indtil begge dele er opdateret.

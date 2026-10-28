@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+const LEXGALLERI_SECURITY_VERSION = 1;
 
 final class ApiError extends RuntimeException {
     public function __construct(public int $status, string $message) { parent::__construct($message); }
@@ -39,10 +40,11 @@ function safe_user(array $u): array { return ['id'=>$u['id'],'email'=>$u['email'
 function user(bool $admin = false): array {
     $id = $_SESSION['uid'] ?? ''; $u = $id ? one('SELECT * FROM users WHERE id=?',[$id]) : null;
     if (!$u || ($_SESSION['expires'] ?? 0) < time()) fail(401,'Log ind for at fortsætte');
+    lg_security_validate_session($u);
     if ($admin && !$u['admin']) fail(403,'Kun administrator'); return $u;
 }
 function login_user(array $u): never {
-    session_regenerate_id(true); $_SESSION = ['uid'=>$u['id'],'expires'=>time()+604800]; send(safe_user($u));
+    lg_security_login($u);
 }
 function access(string $g, ?string $permission = null): array {
     $u=user(); if (!one('SELECT id FROM galleries WHERE id=?',[$g])) fail(404,'Galleriet findes ikke');
@@ -152,7 +154,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1')]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready()]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -180,7 +182,7 @@ function route(string $method,string $path): never {
         $b=body();$mail=email($b);throttle('login:'.($_SERVER['REMOTE_ADDR']??''),30);throttle('account:'.$mail);
         $u=one('SELECT * FROM users WHERE email=?',[$mail]);$pw=$b['password']??'';
         if (!is_string($pw) || !$u || !password_verify($pw,$u['password'])) fail(401,'Forkert e-mail eller adgangskode');
-        if (password_needs_rehash($u['password'],PASSWORD_DEFAULT)) query('UPDATE users SET password=? WHERE id=?',[password_hash($pw,PASSWORD_DEFAULT),$u['id']]);
+        if (password_needs_rehash($u['password'],PASSWORD_DEFAULT)) {$newHash=password_hash($pw,PASSWORD_DEFAULT);query('UPDATE users SET password=? WHERE id=? AND password=?',[$newHash,$u['id'],$u['password']]);$u['password']=$newHash;}
         login_user($u);
     }
     if ($method==='POST' && $path==='/logout') { $_SESSION=[];session_destroy();setcookie(session_name(),'', ['expires'=>1,'path'=>$base?:'/','secure'=>$config['secure_cookies'],'httponly'=>true,'samesite'=>'Strict']);send(['ok'=>true]); }
@@ -195,7 +197,9 @@ function route(string $method,string $path): never {
         query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$inv['gallery_id'],$u['id'],$inv['upload'],$inv['download'],$inv['gps']]);
         query('DELETE FROM invitations WHERE token=?',[$hash]);$db->commit();login_user($u);
     }
+    lg_security_route_pre($method,$path);
     $u=user();
+    lg_security_route($method,$path,$u);
     if ($path==='/admin/lychee-import' || str_starts_with($path,'/admin/lychee-import/')) {
         user(true);
         if(!is_file($private.'/lychee-import.php')) {
@@ -302,7 +306,9 @@ function route(string $method,string $path): never {
 // Bootstrap: private configuration, session files and photos never live in public_html.
 try {
     $config=require $private.'/config/config.php';
-    foreach (['pdo_mysql','gd','exif','mbstring'] as $extension) if(!extension_loaded($extension)) fail(503,'PHP-udvidelsen '.$extension.' skal aktiveres på webhotellet');
+    foreach (['pdo_mysql','gd','exif','mbstring','openssl'] as $extension) if(!extension_loaded($extension)) fail(503,'PHP-udvidelsen '.$extension.' skal aktiveres på webhotellet');
+    if(!is_file($private.'/security.php'))fail(503,'Sikkerhedsmodulet mangler. Installér security.php fra samme kodeversion i den private mappe');
+    require_once $private.'/security.php';
     $base=rtrim($config['base_path']??'/LexGalleri','/');
     if($base!=='' && !preg_match('~^(/[a-zA-Z0-9_-]+)+$~D',$base))throw new RuntimeException('Ugyldig base_path');
     umask(0077);
@@ -316,7 +322,7 @@ try {
     $path=substr($uri,strlen($base));
     if($path==='' || $path==='/') {
         header('Content-Type: text/html; charset=utf-8');$asset=htmlspecialchars($base,ENT_QUOTES,'UTF-8');
-        echo '<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#416c57"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="LexGalleri"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>LexGalleri · Vores fælles minder</title><link rel="manifest" href="'.$asset.'/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="'.$asset.'/static/icon.svg"><link rel="apple-touch-icon" sizes="180x180" href="'.$asset.'/static/apple-touch-icon.png"><link rel="stylesheet" href="'.$asset.'/static/style.css?v=20261028-pwa"><script src="'.$asset.'/static/app.js?v=20261028-pwa" defer></script><script src="'.$asset.'/static/pwa.js?v=20261028-pwa" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';exit;
+        echo '<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#416c57"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="LexGalleri"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>LexGalleri · Vores fælles minder</title><link rel="manifest" href="'.$asset.'/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="'.$asset.'/static/icon.svg"><link rel="apple-touch-icon" sizes="180x180" href="'.$asset.'/static/apple-touch-icon.png"><link rel="stylesheet" href="'.$asset.'/static/style.css?v=20261028-accounts"><script src="'.$asset.'/static/qrcode.js?v=2.0.4" defer></script><script src="'.$asset.'/static/app.js?v=20261028-accounts" defer></script><script src="'.$asset.'/static/pwa.js?v=20261028-accounts" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';exit;
     }
     if(!str_starts_with($path,'/api/'))fail(404,'Ikke fundet');
     if((int)($_SERVER['CONTENT_LENGTH']??0)>26*1024*1024)fail(413,'Upload er for stor');

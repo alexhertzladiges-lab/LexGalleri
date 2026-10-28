@@ -6,7 +6,7 @@ Du installerer selv alle private filer med din egen adgang til webhotellet. Chat
 
 I webhotellets kontrolpanel:
 
-- Vælg PHP **8.4** og aktivér `pdo_mysql`, `gd` (JPEG/PNG/WebP), `exif`, `mbstring` og sessioner. `zip` er valgfri til ZIP-temaer; JSON-temaer virker uden.
+- Vælg PHP **8.4** og aktivér `pdo_mysql`, `gd` (JPEG/PNG/WebP), `exif`, `mbstring`, `openssl` og sessioner. `zip` er valgfri til ZIP-temaer; JSON-temaer virker uden.
 - Opret en tom MySQL/MariaDB-database og separat databasebruger med alle rettigheder **kun til denne database**. Gem værtsnavn, port, fuldt databasenavn, brugernavn og adgangskode hos dig selv.
 - Anbefal: `memory_limit=256M`, `upload_max_filesize=25M`, `post_max_size=26M`, `max_execution_time=60`, `display_errors=Off`, `log_errors=On`. Fejllog skal være privat.
 
@@ -19,18 +19,20 @@ Hent kildekoden fra GitHub (**Code → Download ZIP**) og pak den ud på din pc.
 ```text
 /home/lexandkk/lexgalleri-private/
 ├── app.php
+├── security.php
 ├── schema.sql
 ├── config/
-│   └── config.php
+│   ├── config.php
+│   └── mfa.key        # oprettes privat af PHP ved Authenticator-opsætning
 ├── originals/
 ├── previews/
 ├── thumbnails/
 └── sessions/
 ```
 
-Kopiér repositoryets `private/app.php` og `private/schema.sql` til denne mappe. Opret de øvrige mapper. Kopiér `private/config/config.example.php` til `config/config.php` på serveren, og redigér den dér.
+Kopiér repositoryets [private/app.php](private/app.php), [private/security.php](private/security.php) og [private/schema.sql](private/schema.sql) til denne mappe fra samme kodeversion. Opret de øvrige mapper. Kopiér `private/config/config.example.php` til `config/config.php` på serveren, og redigér den dér. Du opretter ikke selv `mfa.key`; PHP genererer den ved Authenticator-opsætningen.
 
-Private mapper: normalt **700**. Private filer: normalt **600**. PHP-processen skal kunne læse app, skema og konfiguration og skrive i billedmapperne og `sessions/`. Hvis PHP kører som en anden bruger, få webhotellet til at tilpasse ejer/grupperettigheder; brug ikke 777.
+Private mapper: normalt **700**. Private filer: normalt **600**. PHP-processen skal kunne læse programfiler, skema og konfiguration og skrive i billedmapperne, `sessions/` og den private `config/`-mappe, hvor krypteringsnøglen oprettes. Hvis PHP kører som en anden bruger, få webhotellet til at tilpasse ejer/grupperettigheder; brug ikke 777.
 
 **FTP-kontoens mappebegrænsning og PHP's filadgang er forskellige.** PHP skal have adgang til sine private filer, selv om vores FTPS-konto ikke har det. Hvis `open_basedir` er slået til, skal webhotellet tillade PHP adgang til begge appmapper. Det giver ikke FTPS-kontoen adgang til privatmappen.
 
@@ -76,6 +78,7 @@ Du kan enten overføre de offentlige filer selv med FTPS eller lade [GitHub-work
     ├── app.js
     ├── style.css
     ├── pwa.js
+    ├── qrcode.js
     ├── icon.svg
     ├── icon-192.png
     ├── icon-512.png
@@ -90,17 +93,21 @@ PHP's `public/index.php` er allerede kodet til at finde privatmappen på `/home/
 
 Åbn dit eget domænes HTTPS-adresse efterfulgt af `/LexGalleri/`. Udbydernavnet er ikke nødvendigvis dit domæne.
 
-Indtast opsætningsnøgle, navn, e-mail og en unik adminadgangskode på 12–72 bytes. PHP opretter tabellerne og admin-kontoen under en MySQL-lås. Efter vellykket oprettelse ændrer du selv `'setup_token' => ''` i den private konfiguration. Behold `secure_cookies=true` og brug HTTPS.
+Indtast opsætningsnøgle, navn, e-mail og en unik adminadgangskode på 12–72 bytes. PHP opretter tabellerne og admin-kontoen under en MySQL-lås. Tilknyt derefter en Authenticator-app ved at scanne QR-koden eller indtaste opsætningsnøglen fra skærmen, og bekræft med appens sekscifrede kode. Gem de viste engangskoder til gendannelse privat. Først efter bekræftelsen åbnes galleriet.
+
+Efter vellykket oprettelse og Authenticator-tilknytning ændrer du selv `'setup_token' => ''` i den private konfiguration. Behold `secure_cookies=true` og brug HTTPS. Se [ACCOUNTS.md](ACCOUNTS.md) for login og profiler.
 
 Opret et testgalleri, upload et ufølsomt testfoto, og prøv en gæsteinvitation i en anden browserprofil. Kontroller adgang og tilbagekaldelse på pc og mobil, før du uploader familiens arkiv.
 
 ## 6. Opdatering og backup
 
-GitHub/vores FTPS-konto opdaterer **kun de elleve offentlige appfiler** i oversigten ovenfor. Hvis en ny kodeversion også ændrer `private/app.php` eller `private/schema.sql`, får du en vejledning og lægger selv de relevante private filer ind fra samme version. Nye databaseskemaer skal have særskilt migreringsvejledning; upload af schema.sql alene opgraderer ikke en allerede installeret database.
+GitHub/vores FTPS-konto opdaterer **kun de offentlige appfiler** i oversigten ovenfor og [deployvejledningen](DEPLOYMENT.md). Hvis en ny kodeversion også ændrer private programfiler eller databaseskema, lægger du selv de relevante private filer ind fra samme version. Nye databaseskemaer skal have særskilt migreringsvejledning; upload af schema.sql alene opgraderer ikke en allerede installeret database.
+
+**Opdatér en eksisterende installation til profiler og Authenticator:** Importér [004_account_security.sql](private/migrations/004_account_security.sql) i **LexGalleris database** med phpMyAdmin. Hent derefter [app.php](private/app.php) og [security.php](private/security.php) fra samme kodeversion, og læg begge i `/home/lexandkk/lexgalleri-private/` med din egen adgang. Behold eksisterende konfiguration, medier og importtabeller. Lad en eventuel import være pauset, indtil offentlig og privat kode matcher. Log ind igen og gennemfør den første Authenticator-tilknytning; tidligere administratorsessioner giver ikke adgang uden den. Hele forløbet findes i [ACCOUNTS.md](ACCOUNTS.md).
 
 Til webapp-opdateringen erstatter du selv [private/app.php](private/app.php) på `/home/lexandkk/lexgalleri-private/app.php`. Den tilføjer henvisningerne til manifest, ikoner og webappens script. Behold din udfyldte `config/config.php`, importkonfiguration, database og private medier. Der kræves ingen ny SQL-migrering. Hold en eventuel import pauset, indtil offentlige og private programfiler er fra samme version, og genoptag derefter samme job.
 
-Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**. SQL alene indeholder ingen billeder. Hold appen ude af brug under manuel samlet backup/gendannelse, opbevar kopier privat/krypteret, og afprøv gendannelse separat. Sessionsmappen kan udelades; brugerne skal så logge ind igen efter gendannelse.
+Du vedligeholder selv backup af **MySQL-databasen og hele den private mappe**, herunder `config/mfa.key`. Nøglen bruges til at læse de krypterede Authenticator-hemmeligheder i databasen; gem den sammen med din private backup. SQL alene indeholder hverken billeder eller denne nøgle. Hold appen ude af brug under manuel samlet backup/gendannelse, opbevar kopier privat/krypteret, og afprøv gendannelse separat. Sessionsmappen kan udelades; brugerne skal så logge ind igen efter gendannelse.
 
 ## Installér webappen på mobil eller pc
 
@@ -118,6 +125,9 @@ Følg [den særskilte Lychee-importvejledning](LYCHEE-IMPORT.md), hvis du vil ko
 - **404 på `/LexGalleri/api/status`:** Kontrollér `.htaccess`, `base_path` og Apache/LiteSpeed-rewrite. Ved andre servertyper skal webhotellet konfigurere tilsvarende routing til index.php.
 - **500:** Se din private PHP-fejllog. Kontrollér DB-forbindelse, privilegier og `open_basedir`. Hvis webhotellet ikke tillader `Options -Indexes`, bed support om mappeindeks-beskyttelse og fjern kun denne linje fra .htaccess.
 - **Login forsvinder:** Brug HTTPS og kontrollér PHP-skriveadgang til `sessions/`.
+- **Login kræver kontomigrering:** Kør `004_account_security.sql` i LexGalleris database, og kontrollér, at begge private programfiler er fra den samme version.
+- **Authenticator-opsætning kan ikke gemmes:** Kontrollér OpenSSL og PHP's skriveadgang til den private `config/`-mappe. Bevar en allerede oprettet `mfa.key`.
+- **Authenticator-kode afvises:** Brug automatisk dato og tid på telefonen og den seneste kode. En kode, der netop er brugt, kan ikke genbruges; vent på næste kode. Se [kontovejledningen](ACCOUNTS.md).
 - **Upload afvises:** Kontrollér PHP-grænser; prøv et mindre billede.
 
 En grøn FTPS-kørsel bekræfter overførslen af de offentlige filer. Kontrollér derefter dit eget website; de private filer og databaseoplysninger installerer du særskilt med din egen adgang.

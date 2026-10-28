@@ -47,6 +47,8 @@ En FTPS-kontos mappebegrænsning giver ikke i sig selv PHP adgang. Hvis `open_ba
 
 ## 3. Installér de private filer selv
 
+Den aktuelle app kræver også kontosikkerhedsmodulet og obligatorisk admin-Authenticator. Har installationen endnu ikke dette, skal du følge [ACCOUNTS.md](ACCOUNTS.md) og installere `security.php` samt `004_account_security.sql` i LexGalleris database sammen med den nye `app.php`.
+
 Hent følgende filer fra **samme kodeversion** i GitHub, og læg dem ind med webhotellets filmanager eller din egen fulde filadgang:
 
 | Fil i GitHub | Placering på dit webhotel |
@@ -86,7 +88,7 @@ Importtabellerne tilføjes med disse filer:
 
 Skift derefter `'enabled' => false` til `'enabled' => true` i din private `config/lychee-import.php`.
 
-De offentlige og private programfiler skal være fra samme kodeversion. [FTPS-workflowet](DEPLOYMENT.md) overfører kun de elleve offentlige appfiler, inklusive webappens manifest, service worker og ikoner. Det overfører hverken den private PHP-kode, konfigurationen eller SQL-migreringen. Når de offentlige filer er deployet, installerer du selv de tilhørende private programfiler. **Lad importen være pauset eller endnu ikke startet, indtil begge dele er opdateret**, og opdatér derefter status.
+De offentlige og private programfiler skal være fra samme kodeversion. [FTPS-workflowet](DEPLOYMENT.md) overfører kun de tolv offentlige appfiler, inklusive webappens manifest, service worker og ikoner. Det overfører hverken den private PHP-kode, konfigurationen eller SQL-migreringen. Når de offentlige filer er deployet, installerer du selv de tilhørende private programfiler. **Lad importen være pauset eller endnu ikke startet, indtil begge dele er opdateret**, og opdatér derefter status.
 
 ## 5. Lav prøvevisningen
 

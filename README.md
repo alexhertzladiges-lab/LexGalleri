@@ -9,6 +9,8 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 ## Funktioner
 
 - Administrator, gæstekonti og personlige engangsinvitationer, som udløber efter 7 dage.
+- **Min profil** med navn og e-mail. Admin kan se og redigere egne og medlemmers profiler samt sætte en ny adgangskode. Eksisterende adgangskoder vises aldrig.
+- Obligatorisk Authenticator-login for administratorer med TOTP og engangskoder til gendannelse. Se [ACCOUNTS.md](ACCOUNTS.md) for opsætning, profiler og opdatering.
 - Separat se-, upload-, originaldownload- og GPS-adgang pr. bruger og galleri.
 - JPEG/PNG/WebP-upload med dubletkontrol, miniaturebilleder og større visningsbilleder.
 - EXIF-dato, GPS og kameraretning aflæses. Visningsbilleder genkodes uden originalens EXIF.
@@ -44,7 +46,9 @@ Alle nye visuelle forslag, billeder og visualiseringer lægges i dette private G
 
 ## FTPS og private filer
 
-FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun de elleve offentlige kode-, manifest- og ikonfiler, som er oplistet i [DEPLOYMENT.md](DEPLOYMENT.md). Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages.
+FTPS-kontoens rod skal være `/home/lexandkk/public_html/LexGalleri`. GitHub-workflowet overfører kun de offentlige appfiler, som er oplistet i [DEPLOYMENT.md](DEPLOYMENT.md). Private filer installeres og opdateres manuelt af ejeren. Ingen forbindelsesoplysninger fra andre projekter antages.
+
+Profil- og Authenticator-opdateringen kræver [004_account_security.sql](private/migrations/004_account_security.sql) i en eksisterende LexGalleri-database samt begge private programfiler [app.php](private/app.php) og [security.php](private/security.php) fra samme version som den offentlige kode. Behold din eksisterende konfiguration og private medier. PHP opretter en privat krypteringsnøgle i `config/mfa.key`; den skal indgå i din private backup og må aldrig lægges på GitHub. Se [ACCOUNTS.md](ACCOUNTS.md).
 
 Webapp-opdateringen kræver, at ejeren erstatter [private/app.php](private/app.php) med samme version som de offentlige filer. Behold eksisterende konfiguration, database og private medier; der er ingen SQL-migrering til webappen. Se [WEBAPP.md](WEBAPP.md) for opdatering og installation på telefonen.
 
@@ -52,13 +56,17 @@ MP4-opdateringen kræver begge private programfiler: [app.php](private/app.php) 
 
 ## Test
 
-PHP 8.4 med pdo_mysql, gd, exif, mbstring, zip og curl kræves for hele testen. Testen starter selv en lokal PHP-testserver, opretter en tilfældigt navngivet testdatabase og sletter kun den database bagefter. Brug en isoleret testdatabaseserver med en bruger, der må oprette testdatabaser. Testen læser aldrig den rigtige app-konfiguration.
+PHP 8.4 med pdo_mysql, gd, exif, mbstring, openssl, zip og curl kræves for hele testen. Testen starter selv en lokal PHP-testserver, opretter en tilfældigt navngivet testdatabase og sletter kun den database bagefter. Brug en isoleret testdatabaseserver med en bruger, der må oprette testdatabaser. Testen læser aldrig den rigtige app-konfiguration.
 
 ```bash
 LEXGALLERI_TEST=1 TEST_DB_HOST=127.0.0.1 TEST_DB_USER=root TEST_DB_PASSWORD=test-only-password php tests/run.php
 ```
 
 GitHub Actions er sat op til PHP 8.4 og MySQL 8.4. Testen kontrollerer installation, konti, invitationer, gallerirettigheder, direkte billedadgang, tilbagekaldelse, EXIF/GPS, orientering, originalbevarelse, metadata, favoritter og temaer. Browserudseendet og det konkrete webhotel skal stadig kontrolleres efter installation.
+
+`php tests/account-security.php` bruger samme isolerede databaseindstillinger og kontrollerer Authenticator, udløb og genbrug af koder, reservekoder, profilrettigheder, sessions-tilbagekaldelse og installation af kontomigreringen. Brug kun syntetiske konti og Authenticator-nøgler i testen; den må ikke køres mod den rigtige database.
+
+`node --test tests/account-ui.test.mjs` kontrollerer profil- og loginforløbene. `LEXGALLERI_TEST=1 TEST_DB_HOST=127.0.0.1 TEST_DB_USER=root TEST_DB_PASSWORD=test-only-password node --test tests/account-browser.test.mjs` bruger rigtig PHP/MySQL og Chrome/Chromium til hele login-, Authenticator- og medlemsredigeringsforløbet med syntetiske konti.
 
 CI kører også `php tests/lychee-import.php` med samme isolerede testindstillinger. Importtesten opretter to testdatabaser og en midlertidig kildebruger med kun SELECT; testkontoen skal derfor også kunne oprette brugere og tildele rettigheder. Alle testdata er syntetiske og ryddes op bagefter. `node --test tests/lychee-ui.test.mjs` kontrollerer blandt andet, at prøvevisning ikke starter kopiering, og at navigation og pause stopper nye portioner.
 
@@ -72,7 +80,7 @@ CI kører også `php tests/lychee-import.php` med samme isolerede testindstillin
 
 ## Begrænsninger
 
-HEIC, direkte videoupload, import af andre videoformater end MP4, kortvisning, kommentarer, personmærkning, offlineadgang til familiearkivet, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb, MFA og adgangskodegendannelse er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt.
+HEIC, direkte videoupload, import af andre videoformater end MP4, kortvisning, kommentarer, personmærkning, offlineadgang til familiearkivet, genoptagelig upload, papirkurv, gæstekonti med automatisk udløb og automatisk adgangskodegendannelse via e-mail er endnu ikke implementeret. Invitationer udløber; den adgang, der oprettes efter accept, fjernes manuelt af admin. Invitationslinket sendes manuelt. Admin kan sætte en ny adgangskode til et medlem gennem profilvisningen.
 
 Webappen kræver HTTPS og understøttelse i browseren. Den installeres fra browseren og distribueres ikke gennem App Store eller Google Play. Uden forbindelse vises kun en generisk forbindelsesbesked; privat HTML, API-svar, billeder og videoer gemmes ikke i service workerens offlinecache.
 

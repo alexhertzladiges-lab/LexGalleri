@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/security-test-helper.php';
 /**
  * Real HTTP/byte tests using a synthetic, playable H.264 MP4. All destructive
  * operations use a random temporary tree and isolated test databases/accounts.
@@ -101,14 +102,14 @@ SQL);
     $config=['db_host'=>$host,'db_port'=>$port,'db_name'=>$targetName,'db_user'=>$dbuser,'db_password'=>$password,'base_path'=>'/LexGalleri','secure_cookies'=>false,'setup_token'=>str_repeat('video-test-setup-',4)];
     $importConfig=['enabled'=>true,'expected_version'=>'6.6.12','db_host'=>$host,'db_port'=>$port,'db_name'=>$sourceName,'db_user'=>$sourceUser,'db_password'=>$sourcePassword,'table_prefix'=>'','uploads_root'=>$uploadsRoot];
     file_put_contents($privateRoot.'/config/config.php','<?php return '.var_export($config,true).';');file_put_contents($privateRoot.'/config/lychee-import.php','<?php return '.var_export($importConfig,true).';');
-    foreach(['app.php','schema.sql','lychee-import.php'] as $file)copy($root.'/private/'.$file,$privateRoot.'/'.$file);
+    foreach(['app.php','security.php','schema.sql','lychee-import.php'] as $file)copy($root.'/private/'.$file,$privateRoot.'/'.$file);
     $env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
     $server=proc_open([PHP_BINARY,'-d','memory_limit=128M','-d','opcache.enable=0','-d','opcache.enable_cli=0','-d','display_errors=0','-S',parse_url($origin,PHP_URL_HOST).':'.parse_url($origin,PHP_URL_PORT),$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Cannot start isolated video test server');
     $owner=lv_client();$guest=lv_client();$anonymous=lv_client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(lv_request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
     if(!$ready)throw new RuntimeException('Video test server did not become ready');
-    lv_ok(lv_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Video admin','email'=>'video-admin@example.test','password'=>'long-video-password']),'Create video test admin');
+    lv_ok(security_test_complete_admin($owner,lv_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Video admin','email'=>'video-admin@example.test','password'=>'long-video-password']),'lv_request'),'Create video test admin');
     $ownerId=lv_request($owner,'GET','/me')[1]['id'];$pdo->exec('USE `'.$targetName.'`');
     $pdo->exec(file_get_contents($root.'/private/migrations/002_lychee_import.sql'));$pdo->exec(file_get_contents($root.'/private/migrations/003_lychee_move.sql'));
     $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'video-guest@example.test','Video guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);

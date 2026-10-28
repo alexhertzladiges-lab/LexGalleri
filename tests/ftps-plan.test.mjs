@@ -7,7 +7,7 @@ import { connection, plan } from '../scripts/ftps-plan.mjs';
 const env = { FTPS_HOST:'ftps.example.test', FTPS_USERNAME:'gallery-user', FTPS_PORT:'21', GITHUB_SHA:'a'.repeat(40), GITHUB_RUN_ID:'123', GITHUB_RUN_ATTEMPT:'1' };
 const publicFiles = [
   'static/icon.svg','static/icon-192.png','static/icon-512.png','static/apple-touch-icon.png',
-  'manifest.webmanifest','service-worker.js','static/pwa.js','static/style.css','static/app.js',
+  'manifest.webmanifest','service-worker.js','static/pwa.js','static/style.css','static/qrcode.js','static/app.js',
   '.htaccess','index.php',
 ];
 test('requires explicit host, username and port; no other project credentials assumed', () => {
@@ -26,13 +26,13 @@ test('read-only diagnosis stays at the restricted public root', () => {
   assert(!/^(put|mv|mkdir|chmod|rm|rmdir|mirror|!) /m.test(p));
   assert(!p.includes('private'));
 });
-test('only the eleven public app files are staged before activation', () => {
+test('only the twelve public app files are staged before activation', () => {
   const lines=plan({...env,FTPS_PASSWORD:'never-in-plan'}).trim().split('\n');
   assert.deepEqual(lines.filter(l=>l.startsWith('put ')).map(l=>l.split('"')[1]),publicFiles.map(path=>'public/'+path));
   assert.deepEqual(lines.filter(l=>l.startsWith('mv ')).map(l=>l.split('"')[3]),publicFiles);
-  assert.equal(lines.filter(l=>l.startsWith('mv ')).length,11);
+  assert.equal(lines.filter(l=>l.startsWith('mv ')).length,12);
   assert(lines.findIndex(l=>l.startsWith('mv '))>lines.findLastIndex(l=>l.startsWith('put ')));
-  assert.equal(lines.filter(l=>l.startsWith('chmod 644 ')).length,11);
+  assert.equal(lines.filter(l=>l.startsWith('chmod 644 ')).length,12);
   assert(!/private|schema\.sql|app\.php|config|originals|previews|thumbnails|sessions|never-in-plan|^rm |^rmdir |^!|mirror/m.test(lines.join('\n')));
 });
 test('app metadata and icons activate before the entry point, which activates last', () => {
