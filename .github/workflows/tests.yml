@@ -43,6 +43,7 @@ jobs:
           php tests/run.php
           php tests/lychee-import.php
           php tests/lychee-move.php
+          php tests/lychee-video.php
       - run: node --check public/static/app.js
       - run: node --test tests/ftps-plan.test.mjs
       - run: node --test tests/ftps-client.test.mjs

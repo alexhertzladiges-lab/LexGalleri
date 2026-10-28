@@ -88,7 +88,7 @@ SQL);
     $q=$pdo->prepare('INSERT INTO base_albums VALUES(?,?,?,7,?,?)');
     foreach([[$rootAlbum,'Familie','Root description'],[$childAlbum,'Sommer','Child description'],[$emptyAlbum,'Tomt','Empty description']] as [$id,$title,$description])$q->execute([$id,$title,$description,'2010-01-01 00:00:00','2020-01-01 00:00:00']);
     $q=$pdo->prepare('INSERT INTO albums VALUES(?,?)');$q->execute([$rootAlbum,null]);$q->execute([$childAlbum,$rootAlbum]);$q->execute([$emptyAlbum,null]);
-    $paths=[1=>'original/01/02/first.jpg',2=>'original/02/03/duplicate.jpg',3=>'original/03/04/unsorted.jpg',4=>'original/04/05/movie.mp4',5=>'original/missing.jpg',6=>'original/06/07/bad-checksum.jpg',7=>'../outside.jpg',8=>'original/08/09/link.jpg'];
+    $paths=[1=>'original/01/02/first.jpg',2=>'original/02/03/duplicate.jpg',3=>'original/03/04/unsorted.jpg',4=>'original/04/05/movie.webm',5=>'original/missing.jpg',6=>'original/06/07/bad-checksum.jpg',7=>'../outside.jpg',8=>'original/08/09/link.jpg'];
     lm_jpeg($uploadsRoot.'/'.$paths[1],20,100,70);copy($uploadsRoot.'/'.$paths[1],$uploadsRoot.'/'.$paths[2]);
     lm_jpeg($uploadsRoot.'/'.$paths[3],100,70,20);lm_jpeg($uploadsRoot.'/'.$paths[6],190,170,10);
     lm_jpeg($temp.'/outside.jpg',200,10,10);symlink($temp.'/outside.jpg',$uploadsRoot.'/'.$paths[8]);
@@ -102,7 +102,7 @@ SQL);
     $addPhoto=function(int $n,string $path)use($uploadsRoot,$photoInsert,$variantInsert,$membershipInsert,$rootAlbum,$childAlbum):void{
         $exists=is_file($uploadsRoot.'/'.$path);$sha=$exists?sha1_file($uploadsRoot.'/'.$path):null;$current=$n===3?str_repeat('2',40):$sha;$original=$sha;
         if($n===6){$current=str_repeat('0',40);$original=str_repeat('3',40);}
-        $photoInsert->execute([lm_id($n),$n===1?'Manuel flyttet titel':'Move photo '.$n,'Source description '.$n,7,$n===4?'video/mp4':'image/jpeg','family,summer','2001-02-03 04:05:06.000000',$n===3?'Europe/Copenhagen':'UTC','1999-01-01 00:00:00','UTC','55.70000000','12.60000000','København',$current,$original,0,'2010-05-06 07:08:09.000000','2020-06-07 08:09:10.000000',$rootAlbum]);
+        $photoInsert->execute([lm_id($n),$n===1?'Manuel flyttet titel':'Move photo '.$n,'Source description '.$n,7,$n===4?'video/webm':'image/jpeg','family,summer','2001-02-03 04:05:06.000000',$n===3?'Europe/Copenhagen':'UTC','1999-01-01 00:00:00','UTC','55.70000000','12.60000000','København',$current,$original,0,'2010-05-06 07:08:09.000000','2020-06-07 08:09:10.000000',$rootAlbum]);
         $variantInsert->execute([lm_id($n),$path,$exists?filesize($uploadsRoot.'/'.$path):123]);
         if($n!==3)$membershipInsert->execute([lm_id($n),$childAlbum]);if($n===1)$membershipInsert->execute([lm_id($n),$rootAlbum]);
     };
