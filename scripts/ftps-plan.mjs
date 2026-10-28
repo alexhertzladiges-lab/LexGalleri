@@ -44,7 +44,9 @@ export function plan(env, root = process.cwd(), diagnostic = false) {
     const path = resolve(root, f.source);
     if (!existsSync(path) || !lstatSync(path).isFile() || lstatSync(path).isSymbolicLink()) throw Error('Kodefil mangler eller er et symlink: ' + f.source);
   }
-  lines.push('mkdir -p "static"', 'chmod 755 "static"');
+  // Some FTP servers reject MKD for an existing directory even with lftp -p.
+  // Reuse static when accessible; a failed creation must still stop the upload.
+  lines.push('cd "static" || mkdir "static"', 'cd "/"', 'chmod 755 "static"');
   for (const f of files) {
     const slash = f.target.lastIndexOf('/');
     f.staged = f.target.slice(0, slash + 1) + '.lexgalleri-' + tag + '-' + f.target.slice(slash + 1);
