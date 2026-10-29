@@ -21,7 +21,7 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const galleryId='a'.repeat(32);
   const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
@@ -30,6 +30,8 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   let holdRequestPosts=false,holdDecisions=false;
   let holdGrantWrites=false,holdDeletes=false,otherRevoked=false,mediaDeleteCapability=mediaDelete;
   const memberDeletes=[],pendingMemberDeletes=[];let memberDeleteCapability=memberDelete,holdMemberDeletes=false,memberDeleted=false;
+  const invitationCreates=[],pendingInvites=[],galleryEdits=[],pendingGalleryEdits=[],photoEdits=[];let holdInvites=false,holdGalleryEdits=false,multiInviteCapability=multiInvites;
+  let galleryName='Syntetisk galleri',galleryDescription='Kun genererede testdata';
   const defaultTheme={version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'};
   const activeThemeId='e'.repeat(32),inactiveThemeId='9'.repeat(32),themeDeleteRequests=[],pendingThemeDeletes=[];
   const createdGalleryId='7'.repeat(32),galleryCreates=[],pendingGalleryCreates=[],createdGalleries=[];
@@ -62,7 +64,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       send('text/html; charset=utf-8',html);return;
     }
     if(url.pathname===base+'/api/status'){
-      const capabilities={...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
+      const capabilities={...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
     if(url.pathname===base+'/api/me'){json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
@@ -110,9 +112,9 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
     }
     if(url.pathname===base+'/api/galleries'&&req.method==='GET'){
       const visiblePhotos=photos.filter(photo=>!deleted.has(photo.id));
-      json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:visiblePhotos.length,cover:mediaDelete?visiblePhotos[0]?.id??null:null},...(permissions||member&&!otherRevoked?[{id:otherGalleryId,name:member?'Privat syntetisk galleri':'Et andet galleri',description:member?'Beskrivelse kun for inviterede':'Kun genererede testdata',count:member?37:0,cover:null}]:[]),...createdGalleries]);return;
+      json([{id:galleryId,name:galleryName,description:galleryDescription,count:visiblePhotos.length,cover:mediaDelete?visiblePhotos[0]?.id??null:null},...(permissions||multiInvites||member&&!otherRevoked?[{id:otherGalleryId,name:member?'Privat syntetisk galleri':'Et andet galleri',description:member?'Beskrivelse kun for inviterede':'Kun genererede testdata',count:member?37:0,cover:null}]:[]),...createdGalleries]);return;
     }
-    if((permissions||memberDelete)&&url.pathname===base+'/api/admin/users'){
+    if((permissions||memberDelete||multiInvites)&&url.pathname===base+'/api/admin/users'){
       json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},...(!memberDeleted?[{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}]:[])],grants});return;
     }
     if(memberDelete&&url.pathname===base+'/api/admin/users/'+memberId){
@@ -124,18 +126,34 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
         if(holdMemberDeletes)pendingMemberDeletes.push(finish);else finish();return;
       }
     }
-    if(permissions&&url.pathname===base+'/api/admin/grants'&&req.method==='PUT'){
+    if((permissions||multiInvites)&&url.pathname===base+'/api/admin/invitations'&&req.method==='POST'){
+      let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);invitationCreates.push(fields);
+      const finish=error=>{if(error){json({detail:error},503);return;}const chosen=fields.galleries||[{gallery_id:fields.gallery_id,upload:fields.upload,download:fields.download,gps:fields.gps}];json({path:base+'/?invite=synthetic-combined-token',expires_days:7,galleries:chosen.map(choice=>({...choice,name:choice.gallery_id===galleryId?galleryName:'Et andet galleri'}))});};
+      if(holdInvites)pendingInvites.push(finish);else finish();return;
+    }
+    if(galleryEditing&&url.pathname===base+'/api/galleries/'+galleryId&&req.method==='PATCH'){
+      let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);galleryEdits.push(fields);
+      if(member&&!editMember){json({detail:'Ingen redigeringsadgang'},403);return;}
+      const finish=error=>{if(error){json({detail:error},503);return;}galleryName=fields.name;galleryDescription=fields.description;json({ok:true});};
+      if(holdGalleryEdits)pendingGalleryEdits.push(finish);else finish();return;
+    }
+    if(galleryEditing&&new RegExp('^'+base+'/api/photos/[a-f0-9]{32}$').test(url.pathname)&&req.method==='PATCH'){
+      let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);photoEdits.push(fields);
+      if(member&&(!editMember||'lat' in fields||'lon' in fields)){json({detail:'Ingen redigeringsadgang'},403);return;}
+      const photo=photos.find(photo=>photo.id===url.pathname.split('/').at(-1));if(!photo){json({detail:'Ikke fundet'},404);return;}Object.assign(photo,fields);json({ok:true});return;
+    }
+    if((permissions||multiInvites)&&url.pathname===base+'/api/admin/grants'&&req.method==='PUT'){
       let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);grantWrites.push(fields);
       const finish=error=>{
         if(error){json({detail:error},503);return;}
         grants=grants.filter(grant=>grant.user_id!==fields.user_id||grant.gallery_id!==fields.gallery_id);
-        if(fields.view)grants.push({user_id:fields.user_id,gallery_id:fields.gallery_id,upload:Number(fields.upload),download:Number(fields.download),gps:Number(fields.gps)});
+        if(fields.view)grants.push({user_id:fields.user_id,gallery_id:fields.gallery_id,upload:Number(fields.upload),download:Number(fields.download),gps:Number(fields.gps),edit:Number(fields.edit||false)});
         json({ok:true});
       };
       if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
-      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,download:true,gps:true,video:true}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,video:!editMember}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
       json(otherRevoked?{detail:'Du har ikke adgang'}:{photos:otherPhotos,permissions:{upload:false,download:false,gps:false,video:false}},otherRevoked?403:200);return;
@@ -173,6 +191,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+    invitationCreates,galleryEdits,photoEdits,holdInvites:()=>{holdInvites=true;},releaseInvite:error=>{assert(pendingInvites.length,'an invitation must be pending');pendingInvites.shift()(error);},holdGalleryEdits:()=>{holdGalleryEdits=true;},releaseGalleryEdit:error=>{assert(pendingGalleryEdits.length,'a gallery update must be pending');pendingGalleryEdits.shift()(error);},disableMultiInvites:()=>{multiInviteCapability=false;},
     memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
     approvalRequests,deletionRequestPosts,deletionDecisions,
     seedDeletionRequests:()=>{for(const photo of [photos[1],photos[2]])approvalRequests.push(newApproval(photo));},
@@ -565,6 +584,114 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
       const unavailable=await infoVisibility('.media-delete-unavailable');assert(unavailable.inside&&unavailable.visible&&unavailable.beforeTitle,'administrators must see the missing-capability explanation immediately in Info');assert.equal(unavailable.scroll,0);assert.equal(unavailable.titleLength,200);assert.equal(unavailable.role,'status');assert.equal(unavailable.text,'Sletning er ikke aktiveret endnu.');
       assert.equal(site.deleteRequests.length,3);
     });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: password eyes cover login, setup, registration and account confirmation without submitting',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture();let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','initial page');
+    const check=async(expected,root)=>{
+      const before=site.requests.length;
+      const result=await run('(()=>{const root=document.querySelector('+JSON.stringify(root)+'),fields=[...root.querySelectorAll(".password-field input")];if(fields.length!=='+expected+')throw Error("unexpected password field count: "+fields.length);const secret="Syntetisk kode & < > 12345";for(const input of fields){const button=input.parentElement.querySelector(".password-toggle"),label=document.querySelector(\'label[for="\'+input.id+\'"]\');if(input.type!=="password"||!label||button.type!=="button"||button.getAttribute("aria-controls")!==input.id||button.getAttribute("aria-pressed")!=="false")throw Error("password eye defaults or labels invalid");input.value=secret;input.focus();input.setSelectionRange(3,7);button.click();if(input.type!=="text"||input.value!==secret||input.selectionStart!==3||input.selectionEnd!==7||button.getAttribute("aria-pressed")!=="true"||!button.getAttribute("aria-label").startsWith("Skjul "))throw Error("reveal changed value, caret or accessible state");if(new FormData(input.form).get(input.name)!==secret)throw Error("form value changed when revealed");if(fields.some(other=>other!==input&&other.type!=="password"))throw Error("eye changed another field");button.click();if(input.type!=="password"||button.getAttribute("aria-pressed")!=="false"||input.value!==secret)throw Error("hide failed");}addPasswordToggles(root);return root.querySelectorAll(".password-toggle").length;})()');
+      assert.equal(result,expected);assert.equal(site.requests.length,before,'password eyes must never submit a form or make a network request');
+    };
+    for(const mobile of [false,true]){
+      await call('Emulation.setDeviceMetricsOverride',{width:mobile?390:1280,height:mobile?844:900,deviceScaleFactor:1,mobile});
+      for(const [expression,count] of [['auth(false)',1],['auth(true)',2],['auth(false,"synthetic-invitation")',1]]){await run(expression);await check(count,'#auth');assert(await run('document.querySelector(".login").scrollWidth<=innerWidth'),'login fields fit the viewport');}
+    }
+    await run('me={id:"'+'f'.repeat(32)+'",admin:1,name:"Admin",email:"admin@example.test"};view="people";editAccountProfile({id:"'+site.memberId+'",admin:0,name:"Member",email:"member@example.test"},false)');await check(3,'#account-edit');
+    await run('document.querySelector("#close-modal").click()');await wait('document.querySelector("#modal").innerHTML===""','closed profile clears passwords and revealed values');
+    for(const action of ['recovery-codes','replace']){await run('accountSecurityAction('+JSON.stringify(action)+')');await check(1,'#account-security');await run('document.querySelector("#close-modal").click()');await wait('document.querySelector("#modal").innerHTML===""','security confirmation cleared');}
+    await run('me={id:"'+site.memberId+'",admin:0,name:"Member",email:"member@example.test"};editAccountProfile(me,true)');await check(3,'#account-edit');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: invitations select multiple galleries and distinct rights before creating one link',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture({multiInvites:true,galleryEditing:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const row=id=>'document.querySelector(\'[data-invite-gallery="'+id+'"]\')';
+    const right=(id,key)=>row(id)+'.querySelector(\'[data-invite-right="'+key+'"]\')';
+    const sends=async n=>{const until=Date.now()+5000;while(site.invitationCreates.length<n&&Date.now()<until)await pause(20);assert.equal(site.invitationCreates.length,n);};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=people]")','admin menu');await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector("#invite")','people view');await run('document.querySelector("#invite").click()');
+    await run('document.querySelector("#invite-form").elements.name.value="Inviteret person";document.querySelector("#invite-form").elements.email.value="invite@example.test";document.querySelector("#invite-form").requestSubmit()');
+    assert(await run('document.querySelector("#invite-form .error").textContent.includes("Vælg mindst")'));assert.equal(site.invitationCreates.length,0);
+    assert(await run(right(site.galleryId,'edit')+'.disabled&&'+right(site.otherGalleryId,'upload')+'.disabled'));
+    await run(right(site.galleryId,'view')+'.click();'+right(site.galleryId,'upload')+'.click();'+right(site.galleryId,'edit')+'.click();'+right(site.galleryId,'view')+'.click()');
+    assert(await run('!'+right(site.galleryId,'edit')+'.checked&&'+right(site.galleryId,'edit')+'.disabled'));
+    await run(right(site.galleryId,'view')+'.click();'+right(site.galleryId,'upload')+'.click();'+right(site.galleryId,'edit')+'.click();'+right(site.otherGalleryId,'view')+'.click()');
+    assert.equal(await run('document.querySelector("#invite-selection-count").textContent'),'2 gallerier valgt');
+    await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+    assert(await run('document.querySelector("#modal").scrollWidth<=document.querySelector("#modal").clientWidth+1'),'permission cards must fit a mobile dialog');
+    site.holdInvites();await run('document.querySelector("#invite-form").requestSubmit();document.querySelector("#invite-form").requestSubmit()');await sends(1);
+    assert.deepEqual(site.invitationCreates[0],{name:'Inviteret person',email:'invite@example.test',galleries:[{gallery_id:site.galleryId,upload:true,edit:true,download:false,gps:false},{gallery_id:site.otherGalleryId,upload:false,edit:false,download:false,gps:false}]});
+    assert(await run('[...document.querySelectorAll("#invite-form input")].every(input=>input.disabled)'));
+    site.releaseInvite('Syntetisk invitationsfejl');await wait('document.querySelector("#invite-form .error").textContent.includes("Syntetisk invitationsfejl")','invitation retry state');
+    assert(await run(right(site.galleryId,'edit')+'.checked&&!'+right(site.galleryId,'edit')+'.disabled'));
+    await run('document.querySelector("#invite-form").requestSubmit()');await sends(2);site.releaseInvite();await wait('!!document.querySelector("#invite-link")','one personal invitation');
+    const summary=await run('[...document.querySelectorAll(".invite-summary li")].map(item=>item.textContent)');assert.equal(summary.length,2);assert.match(summary[0],/Syntetisk galleri.*Redigere galleri/);assert.match(summary[1],/Et andet galleri/);assert(!summary[1].includes('Redigere'));
+    assert.match(await run('document.querySelector("#invite-link").value'),/\?invite=synthetic-combined-token$/);
+    await run('document.querySelector("#close-modal").click()');await wait('!document.querySelector("#invite-link")','closed invitation removes its private token from the dialog');
+    await run('document.querySelector("[data-user]").click()');await wait('!!document.querySelector(".grant input[name=edit]")','editing permission management');
+    await run('document.querySelector(".grant input[name=edit]").click();document.querySelector(".grant").requestSubmit()');await wait('document.querySelector(".grant .grant-feedback").dataset.state==="success"','saved editing permission');
+    assert.equal(site.grantWrites.at(-1).edit,true);await run('document.querySelector("#close-modal").click();document.querySelector("[data-user]").click()');assert(await run('document.querySelector(".grant input[name=edit]").checked'));
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: admin gallery rename saves name and description without reloading photos',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture({galleryEditing:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#edit-gallery")','gallery editing action');
+    assert(await run('!document.querySelector("#edit-gallery").disabled'),'admin renaming is available independently of member permission migration');
+    await run('window.__renameGrid=document.querySelector("#photo-grid");window.__renameImages=[...__renameGrid.querySelectorAll("img")];document.querySelector("#edit-gallery").click()');
+    const before=site.requests.filter(path=>path.endsWith('/photos')).length;site.holdGalleryEdits();
+    await run('document.querySelector("#edit-gallery-form").elements.name.value="Familieferie 2026";document.querySelector("#edit-gallery-form").elements.description.value="Ny beskrivelse";document.querySelector("#edit-gallery-form button[type=submit]").click();document.querySelector("#edit-gallery-form button[type=submit]").click()');
+    await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','pending rename');assert.equal(site.galleryEdits.length,1);site.releaseGalleryEdit('Syntetisk navnefejl');await wait('document.querySelector("#edit-gallery-form .error").textContent.includes("Syntetisk navnefejl")','rename failure');
+    assert.equal(await run('document.querySelector("#gallery-title").textContent'),'Syntetisk galleri');
+    await run('document.querySelector("#edit-gallery-form").requestSubmit()');await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','rename retry');site.releaseGalleryEdit();await wait('!document.querySelector("#modal").open&&document.querySelector("#gallery-title").textContent==="Familieferie 2026"','saved gallery name');
+    assert.equal(await run('document.querySelector("#gallery-description").textContent'),'Ny beskrivelse');
+    assert(await run('__renameGrid===document.querySelector("#photo-grid")&&__renameImages.every(image=>image.isConnected)'));assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);
+    await run('document.querySelector("#back").click()');await wait('!!document.querySelector("#gallery-grid")','renamed gallery overview');assert.match(await run('document.querySelector("[data-gallery] h3").textContent'),/Familieferie 2026/);
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: a granted member edits photo information without GPS fields or thumbnail reloads',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture({member:true,galleryEditing:true,editMember:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','member overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("[data-photo]")','member gallery');
+    assert(await run('!!document.querySelector("#edit-gallery")&&!document.querySelector("[data-view=people]")'));
+    await run('window.__editGrid=document.querySelector("#photo-grid");window.__editImages=[...__editGrid.querySelectorAll("img")];photos[1].lat=55.67;photos[1].lon=12.56;document.querySelector(\'[data-photo="'+site.stillPhotoId+'"]\').click()');await wait('!!document.querySelector("#photo-info-toggle")','viewer');await run('document.querySelector("#photo-info-toggle").click()');assert(await run('!!document.querySelector("#edit-photo")&&!document.querySelector("#delete-photo")'));
+    assert(await run('photos[1].lat===null&&photos[1].lon===null&&!document.querySelector("#photo-info").textContent.includes("55.67")'),'current server metadata replaces previously loaded GPS before editing');await run('document.querySelector("#edit-photo").click()');assert(await run('!document.querySelector("#edit input[name=lat]")&&!document.querySelector("#edit input[name=lon]")'));
+    const before=site.requests.filter(path=>path.endsWith('/photos')).length;
+    await run('document.querySelector("#edit").elements.title.value="Medlemmets titel";document.querySelector("#edit").elements.precision.value="month";document.querySelector("#edit").elements.taken.value="2026-07";document.querySelector("#edit").requestSubmit()');await wait('!document.querySelector("#modal").open','saved photo metadata');
+    assert.equal(site.photoEdits.length,1);assert(!('lat' in site.photoEdits[0])&&!('lon' in site.photoEdits[0]));assert.equal(site.photoEdits[0].title,'Medlemmets titel');
+    assert(await run('__editGrid===document.querySelector("#photo-grid")&&__editImages.every(image=>image.isConnected)&&document.querySelector(\'[data-photo="'+site.stillPhotoId+'"] .caption\').textContent.includes("Medlemmets titel")'));assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: a legacy invitation remains available and closed requests cannot restore a private link',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture({permissions:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=people]")','menu');await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector("#invite")','people');await run('document.querySelector("#invite").click()');
+    assert(await run('!!document.querySelector("#invite-form select[name=gallery_id]")&&!document.querySelector("#invite-galleries")&&document.querySelector("#invite-form").textContent.includes("ikke aktiveret")'));
+    site.holdInvites();await run('document.querySelector("#invite-form").elements.name.value="Legacy person";document.querySelector("#invite-form").elements.email.value="legacy@example.test";document.querySelector("#invite-form").requestSubmit()');await wait('document.querySelector("#invite-form button[type=submit]").disabled','pending invitation');
+    assert.equal(site.invitationCreates.length,1);assert.equal(site.invitationCreates[0].gallery_id,site.galleryId);assert(!('galleries' in site.invitationCreates[0]));
+    await run('document.querySelector("#close-modal").click();document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("#gallery-grid")','new page');site.releaseInvite();await pause(100);assert(await run('!!document.querySelector("#gallery-grid")&&!document.querySelector("#invite-link")&&!document.querySelector("#modal").open'));
   }finally{if(browser)await browser.close();await site.close();}
 });
 

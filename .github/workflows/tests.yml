@@ -42,6 +42,7 @@ jobs:
         run: |
           php tests/run.php
           php tests/account-security.php
+          php tests/invitations.php
           php tests/member-delete.php
           php tests/media-delete.php
           php tests/media-delete-requests.php

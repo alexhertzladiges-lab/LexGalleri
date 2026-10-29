@@ -49,8 +49,54 @@ function login_user(array $u): never {
 function access(string $g, ?string $permission = null): array {
     $u=user(); if (!one('SELECT id FROM galleries WHERE id=?',[$g])) fail(404,'Galleriet findes ikke');
     $a=one('SELECT * FROM grants WHERE gallery_id=? AND user_id=?',[$g,$u['id']]);
-    if (!$u['admin'] && (!$a || $permission && !$a[$permission])) fail(403,'Du har ikke adgang');
+    if(!$u['admin']) {
+        if(!$a)fail(403,'Du har ikke adgang');
+        if($permission==='edit'){if(!gallery_edit_allowed($g,$u,$a))fail(403,'Du har ikke adgang til at redigere dette galleri');}
+        elseif($permission&&!$a[$permission])fail(403,'Du har ikke adgang');
+    }
     return [$u,$a];
+}
+function gallery_permissions_ready(): bool {
+    static $ready=null;if($ready!==null)return $ready;
+    return $ready=(int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND ((table_name='gallery_editors' AND column_name IN ('gallery_id','user_id')) OR (table_name='invitation_galleries' AND column_name IN ('token','gallery_id','upload','edit_metadata','download','gps')))")->fetchColumn()===8;
+}
+function gallery_edit_allowed(string $gallery,array $u,?array $grant): bool {
+    return (bool)$u['admin'] || $grant && gallery_permissions_ready() && one('SELECT 1 FROM gallery_editors WHERE gallery_id=? AND user_id=?',[$gallery,$u['id']])!==null;
+}
+function gallery_editor_set(string $gallery,string $user,bool $enabled): void {
+    if(!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at aktivere redigeringsrettigheder');
+    if($enabled)query('INSERT IGNORE INTO gallery_editors(gallery_id,user_id) VALUES(?,?)',[$gallery,$user]);
+    else query('DELETE FROM gallery_editors WHERE gallery_id=? AND user_id=?',[$gallery,$user]);
+}
+function gallery_permission_flag(array $b,string $key): bool {
+    if(!array_key_exists($key,$b))return false;
+    if(!in_array($b[$key],[true,false,0,1],true))fail(400,'Ugyldig rettighed: '.$key);
+    return(bool)$b[$key];
+}
+function create_gallery_invitation(array $b): array {
+    global $db,$base;
+    $mail=email($b);$name=text($b,'name',100,true);$multi=array_key_exists('galleries',$b);
+    if($multi&&!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at invitere til flere gallerier');
+    $input=$multi?$b['galleries']:[array_intersect_key($b,array_flip(['gallery_id','upload','edit','download','gps']))];
+    if(!is_array($input)||!array_is_list($input)||count($input)<1||count($input)>100)fail(400,'Vælg mellem 1 og 100 gallerier');
+    $selected=[];$seen=[];
+    foreach($input as $item){
+        if(!is_array($item)||array_diff(array_keys($item),['gallery_id','upload','edit','download','gps']))fail(400,'Ugyldige gallerirettigheder');
+        $id=$item['gallery_id']??null;if(!is_string($id)||!preg_match('/^[a-f0-9]{32}$/D',$id))fail(400,'Vælg et gyldigt galleri');
+        if(isset($seen[$id]))fail(400,'Et galleri må kun vælges én gang');$seen[$id]=true;
+        $gallery=one('SELECT id,name FROM galleries WHERE id=?',[$id]);if(!$gallery)fail(404,'Et af de valgte gallerier findes ikke');
+        $choice=['gallery_id'=>$id,'name'=>$gallery['name']];foreach(['upload','edit','download','gps'] as $key)$choice[$key]=gallery_permission_flag($item,$key);
+        if($choice['edit']&&!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at aktivere redigeringsrettigheder');
+        $selected[]=$choice;
+    }
+    $token=bin2hex(random_bytes(32));$hash=hash('sha256',$token);$first=$selected[0];
+    $db->beginTransaction();
+    try{
+        query('INSERT INTO invitations(token,email,name,gallery_id,upload,download,gps,expires) VALUES(?,?,?,?,?,?,?,?)',[$hash,$mail,$name,$first['gallery_id'],(int)$first['upload'],(int)$first['download'],(int)$first['gps'],time()+604800]);
+        if(gallery_permissions_ready())foreach($selected as $choice)query('INSERT INTO invitation_galleries(token,gallery_id,upload,edit_metadata,download,gps) VALUES(?,?,?,?,?,?)',[$hash,$choice['gallery_id'],(int)$choice['upload'],(int)$choice['edit'],(int)$choice['download'],(int)$choice['gps']]);
+        $db->commit();
+    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+    return ['path'=>$base.'/?invite='.$token,'expires_days'=>7,'galleries'=>$selected];
 }
 function photo(string $id, ?string $permission=null): array {
     $p=one('SELECT * FROM photos WHERE id=?',[$id]); if (!$p) fail(404,'Foto findes ikke');
@@ -336,7 +382,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -372,11 +418,18 @@ function route(string $method,string $path): never {
         $b=body();throttle('invite:'.($_SERVER['REMOTE_ADDR']??''));$hash=hash('sha256',text($b,'token',200,true));
         $db->beginTransaction();$inv=one('SELECT * FROM invitations WHERE token=? AND expires>? FOR UPDATE',[$hash,time()]);
         if (!$inv) fail(400,'Invitationen er udløbet eller brugt');
-        $u=one('SELECT * FROM users WHERE email=?',[$inv['email']]);
+        $assignments=[];
+        if(one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='invitation_galleries'"))$assignments=rows('SELECT gallery_id,upload,edit_metadata AS `edit`,download,gps FROM invitation_galleries WHERE token=? ORDER BY gallery_id FOR UPDATE',[$hash]);
+        if($assignments&&!gallery_permissions_ready())fail(503,'Invitationens rettigheder kræver 006_gallery_permissions.sql');
+        if(!$assignments)$assignments=[array_merge($inv,['edit'=>0])];
+        $u=one('SELECT * FROM users WHERE email=? FOR UPDATE',[$inv['email']]);
         if ($u) {if (!is_string($b['password']??null) || !password_verify($b['password'],$u['password'])) fail(401,'Brug din eksisterende adgangskode');}
-        else { $u=['id'=>uid(),'email'=>$inv['email'],'name'=>$inv['name'],'admin'=>0];
-            query('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)',[$u['id'],$u['email'],$u['name'],new_password($b)]); }
-        query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$inv['gallery_id'],$u['id'],$inv['upload'],$inv['download'],$inv['gps']]);
+        else { $u=['id'=>uid(),'email'=>$inv['email'],'name'=>$inv['name'],'admin'=>0,'password'=>new_password($b)];
+            query('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)',[$u['id'],$u['email'],$u['name'],$u['password']]); }
+        foreach($assignments as $choice){
+            query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$choice['gallery_id'],$u['id'],$choice['upload'],$choice['download'],$choice['gps']]);
+            if(gallery_permissions_ready())gallery_editor_set($choice['gallery_id'],$u['id'],(bool)$choice['edit']);
+        }
         query('DELETE FROM invitations WHERE token=?',[$hash]);$db->commit();login_user($u);
     }
     lg_security_route_pre($method,$path);
@@ -406,13 +459,17 @@ function route(string $method,string $path): never {
         send(['ok'=>true,'request'=>$method==='POST'?media_delete_request_create($m[1],$u):media_delete_request_cancel($m[1],$u)]);
     }
     if ($method==='GET' && $path==='/galleries') send(rows('SELECT g.*,(SELECT count(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',[(int)$u['admin'],$u['id']]));
+    if($method==='PATCH'&&preg_match('~^/galleries/([a-f0-9]{32})$~D',$path,$m)){
+        access($m[1],'edit');$b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);
+        query('UPDATE galleries SET name=?,description=? WHERE id=?',[$name,$description,$m[1]]);send(['ok'=>true]);
+    }
     if ($method==='POST' && $path==='/galleries') {
         $b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);$id=uid();
         $db->beginTransaction();
         query('INSERT INTO galleries(id,name,description,created) VALUES(?,?,?,?)',[$id,$name,$description,stamp()]);
         // The authenticated creator gets access only to this new gallery.
         // Administrators already have full access through their existing role.
-        if(!$u['admin'])query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1)',[$id,$u['id']]);
+        if(!$u['admin']){query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1)',[$id,$u['id']]);if(gallery_permissions_ready())gallery_editor_set($id,$u['id'],true);}
         $db->commit();send(['id'=>$id]);
     }
     if (preg_match('~^/galleries/([a-f0-9]{32})/photos$~D',$path,$m)) {
@@ -432,7 +489,7 @@ function route(string $method,string $path): never {
                 }
                 unset($p['digest'],$p['filename'],$p['_import_metadata']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null;
             }
-            unset($p);send(['photos'=>$ps,'permissions'=>['upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
+            unset($p);send(['photos'=>$ps,'permissions'=>['edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
         }
         if ($method==='POST') {
             $f=upload_file(25*1024*1024);$tmp=$f['tmp_name'];$info=@getimagesize($tmp);
@@ -472,8 +529,10 @@ function route(string $method,string $path): never {
     }
     if ($method==='DELETE' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {$admin=user(true);media_delete_direct($m[1],$admin);send(['ok'=>true]);}
     if ($method==='PATCH' && preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$m)) {
-        user(true);photo($m[1]);$b=body();$taken=text($b,'taken',32);$precision=text($b,'precision',16,true);validate_date($taken,$precision);
-        $lat=$b['lat']??null;$lon=$b['lon']??null;
+        $p=photo($m[1],'edit');$b=body();$taken=text($b,'taken',32);$precision=text($b,'precision',16,true);validate_date($taken,$precision);
+        $hasGps=array_key_exists('lat',$b)||array_key_exists('lon',$b);
+        if($hasGps){access($p['gallery_id'],'gps');if(!array_key_exists('lat',$b)||!array_key_exists('lon',$b))fail(400,'Angiv begge koordinater');}
+        $lat=$hasGps?$b['lat']:$p['lat'];$lon=$hasGps?$b['lon']:$p['lon'];
         if(($lat===null)!==($lon===null) || $lat!==null && (!is_numeric($lat)||!is_numeric($lon)||!is_finite((float)$lat)||!is_finite((float)$lon)||abs((float)$lat)>90||abs((float)$lon)>180))fail(400,'Ugyldige koordinater');
         query('UPDATE photos SET title=?,taken=?,`precision`=?,place=?,lat=?,lon=? WHERE id=?',[text($b,'title',200,true),$taken,$precision,text($b,'place',200),$lat,$lon,$m[1]]);send(['ok'=>true]);
     }
@@ -483,17 +542,20 @@ function route(string $method,string $path): never {
     }
     if($method==='GET' && $path==='/theme') {$t=one('SELECT value FROM settings WHERE `key`=\'theme\'');send($t?json_decode($t['value'],true):default_theme());}
     if(str_starts_with($path,'/admin/'))user(true);
-    if($method==='GET' && $path==='/admin/users')send(['users'=>array_map('safe_user',rows("SELECT u.* FROM users u WHERE NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))")),'grants'=>rows('SELECT * FROM grants')]);
+    if($method==='GET' && $path==='/admin/users')send(['users'=>array_map('safe_user',rows("SELECT u.* FROM users u WHERE NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))")),'grants'=>rows(gallery_permissions_ready()?'SELECT a.*,EXISTS(SELECT 1 FROM gallery_editors e WHERE e.gallery_id=a.gallery_id AND e.user_id=a.user_id) AS `edit` FROM grants a':'SELECT a.*,0 AS `edit` FROM grants a')]);
     if($method==='PUT' && $path==='/admin/grants') {
         $b=body();$g=text($b,'gallery_id',32,true);$id=text($b,'user_id',32,true);
+        if(array_key_exists('edit',$b)&&!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at ændre redigeringsrettigheder');
+        $edit=array_key_exists('edit',$b)?gallery_permission_flag($b,'edit'):null;
         $db->beginTransaction();
         if(!one('SELECT id FROM galleries WHERE id=?',[$g]) || !one('SELECT id FROM users WHERE id=? FOR UPDATE',[$id]) || one('SELECT 1 FROM settings WHERE `key`=? FOR UPDATE',['deleted_user_'.$id]))fail(404,'Galleri eller bruger findes ikke');
         if($b['view']??false)query('INSERT INTO grants VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$g,$id,(int)!empty($b['upload']),(int)!empty($b['download']),(int)!empty($b['gps'])]);
-        else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);$db->commit();send(['ok'=>true]);
+        else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);
+        if(!empty($b['view'])&&$edit!==null)gallery_editor_set($g,$id,$edit);
+        $db->commit();send(['ok'=>true]);
     }
     if($method==='POST' && $path==='/admin/invitations') {
-        $b=body();$g=text($b,'gallery_id',32,true);if(!one('SELECT id FROM galleries WHERE id=?',[$g]))fail(404,'Vælg et galleri');$token=bin2hex(random_bytes(32));
-        query('INSERT INTO invitations VALUES(?,?,?,?,?,?,?,?)',[hash('sha256',$token),email($b),text($b,'name',100,true),$g,(int)!empty($b['upload']),(int)!empty($b['download']),(int)!empty($b['gps']),time()+604800]);send(['path'=>$base.'/?invite='.$token,'expires_days'=>7]);
+        send(create_gallery_invitation(body()));
     }
     if($method==='GET' && $path==='/admin/themes') {$ts=[['id'=>'default','theme'=>default_theme()]];foreach(rows('SELECT * FROM themes') as $t)$ts[]=['id'=>$t['id'],'theme'=>json_decode($t['document'],true)];send($ts);}
     if($method==='POST' && $path==='/admin/themes') {
