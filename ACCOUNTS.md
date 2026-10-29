@@ -75,6 +75,32 @@ Gæster og medlemmer kan også vælge **Nyt galleri**. Et galleri oprettet af et
 
 Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Det kan bruges én gang og udløber efter syv dage. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
 
+## Invitation til flere gallerier
+
+Åbn **Familie & gæster → Invitér en gæst**, og udfyld navn og e-mail. Markér **Se galleri** ved hvert galleri, personen skal have adgang til, og vælg de øvrige rettigheder separat for hvert galleri:
+
+| Rettighed | Adgang |
+| --- | --- |
+| Se galleri | Galleriet og dets visningsbilleder bliver synlige. |
+| Uploade billeder | Tilføje billeder til netop dette galleri. |
+| Redigere galleri og billedoplysninger | Ændre galleriets navn og beskrivelse samt billeders og videoers titel, dato og sted. Ændring af koordinater kræver også GPS-adgang. |
+| Hente originaler | Hente originalfiler og afspille videoer, når GPS-adgang også er valgt. |
+| Se præcis GPS | Se koordinater; redigering af dem kræver også redigeringsrettigheden. |
+
+Vælg **Opret invitationslink**. Den færdige invitation viser en oversigt over de gemte gallerier og rettigheder, før du kopierer og sender linket. Der oprettes ét personligt engangslink til alle valgte gallerier; de får deres respektive rettigheder samlet ved accept. Andre gallerier bliver ikke synlige. Til en eksisterende konto ændrer invitationen kun rettighederne i de valgte gallerier; øvrig adgang bevares og kan ændres under **Redigér gallerirettigheder**.
+
+Redigering giver ikke adgang til at dele gallerier, administrere konti eller slette andres uploads. Medlemmers sletning af egne uploads kræver fortsat admins godkendelse.
+
+**Installation:** Importér [006_gallery_permissions.sql](private/migrations/006_gallery_permissions.sql) i **LexGalleris database** via phpMyAdmin. Erstat derefter [app.php](private/app.php) og [security.php](private/security.php) i `/home/lexandkk/lexgalleri-private/` med din egen adgang, og brug de offentlige filer fra samme kodeversion. Behold konfigurationen, Authenticator-nøglen og medierne. Migreringen kan køres igen og ændrer ikke eksisterende rettigheder. Allerede udsendte invitationer til ét galleri virker fortsat. `multi_gallery_invitations: true` i `/lexgalleri/api/status` viser, at migrering og privat kode er klar.
+
+## Redigér galleriets navn
+
+Åbn galleriet, og vælg **Redigér galleri**. Ret navn og beskrivelse, og vælg **Gem galleri**. Admin har altid denne adgang; et medlem skal have den særskilte redigeringsrettighed. Billedoversigten genindlæses ikke ved gemning. Admins redigering af navn kræver den nye private `app.php`, men er tilgængelig før migrering 006, som aktiverer medlemmers rettigheder.
+
+## Vis og skjul adgangskoder
+
+Øjeikonet ved hvert adgangskodefelt viser eller skjuler netop dette felt. Adgangskoder er skjult fra starten. Det gælder login, registrering via invitation, første opsætning, profilens adgangskodeskift og adminbekræftelser. Funktionen ændrer ikke adgangskoden eller indsender formularen og kræver kun de opdaterede offentlige appfiler.
+
 ## Slet et medlem
 
 Som admin åbner du **Familie & gæster** og vælger **Slet medlem** ved personen. Knappen findes også på medlemmets profil. Bekræft med **Slet medlemmet**; **Annullér** bevarer kontoen. Administratorkonti kan ikke slettes her.

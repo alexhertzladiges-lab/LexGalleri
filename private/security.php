@@ -207,8 +207,9 @@ function lg_security_route_pre(string $method,string $path): void {
 }
 function lg_security_profile(array $u): array {
     if(lg_security_member_deleted($u['id']))fail(404,'Medlemmet findes ikke');
-    $state=lg_security_state($u['id']);$galleries=$u['admin']?rows('SELECT id,name,1 upload,1 download,1 gps FROM galleries ORDER BY name'):rows('SELECT g.id,g.name,a.upload,a.download,a.gps FROM galleries g JOIN grants a ON a.gallery_id=g.id WHERE a.user_id=? ORDER BY g.name',[$u['id']]);
-    foreach($galleries as &$gallery)foreach(['upload','download','gps'] as $key)$gallery[$key]=(bool)$gallery[$key];unset($gallery);
+    $state=lg_security_state($u['id']);$edit=function_exists('gallery_permissions_ready')&&gallery_permissions_ready();
+    $galleries=$u['admin']?rows('SELECT id,name,1 upload,1 download,1 gps,1 AS `edit` FROM galleries ORDER BY name'):rows('SELECT g.id,g.name,a.upload,a.download,a.gps,'.($edit?'EXISTS(SELECT 1 FROM gallery_editors e WHERE e.gallery_id=g.id AND e.user_id=a.user_id)':'0').' AS `edit` FROM galleries g JOIN grants a ON a.gallery_id=g.id WHERE a.user_id=? ORDER BY g.name',[$u['id']]);
+    foreach($galleries as &$gallery)foreach(['upload','edit','download','gps'] as $key)$gallery[$key]=(bool)$gallery[$key];unset($gallery);
     return array_merge(safe_user($u),['mfa_enabled'=>(bool)$state['totp_enabled'],'upload_count'=>(int)query('SELECT COUNT(*) FROM photos WHERE uploader=?',[$u['id']])->fetchColumn(),'galleries'=>$galleries]);
 }
 function lg_security_update_profile(array $actor,string $id,array $b): never {
