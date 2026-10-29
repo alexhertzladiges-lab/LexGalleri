@@ -254,7 +254,7 @@ function lg_security_delete_member(array $actor,string $id,array $b): never {
         // Keep only the uploader identity required by existing media foreign
         // keys and history. Credentials and personal contact details are gone;
         // the retained row cannot log in or appear as an active member again.
-        query('UPDATE users SET email=?,password=? WHERE id=?',['deleted-'.$id.'@lexgalleri.invalid','!deleted-account!',$id]);
+        query('UPDATE users SET email=?,password=? WHERE id=?',['deleted-'.uid().'@lexgalleri.invalid','!deleted-account!',$id]);
         query('INSERT INTO settings(`key`,value) VALUES(?,?)',['deleted_user_'.$id,json_encode(['deleted_at'=>$now,'by'=>$fresh['id']],JSON_THROW_ON_ERROR)]);
         $db->commit();send(['ok'=>true,'id'=>$id]);
     }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
