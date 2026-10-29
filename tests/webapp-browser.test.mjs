@@ -650,14 +650,15 @@ test('real Chromium: admin gallery rename saves name and description without rel
   const site=await fixture({galleryEditing:true});let browser;
   try{
     browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const received=async count=>{const until=Date.now()+5000;while(site.galleryEdits.length<count&&Date.now()<until)await pause(20);assert.equal(site.galleryEdits.length,count,'the fixture must receive each rename before replying');};
     await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#edit-gallery")','gallery editing action');
     assert(await run('!document.querySelector("#edit-gallery").disabled'),'admin renaming is available independently of member permission migration');
     await run('window.__renameGrid=document.querySelector("#photo-grid");window.__renameImages=[...__renameGrid.querySelectorAll("img")];document.querySelector("#edit-gallery").click()');
     const before=site.requests.filter(path=>path.endsWith('/photos')).length;site.holdGalleryEdits();
     await run('document.querySelector("#edit-gallery-form").elements.name.value="Familieferie 2026";document.querySelector("#edit-gallery-form").elements.description.value="Ny beskrivelse";document.querySelector("#edit-gallery-form button[type=submit]").click();document.querySelector("#edit-gallery-form button[type=submit]").click()');
-    await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','pending rename');assert.equal(site.galleryEdits.length,1);site.releaseGalleryEdit('Syntetisk navnefejl');await wait('document.querySelector("#edit-gallery-form .error").textContent.includes("Syntetisk navnefejl")','rename failure');
+    await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','pending rename');await received(1);site.releaseGalleryEdit('Syntetisk navnefejl');await wait('document.querySelector("#edit-gallery-form .error").textContent.includes("Syntetisk navnefejl")','rename failure');
     assert.equal(await run('document.querySelector("#gallery-title").textContent'),'Syntetisk galleri');
-    await run('document.querySelector("#edit-gallery-form").requestSubmit()');await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','rename retry');site.releaseGalleryEdit();await wait('!document.querySelector("#modal").open&&document.querySelector("#gallery-title").textContent==="Familieferie 2026"','saved gallery name');
+    await run('document.querySelector("#edit-gallery-form").requestSubmit()');await wait('document.querySelector("#edit-gallery-form button[type=submit]").disabled','rename retry');await received(2);site.releaseGalleryEdit();await wait('!document.querySelector("#modal").open&&document.querySelector("#gallery-title").textContent==="Familieferie 2026"','saved gallery name');
     assert.equal(await run('document.querySelector("#gallery-description").textContent'),'Ny beskrivelse');
     assert(await run('__renameGrid===document.querySelector("#photo-grid")&&__renameImages.every(image=>image.isConnected)'));assert.equal(site.requests.filter(path=>path.endsWith('/photos')).length,before);
     await run('document.querySelector("#back").click()');await wait('!!document.querySelector("#gallery-grid")','renamed gallery overview');assert.match(await run('document.querySelector("[data-gallery] h3").textContent'),/Familieferie 2026/);
