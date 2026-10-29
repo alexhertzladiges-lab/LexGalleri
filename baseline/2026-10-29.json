@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "baseline_date": "2026-10-29",
+  "registered_at_utc": "2026-10-29 18:07:59 UTC",
+  "scope": "Version and feature registration only",
+  "owner_report": {
+    "known_issues": [],
+    "statement": "Ejeren oplyser ingen kendte fejl i nogen af projekterne.",
+    "reported_on": "2026-10-29",
+    "does_not_replace_live_function_tests": true
+  },
+  "preservation_policy": {
+    "existing_features": true,
+    "existing_data": true,
+    "production_mutations": false,
+    "private_configuration_reads": false,
+    "new_backup_created": false,
+    "actual_backup_status": "not_verified"
+  },
+  "verification_limits": [
+    "No fresh live HTTPS/FTPS verification: destination network access unavailable",
+    "Private configuration and production databases were not read",
+    "Existing physical device installations were not tested in this step",
+    "This registration is not a data backup"
+  ],
+  "project": {
+    "name": "LexGalleri",
+    "repository": "alexhertzladiges-lab/LexGalleri",
+    "url": "https://lexan.dk/lexgalleri/",
+    "branch": "main"
+  },
+  "technology": {
+    "frontend": {
+      "implementation": "HTML, CSS and plain JavaScript",
+      "delivery": "PWA",
+      "evidence": [
+        "private/app.php",
+        "public/static/app.js",
+        "public/static/style.css",
+        "public/manifest.webmanifest"
+      ]
+    },
+    "backend": {
+      "language": "PHP",
+      "target_version": "8.4",
+      "actual_host_version_verified": false
+    },
+    "database": "MySQL"
+  },
+  "versions": {
+    "public_source_commit": "1ee89613ead572de8597a029770a0e876edec22c",
+    "private_reference_source_commit": "1ee89613ead572de8597a029770a0e876edec22c",
+    "installed_private_source_commit": null,
+    "applied_database_migrations": null,
+    "display_version": null,
+    "authoritative_reference": "Full source commit plus deployment evidence; private installation remains unverified"
+  },
+  "deployment": {
+    "run": 40905344689,
+    "job": 123560026145,
+    "conclusion": "success",
+    "evidence_url": "https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/40905344689",
+    "transfer_ack_utc": "2026-10-29T15:52:07Z",
+    "host": "web3.e-studio.dk",
+    "port": 21,
+    "user": "chatgpt@lexan.dk",
+    "owner_reported_public_root": "/home/lexandkk/public_html/lexgalleri",
+    "public_root_freshly_verified": false,
+    "post_transfer_remote_hashes": false,
+    "private_files_installed_by": "owner"
+  },
+  "ci": {
+    "run": 40905313356,
+    "source_commit": "1ee89613ead572de8597a029770a0e876edec22c",
+    "conclusion": "success",
+    "evidence_url": "https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/40905313356"
+  },
+  "features": [
+    {
+      "id": "LG-01",
+      "title": "Login og kontosikkerhed",
+      "minimum_behavior": "Login, admin-authenticator, gendannelseskoder, profiler, adgangskodeskift og vis/skjul adgangskode skal bevares.",
+      "evidence_paths": [
+        "private/security.php",
+        "public/static/app.js",
+        "tests/account-security.php",
+        "tests/account-browser.test.mjs"
+      ],
+      "prerequisites": [
+        "Matchende private app.php og security.php",
+        "004_account_security.sql ved eksisterende installation"
+      ],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-02",
+      "title": "Gallerier og rettigheder",
+      "minimum_behavior": "Kun tilladte gallerier er synlige. Admin styrer adgang; medlemmer/gæster kan oprette gallerier. Navn og beskrivelse kan redigeres efter rettighed.",
+      "evidence_paths": [
+        "private/app.php",
+        "public/static/app.js",
+        "tests/gallery-create.php",
+        "tests/invitations.php"
+      ],
+      "prerequisites": [
+        "Aktuel privat programversion",
+        "006_gallery_permissions.sql for særskilt medlemsredigering"
+      ],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-03",
+      "title": "Medlemmer og invitationer",
+      "minimum_behavior": "Admin kan invitere til udvalgte gallerier med særskilte rettigheder, administrere profiler og slette medlemmer uden at fjerne deres medier og uploaderhistorik.",
+      "evidence_paths": [
+        "private/app.php",
+        "private/security.php",
+        "tests/invitations.php",
+        "tests/member-delete.php"
+      ],
+      "prerequisites": [
+        "Aktuelle private programfiler",
+        "006_gallery_permissions.sql for invitation til flere gallerier"
+      ],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-04",
+      "title": "Billeder og videoer",
+      "minimum_behavior": "Billedvisning og MP4-afspilning, originale filer, visningsbilleder og miniaturebilleder samt serverens adgangskontrol skal bevares.",
+      "evidence_paths": [
+        "private/app.php",
+        "public/static/app.js",
+        "tests/run.php",
+        "tests/lychee-video.php"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-05",
+      "title": "Fotooplysninger",
+      "minimum_behavior": "Uploader, uploadtidspunkt, optagedato med forskellig præcision, sted og GPS skal bevares og vises efter rettighed. Metadataredigering må ikke fjerne skjulte GPS-data.",
+      "evidence_paths": [
+        "private/app.php",
+        "public/static/app.js",
+        "tests/invitations.php"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-06",
+      "title": "Visning og navigation",
+      "minimum_behavior": "Pile i medievisningen, samlet Info-panel og tilbagevenden til samme galleri uden at genindlæse hele billedoversigten skal bevares.",
+      "evidence_paths": [
+        "public/static/app.js",
+        "public/static/style.css",
+        "tests/webapp-browser.test.mjs"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-07",
+      "title": "Sletning og sletteønsker",
+      "minimum_behavior": "Admin kan slette billeder/MP4 fra galleriets markeringstilstand. Medlemmer kan kun markere egne uploads til godkendelse. Afbrudte handlinger skal kunne håndteres sikkert.",
+      "evidence_paths": [
+        "private/app.php",
+        "public/static/app.js",
+        "tests/media-delete.php",
+        "tests/media-delete-requests.php"
+      ],
+      "prerequisites": [
+        "005_media_delete_requests.sql for sletteønsker",
+        "Aktuel privat programversion"
+      ],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-08",
+      "title": "Søgning, tidslinje og favoritter",
+      "minimum_behavior": "Søgning, sortering, tidslinje og personlige favoritter skal bevares.",
+      "evidence_paths": [
+        "public/static/app.js",
+        "private/app.php",
+        "tests/run.php"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-09",
+      "title": "Designpakker",
+      "minimum_behavior": "Admin kan installere, aktivere og slette understøttede designpakker. Standarddesign, farver, fontvalg, radius og tæthed skal bevares.",
+      "evidence_paths": [
+        "private/app.php",
+        "public/static/app.js",
+        "tests/theme-delete.php"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-10",
+      "title": "PWA og adresser",
+      "minimum_behavior": "Mobil/pc og installation som webapp med egne ikoner skal bevares. Den offentlige adresse er /lexgalleri/ med små bogstaver. Private medier må ikke lægges i offlinecache.",
+      "evidence_paths": [
+        "public/manifest.webmanifest",
+        "public/service-worker.js",
+        "public/static/pwa.js",
+        "hosting/root/.htaccess",
+        "tests/webapp.test.mjs"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    },
+    {
+      "id": "LG-11",
+      "title": "Importspor og mediereferencer",
+      "minimum_behavior": "Eksisterende importhistorik, medieplaceringer og relationer skal bevares. Importværktøjets kode er en særskilt administrativ funktion og må ikke automatisk startes af denne registrering.",
+      "evidence_paths": [
+        "private/lychee-import.php",
+        "private/migrations/002_lychee_import.sql",
+        "private/migrations/003_lychee_move.sql",
+        "tests/lychee-import.php",
+        "tests/lychee-move.php"
+      ],
+      "prerequisites": [],
+      "source_status": "present_in_recorded_source",
+      "fresh_live_function_test": false
+    }
+  ],
+  "preserve_data": [
+    "Originale billeder og videoer, previews og thumbnails",
+    "Galleri-/medie-id’er og placeringer",
+    "Medlemmer, profiler, uploadernavne og historik",
+    "Rettigheder, invitationer, favoritter og sletteønsker",
+    "Fotooplysninger, GPS, datoer og importspor",
+    "Aktive designindstillinger og ejerens private sikkerhedskonfiguration"
+  ],
+  "fingerprints": {
+    "algorithm": "sha256",
+    "public_reference_kind": "Repository bytes, not newly observed server bytes",
+    "public_files": {
+      "static/icon.svg": "3581a3e6e9b04d05d57ef120042325ebfb8f0446c833e6bcfcc48d1f9c323854",
+      "static/icon-192.png": "af8af50d7163b6165d9c7ab28b94566f870d450d4c2205278512c253555827d7",
+      "static/icon-512.png": "cc8f66f596bc636255ebbbac7f8ce9b6ab6b76d44f9fd890cd77face45c77dab",
+      "static/apple-touch-icon.png": "3e183be61a9a6386d2e2f2b73772f9766abdad74efd4beafe14c6666d5385430",
+      "manifest.webmanifest": "2c2f0fc21bbcee06d14c37a08e42a8ff0ac10febac3aa8fe5bd05bc2b0c199c3",
+      "service-worker.js": "627d061837351916a09612ed21545256c5d1abddfc96a27b79416c33f314ad1c",
+      "static/pwa.js": "4dd9535250eaa9c783f72b6417b456997753d23787f36f4163ad94db27717ffe",
+      "static/style.css": "80be18e1024e24d5bc1aa8dc88530e8dc6822b336c00c04f76d1ef091b849295",
+      "static/qrcode.js": "3a37975079ddc00ed73102d210dfda36d292461f21bb42a5dfce4dcf4666e7c5",
+      "static/app.js": "aa627cfbd4dfd7bed56243da12e29397845dc3bfc89df2f1a78276caff544098",
+      ".htaccess": "ce78444e2797c366da3dacd531836f4a0fe23121f1bc26b726497b88e1e9def8",
+      "index.php": "572214cfa5f8cd30dd119d5b2386e8b5bf305cb12dd4d1ea0f9c5518b8a8cf8a"
+    },
+    "private_program_reference_kind": "Repository programs only, not the owner-installed files",
+    "private_programs": {
+      "app.php": "d2d894011900719486affb9383369cdf7dc18032bfd82915fa6c39f80368ff72",
+      "security.php": "2d6ca7c748f081e56c35cbb17901885a9be6cf35f1dae592457b37fe264301b7",
+      "lychee-import.php": "e3974b17aaf5093bff3a45f12fc5a606398779125701b2514e30e19fb2679b54"
+    }
+  },
+  "follow_up_verification": [
+    "Identify installed private program version and applied migrations through owner-controlled checks",
+    "Recheck public file bytes and frontend capabilities when read-only network access is available",
+    "Run role-based live acceptance checks using agreed accounts and non-destructive actions"
+  ]
+}
