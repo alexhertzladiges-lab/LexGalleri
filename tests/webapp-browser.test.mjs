@@ -21,7 +21,7 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const galleryId='a'.repeat(32);
   const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
@@ -29,6 +29,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   const approvalRequests=[],deletionRequestPosts=[],deletionDecisions=[],pendingRequestPosts=[],pendingDecisions=[];
   let holdRequestPosts=false,holdDecisions=false;
   let holdGrantWrites=false,holdDeletes=false,otherRevoked=false,mediaDeleteCapability=mediaDelete;
+  const memberDeletes=[],pendingMemberDeletes=[];let memberDeleteCapability=memberDelete,holdMemberDeletes=false,memberDeleted=false;
   const defaultTheme={version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},font:'sans',radius:16,density:'comfortable'};
   const activeThemeId='e'.repeat(32),inactiveThemeId='9'.repeat(32),themeDeleteRequests=[],pendingThemeDeletes=[];
   const createdGalleryId='7'.repeat(32),galleryCreates=[],pendingGalleryCreates=[],createdGalleries=[];
@@ -61,7 +62,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       send('text/html; charset=utf-8',html);return;
     }
     if(url.pathname===base+'/api/status'){
-      const capabilities={...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
+      const capabilities={...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
     if(url.pathname===base+'/api/me'){json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
@@ -111,8 +112,17 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       const visiblePhotos=photos.filter(photo=>!deleted.has(photo.id));
       json([{id:galleryId,name:'Syntetisk galleri',description:'Kun genererede testdata',count:visiblePhotos.length,cover:mediaDelete?visiblePhotos[0]?.id??null:null},...(permissions||member&&!otherRevoked?[{id:otherGalleryId,name:member?'Privat syntetisk galleri':'Et andet galleri',description:member?'Beskrivelse kun for inviterede':'Kun genererede testdata',count:member?37:0,cover:null}]:[]),...createdGalleries]);return;
     }
-    if(permissions&&url.pathname===base+'/api/admin/users'){
-      json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}],grants});return;
+    if((permissions||memberDelete)&&url.pathname===base+'/api/admin/users'){
+      json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},...(!memberDeleted?[{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}]:[])],grants});return;
+    }
+    if(memberDelete&&url.pathname===base+'/api/admin/users/'+memberId){
+      if(req.method==='GET'){json(memberDeleted?{detail:'Medlemmet findes ikke'}:{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test',upload_count:2,galleries:[]},memberDeleted?404:200);return;}
+      if(req.method==='DELETE'){
+        let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);memberDeletes.push({id:memberId,fields});
+        if(member||!memberDeleteCapability){json({detail:'Ingen adgang'},403);return;}
+        const finish=error=>{if(error){json({detail:error},503);return;}memberDeleted=true;grants=grants.filter(grant=>grant.user_id!==memberId);json({ok:true,id:memberId});};
+        if(holdMemberDeletes)pendingMemberDeletes.push(finish);else finish();return;
+      }
     }
     if(permissions&&url.pathname===base+'/api/admin/grants'&&req.method==='PUT'){
       let text='';for await(const part of req)text+=part;const fields=JSON.parse(text);grantWrites.push(fields);
@@ -163,6 +173,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+    memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
     approvalRequests,deletionRequestPosts,deletionDecisions,
     seedDeletionRequests:()=>{for(const photo of [photos[1],photos[2]])approvalRequests.push(newApproval(photo));},
     holdDeletionRequestPosts:()=>{holdRequestPosts=true;},releaseDeletionRequestPost:error=>{assert(pendingRequestPosts.length,'a deletion request must be pending');pendingRequestPosts.shift()(error);},
@@ -183,7 +194,7 @@ async function chrome(){
   const child=spawn(binary,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-background-networking','--disable-default-apps','--disable-sync','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});
   let diagnostics='';
   const address=await new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>reject(Error('Chromium did not start: '+diagnostics.slice(-1000))),15000);
+    const timer=setTimeout(()=>reject(Error('Chromium did not start: '+diagnostics.slice(-1000))),30000);
     child.once('error',error=>{clearTimeout(timer);reject(error);});
     child.once('exit',code=>{clearTimeout(timer);reject(Error('Chromium exited '+code+': '+diagnostics.slice(-1000)));});
     child.stderr.on('data',chunk=>{diagnostics+=chunk.toString();const match=diagnostics.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match){clearTimeout(timer);resolve(match[1]);}});
@@ -555,6 +566,63 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
       assert.equal(site.deleteRequests.length,3);
     });
   }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: administrators delete members with review, cancellation, retry and preserved media',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async t=>{
+  const site=await fixture({memberDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const member='document.querySelector(\'[data-member-row="'+site.memberId+'"]\')';
+    const trigger='document.querySelector(\'[data-member-delete="'+site.memberId+'"]\')';
+    const open=async()=>{await run(trigger+'.click()');await wait('document.querySelector("#modal").open&&!!document.querySelector("#delete-member")','member confirmation');};
+    const count=async n=>{const until=Date.now()+5000;while(site.memberDeletes.length<n&&Date.now()<until)await pause(20);assert.equal(site.memberDeletes.length,n);};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=people]")','admin menu');
+    await run('document.querySelector("[data-view=people]").click()');await wait('!!'+trigger,'member delete entry');
+    await t.test('desktop/mobile show the member action and cancellation leaves the account intact',async()=>{
+      assert.equal(await run('document.querySelectorAll("[data-member-delete]").length'),1,'administrator accounts never have a delete entry');
+      for(const mobile of [false,true]){
+        await call('Emulation.setDeviceMetricsOverride',{width:mobile?390:1280,height:mobile?844:900,deviceScaleFactor:1,mobile});
+        assert(await run('(()=>{const b='+trigger+';b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !b.disabled&&r.width>0&&r.height>0&&(hit===b||b.contains(hit));})()'));
+      }
+      await open();const text=await run('document.querySelector("#delete-member").textContent');assert.match(text,/Syntetisk medlem/);assert.match(text,/member@example.test/);assert.match(text,/Billeder, videoer og uploadernavnet.*bevares/);
+      await run('document.querySelector("#delete-member-cancel").click()');assert(await run('!document.querySelector("#modal").open&&!!'+member));assert.equal(site.memberDeletes.length,0);
+    });
+    await t.test('member profiles expose the same reviewed action',async()=>{
+      await run('document.querySelector(\'[data-profile="'+site.memberId+'"]\').click()');await wait('!!document.querySelector("#profile-back")&&!!'+trigger,'member profile action');
+      await open();await run('document.querySelector("#delete-member-cancel").click();document.querySelector("#profile-back").click()');await wait('!!'+member,'member list restored');assert.equal(site.memberDeletes.length,0);
+    });
+    await t.test('pending requests cannot duplicate and failures retain the member for retry',async()=>{
+      site.holdMemberDeletes();await run('window.__keptAdmin=document.querySelector(\'[data-member-row="'+'f'.repeat(32)+'"]\');window.__targetMember='+member);await open();
+      await run('document.querySelector("#delete-member").requestSubmit();document.querySelector("#delete-member").requestSubmit()');await count(1);
+      assert.deepEqual(site.memberDeletes[0],{id:site.memberId,fields:{confirm:true}});assert(await run('document.querySelector("#delete-member-submit").disabled&&document.querySelector("#delete-member-cancel").disabled'));
+      site.releaseMemberDelete('Syntetisk slettefejl');await wait('document.querySelector("#delete-member-status").textContent.includes("Syntetisk slettefejl")','visible deletion failure');
+      assert(await run('__targetMember==='+member+'&&!document.querySelector("#delete-member-submit").disabled'));
+      await run('document.querySelector("#delete-member").requestSubmit()');await count(2);site.releaseMemberDelete();await wait('!'+member+'&&!document.querySelector("#modal").open','acknowledged account deletion');
+      assert(await run('__keptAdmin.isConnected&&document.querySelector("#member-delete-feedback").textContent.includes("er slettet")'));
+      await run('document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("[data-gallery]")','gallery navigation');await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','preserved gallery media');
+      assert.equal(site.deleteRequests.length,0,'deleting an account must never submit a media DELETE');
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: member deletion is gated and late replies cannot overwrite navigation',{
+  skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable',timeout:90000,
+},async()=>{
+  const site=await fixture({memberDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const people=async()=>{await wait('!!document.querySelector("[data-view=people]")','admin menu');await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector("[data-member-delete]")','member list');};
+    site.disableMemberDelete();await call('Page.navigate',{url:site.origin+base+'/'});await people();assert(await run('document.querySelector("[data-member-delete]").disabled&&document.querySelector("#content").textContent.includes("ikke aktiveret endnu")'));assert.equal(site.memberDeletes.length,0);
+  }finally{if(browser)await browser.close();await site.close();}
+  const live=await fixture({memberDelete:true});let second;
+  try{
+    second=await chrome();const {evaluate:run,wait,call}=second;await call('Page.navigate',{url:live.origin+base+'/'});await wait('!!document.querySelector("[data-view=people]")','admin menu');await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector("[data-member-delete]")','member list');
+    live.holdMemberDeletes();await run('document.querySelector("[data-member-delete]").click();document.querySelector("#delete-member").requestSubmit()');await wait('document.querySelector("#delete-member-submit").disabled','pending member deletion');
+    await run('document.querySelector("#close-modal").click();document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("#gallery-grid")','new view');await run('window.__newOverview=document.querySelector("#gallery-grid")');live.releaseMemberDelete();await pause(100);
+    assert(await run('__newOverview===document.querySelector("#gallery-grid")&&!document.querySelector("[data-member-row]")&&!document.querySelector("#modal").open'));assert.equal(live.memberDeletes.length,1);
+  }finally{if(second)await second.close();await live.close();}
 });
 
 test('real Chromium: deletion starts directly from the gallery front page and admin access is labelled correctly',{

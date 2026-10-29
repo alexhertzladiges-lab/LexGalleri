@@ -336,7 +336,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -483,12 +483,13 @@ function route(string $method,string $path): never {
     }
     if($method==='GET' && $path==='/theme') {$t=one('SELECT value FROM settings WHERE `key`=\'theme\'');send($t?json_decode($t['value'],true):default_theme());}
     if(str_starts_with($path,'/admin/'))user(true);
-    if($method==='GET' && $path==='/admin/users')send(['users'=>array_map('safe_user',rows('SELECT * FROM users')),'grants'=>rows('SELECT * FROM grants')]);
+    if($method==='GET' && $path==='/admin/users')send(['users'=>array_map('safe_user',rows("SELECT u.* FROM users u WHERE NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))")),'grants'=>rows('SELECT * FROM grants')]);
     if($method==='PUT' && $path==='/admin/grants') {
         $b=body();$g=text($b,'gallery_id',32,true);$id=text($b,'user_id',32,true);
-        if(!one('SELECT id FROM galleries WHERE id=?',[$g]) || !one('SELECT id FROM users WHERE id=?',[$id]))fail(404,'Galleri eller bruger findes ikke');
+        $db->beginTransaction();
+        if(!one('SELECT id FROM galleries WHERE id=?',[$g]) || !one('SELECT id FROM users WHERE id=? FOR UPDATE',[$id]) || one('SELECT 1 FROM settings WHERE `key`=? FOR UPDATE',['deleted_user_'.$id]))fail(404,'Galleri eller bruger findes ikke');
         if($b['view']??false)query('INSERT INTO grants VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$g,$id,(int)!empty($b['upload']),(int)!empty($b['download']),(int)!empty($b['gps'])]);
-        else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);send(['ok'=>true]);
+        else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);$db->commit();send(['ok'=>true]);
     }
     if($method==='POST' && $path==='/admin/invitations') {
         $b=body();$g=text($b,'gallery_id',32,true);if(!one('SELECT id FROM galleries WHERE id=?',[$g]))fail(404,'Vælg et galleri');$token=bin2hex(random_bytes(32));

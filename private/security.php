@@ -15,6 +15,9 @@ function lg_security_ready(): bool {
 function lg_security_require(): void {
     if(!lg_security_ready())fail(503,'Kontosikkerhed er ikke installeret. Importér 004_account_security.sql i LexGalleris database');
 }
+function lg_security_member_deleted(string $id,bool $lock=false): bool {
+    return one('SELECT 1 FROM settings WHERE `key`=?'.($lock?' FOR UPDATE':''),['deleted_user_'.$id])!==null;
+}
 function lg_security_state(string $id,bool $lock=false): array {
     lg_security_require();
     query('INSERT IGNORE INTO user_security(user_id,session_version,totp_secret,totp_last_step,totp_enabled,created,updated) VALUES(?,1,NULL,-1,0,?,?)',[$id,stamp(),stamp()]);
@@ -25,6 +28,7 @@ function lg_security_forget_session(): void {
     $_SESSION=[];session_regenerate_id(true);
 }
 function lg_security_validate_session(array $u): void {
+    if(lg_security_member_deleted($u['id'])){lg_security_forget_session();fail(401,'Kontoen er slettet');}
     $state=lg_security_state($u['id']);
     if((string)($_SESSION['security_version']??'')!==(string)$state['session_version'] || $u['admin'] && (empty($_SESSION['mfa_authenticated']) || !$state['totp_enabled'])) {
         lg_security_forget_session();fail(401,'Log ind igen for at fortsætte');
@@ -48,7 +52,7 @@ function lg_security_login(array $verified): never {
     // challenge or session bound to the reset account's newer epoch.
     $db->beginTransaction();
     $u=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$verified['id']]);
-    if(!$u || isset($verified['password'])&&!hash_equals($verified['password'],$u['password']))fail(401,'Kontoen er ændret. Log ind igen');
+    if(!$u || lg_security_member_deleted($u['id'],true) || isset($verified['password'])&&!hash_equals($verified['password'],$u['password']))fail(401,'Kontoen er ændret. Log ind igen');
     $state=lg_security_state($u['id'],true);$db->commit();
     if($u['admin'])lg_security_begin_pending($u,$state);
     lg_security_complete($u,(int)$state['session_version'],false);
@@ -60,7 +64,7 @@ function lg_security_pending(bool $lock=false): array {
         lg_security_forget_session();fail(401,'Loginforsøget er udløbet. Log ind igen');
     }
     $u=one('SELECT * FROM users WHERE id=?'.($lock?' FOR UPDATE':''),[$id]);
-    if(!$u || !$u['admin']){lg_security_forget_session();fail(401,'Log ind igen');}
+    if(!$u || !$u['admin'] || lg_security_member_deleted($u['id'],$lock)){lg_security_forget_session();fail(401,'Log ind igen');}
     $state=lg_security_state($id,$lock);
     if((string)$state['session_version']!==(string)($_SESSION['lg_pending_version']??'') || !hash_equals(hash('sha256',$u['password']),(string)($_SESSION['lg_pending_password']??''))) {
         lg_security_forget_session();fail(401,'Kontoen er ændret. Log ind igen');
@@ -202,6 +206,7 @@ function lg_security_route_pre(string $method,string $path): void {
     }
 }
 function lg_security_profile(array $u): array {
+    if(lg_security_member_deleted($u['id']))fail(404,'Medlemmet findes ikke');
     $state=lg_security_state($u['id']);$galleries=$u['admin']?rows('SELECT id,name,1 upload,1 download,1 gps FROM galleries ORDER BY name'):rows('SELECT g.id,g.name,a.upload,a.download,a.gps FROM galleries g JOIN grants a ON a.gallery_id=g.id WHERE a.user_id=? ORDER BY g.name',[$u['id']]);
     foreach($galleries as &$gallery)foreach(['upload','download','gps'] as $key)$gallery[$key]=(bool)$gallery[$key];unset($gallery);
     return array_merge(safe_user($u),['mfa_enabled'=>(bool)$state['totp_enabled'],'upload_count'=>(int)query('SELECT COUNT(*) FROM photos WHERE uploader=?',[$u['id']])->fetchColumn(),'galleries'=>$galleries]);
@@ -213,7 +218,7 @@ function lg_security_update_profile(array $actor,string $id,array $b): never {
     $name=array_key_exists('name',$b)?text($b,'name',100,true):null;$mail=array_key_exists('email',$b)?email($b):null;$password=array_key_exists('password',$b)?new_password($b):null;
     lg_security_reauth_throttle($actor['id']);
     $db->beginTransaction();[$freshActor,$actorState]=lg_security_reauthenticate($actor,$b);
-    $target=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$id]);if(!$target)fail(404,'Medlemmet findes ikke');
+    $target=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$id]);if(!$target || lg_security_member_deleted($id,true))fail(404,'Medlemmet findes ikke');
     $targetState=lg_security_state($id,true);$newMail=$mail??$target['email'];
     if(one('SELECT id FROM users WHERE email=? AND id<>?',[$newMail,$id]))fail(409,'E-mailadressen bruges allerede');
     try{query('UPDATE users SET name=?,email=?,password=? WHERE id=?',[$name??$target['name'],$newMail,$password??$target['password'],$id]);}
@@ -223,6 +228,36 @@ function lg_security_update_profile(array $actor,string $id,array $b): never {
     $target['name']=$name??$target['name'];$target['email']=$newMail;
     $self=$id===$actor['id'];if($self)lg_security_forget_session();
     send(['user'=>safe_user($target),'reauthentication_required'=>$self]);
+}
+function lg_security_delete_member(array $actor,string $id,array $b): never {
+    global $db;
+    if(!$actor['admin'])fail(403,'Kun administrator');
+    if(($b['confirm']??null)!==true)fail(400,'Bekræft sletningen af medlemmet');
+    $db->beginTransaction();
+    try {
+        // Serialize with profile/security changes, and recheck the acting
+        // administrator's session epoch before changing another account.
+        $fresh=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$actor['id']]);
+        if(!$fresh || !$fresh['admin'])fail(403,'Kun administrator');
+        $state=lg_security_state($fresh['id'],true);
+        if((string)($_SESSION['security_version']??'')!==(string)$state['session_version'] || empty($_SESSION['mfa_authenticated']) || !$state['totp_enabled'])fail(401,'Log ind igen');
+        $target=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$id]);
+        if(!$target)fail(404,'Medlemmet findes ikke');
+        if($id===$fresh['id'] || $target['admin'])fail(409,'Administratorkonti kan ikke slettes her');
+        if(lg_security_member_deleted($id,true)){$db->commit();send(['ok'=>true,'id'=>$id]);}
+        $now=stamp();lg_security_state($id,true);
+        query('DELETE FROM invitations WHERE email=?',[$target['email']]);
+        query('DELETE FROM grants WHERE user_id=?',[$id]);
+        query('DELETE FROM favorites WHERE user_id=?',[$id]);
+        query('DELETE FROM user_recovery_codes WHERE user_id=?',[$id]);
+        query('UPDATE user_security SET session_version=session_version+1,totp_secret=NULL,totp_enabled=0,totp_last_step=-1,updated=? WHERE user_id=?',[$now,$id]);
+        // Keep only the uploader identity required by existing media foreign
+        // keys and history. Credentials and personal contact details are gone;
+        // the retained row cannot log in or appear as an active member again.
+        query('UPDATE users SET email=?,password=? WHERE id=?',['deleted-'.$id.'@lexgalleri.invalid','!deleted-account!',$id]);
+        query('INSERT INTO settings(`key`,value) VALUES(?,?)',['deleted_user_'.$id,json_encode(['deleted_at'=>$now,'by'=>$fresh['id']],JSON_THROW_ON_ERROR)]);
+        $db->commit();send(['ok'=>true,'id'=>$id]);
+    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
 }
 function lg_security_route(string $method,string $path,array $u): void {
     global $db;
@@ -234,6 +269,7 @@ function lg_security_route(string $method,string $path,array $u): void {
         if(!$u['admin'])fail(403,'Kun administrator');
         if($method==='GET'){$target=one('SELECT * FROM users WHERE id=?',[$m[1]]);if(!$target)fail(404,'Medlemmet findes ikke');send(lg_security_profile($target));}
         if($method==='PATCH')lg_security_update_profile($u,$m[1],body());
+        if($method==='DELETE')lg_security_delete_member($u,$m[1],body());
     }
     if($method==='GET'&&$path==='/security/mfa') {
         $state=lg_security_state($u['id']);send(['required'=>(bool)$u['admin'],'enabled'=>(bool)$state['totp_enabled'],'recovery_codes_remaining'=>(int)query('SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=? AND used_at IS NULL',[$u['id']])->fetchColumn()]);
