@@ -75,6 +75,16 @@ Gæster og medlemmer kan også vælge **Nyt galleri**. Et galleri oprettet af et
 
 Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Det kan bruges én gang og udløber efter syv dage. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
 
+## Slet et medlem
+
+Som admin åbner du **Familie & gæster** og vælger **Slet medlem** ved personen. Knappen findes også på medlemmets profil. Bekræft med **Slet medlemmet**; **Annullér** bevarer kontoen. Administratorkonti kan ikke slettes her.
+
+Kontoen fjernes fra medlemslisten, og alle eksisterende login mister adgang ved næste forespørgsel. E-mailadresse, adgangskode, reservekoder, gallerirettigheder, personlige favoritter og ubrugte invitationer til den gamle e-mail fjernes. Gallerier, billeder, MP4-filer og uploadernavnet bevares i historikken. Eksisterende markeringer af medlemmets billeder til sletning kan stadig gennemgås af admin.
+
+Personen kan inviteres igen med samme e-mail, men får en ny konto med de rettigheder, du vælger i den nye invitation. Gamle invitationslinks kan ikke gendanne den slettede konto eller dens adgang.
+
+**Aktivér i en eksisterende installation:** Hent den nye [app.php](private/app.php) og [security.php](private/security.php), og erstat begge i `/home/lexandkk/lexgalleri-private/` med din egen filmanager. Behold konfigurationen, Authenticator-nøglen og mediemapperne. De offentlige appfiler skal være fra samme kodeversion. Der kræves ingen ny SQL-migrering. `/lexgalleri/api/status` viser `member_delete: true`, når den private kode er klar; indtil da vises knappen deaktiveret med en installationsvejledning.
+
 ## Slet billeder og videoer som admin
 
 Kun administratorer kan gennemføre sletninger. Medlemmer og gæster kan markere egne uploads til godkendelse som beskrevet nedenfor. De kan ikke markere administratorens eller andre medlemmers uploads. Serveren kontrollerer ejerskab og godkendelse ved hvert forsøg.
