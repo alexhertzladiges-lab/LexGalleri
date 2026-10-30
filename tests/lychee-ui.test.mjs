@@ -147,8 +147,9 @@ test('a locked move preview displays the stored mode and moved-original count',(
 });
 
 function mediaPhoto(overrides={}){return{id:'photo-1',gallery_id:'gallery-1',mime:'video/mp4',title:'Video fra haven',taken:'2026-07-14T12:30',precision:'exact',place:'Haven',lat:null,lon:null,uploader_name:'Familien',uploaded:'2026-07-15T09:00:00Z',favorite:false,...overrides};}
-async function mediaFixture(rights,overrides={}){
+async function mediaFixture(rights,overrides={},fetchVideo){
  const f=fixture(),calls=[];f.ctx.photo=mediaPhoto(overrides);f.ctx.testApi=async(...args)=>{calls.push(args);return{permissions:rights}};
+ if(fetchVideo)f.ctx.fetch=fetchVideo;
  f.run('api=globalThis.testApi;me={admin:false};photos=[photo]');await f.run('showPhoto(photo.id)');
  return{...f,calls,html:f.elements.get('#modal').innerHTML};
 }
@@ -189,6 +190,38 @@ test('missing, denied, or truthy nonboolean video permission never renders a vid
   assert(!f.elements.get('#photo-video')?.listeners.has('error'));
   assert.equal(f.calls.length,1);
   assert.equal(f.html.includes('Hent original med metadata'),!!(rights.download&&rights.gps));
+ }
+});
+test('a guest with download and GPS access can verify playback directly when the gallery video flag is missing or false',async()=>{
+ for(const video of [undefined,false]){
+  const requests=[],rights={download:true,gps:true,...(video===undefined?{}:{video})};
+  const f=await mediaFixture(rights,{},async(url,options)=>{requests.push({url,options});return{status:200,headers:{get:()=> 'video/mp4'}};});
+  assert.match(f.html,/<video id="photo-video" controls/);
+  assert.equal(rights.video,video,'do not mutate the gallery permissions snapshot');
+  assert.equal(requests.length,1);assert.equal(requests[0].url,'/LexGalleri/api/photos/photo-1/video');
+  assert.equal(requests[0].options.method,'HEAD');assert.equal(requests[0].options.cache,'no-store');assert.equal(requests[0].options.credentials,'same-origin');
+ }
+});
+test('video access verification fails closed on HTTP denials, non-video responses and connection errors',async()=>{
+ for(const reply of [{status:401},{status:403},{status:404},{status:503},{status:200,mime:'text/html'},{status:204,mime:'video/mp4'},null]){
+  const f=await mediaFixture({download:true,gps:true},{},async()=>{if(!reply)throw Error('offline');return{status:reply.status,headers:{get:()=>reply.mime??'application/json'}};});
+  assert(!f.html.includes('<video'));assert(!f.html.includes('/video"'));
+  assert(!f.elements.get('#photo-video')?.listeners.has('error'));
+  assert.match(f.html,/role="status"/);
+ }
+});
+test('a guest without both original permissions never probes video access',async()=>{
+ for(const rights of [{},{download:true,gps:false},{download:false,gps:true},{download:'true',gps:true}]){
+  let requests=0;const f=await mediaFixture(rights,{},async()=>{requests++;throw Error('must not probe');});
+  assert.equal(requests,0);assert(!f.html.includes('<video'));
+ }
+});
+test('a delayed video access check cannot reopen a closed viewer or replace a newer photo',async()=>{
+ for(const cancel of ['closeModal()','photoViewerGeneration++','accountGeneration++']){
+  const f=fixture();let resolveHead;f.ctx.fetch=()=>new Promise(resolve=>resolveHead=resolve);f.ctx.photo=mediaPhoto();f.ctx.testApi=async()=>({permissions:{download:true,gps:true}});
+  f.run('api=testApi;me={admin:false};photos=[photo]');const opened=f.run('showPhoto(photo.id)');for(let i=0;i<20&&!resolveHead;i++)await Promise.resolve();assert.equal(typeof resolveHead,'function');
+  f.run(cancel);resolveHead({status:200,headers:{get:()=> 'video/mp4'}});await opened;
+  assert.equal(f.elements.get('#modal').open,false);
  }
 });
 test('ordinary photos retain the image viewer even when video playback is permitted',async()=>{

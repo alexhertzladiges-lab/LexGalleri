@@ -31,8 +31,9 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
   const requests=[];let denied=false, disconnected=false;
+  const videoRequests=[],pendingVideoHeads=[];let videoStatus=200,holdVideoHeads=false,videoFlag;
   let directoryUnavailable=false,holdDirectory=false;const pendingDirectories=[];
   const extraMembers=adminDirectory?Array.from({length:8},(_,i)=>({id:(0x810+i).toString(16).padStart(32,'0'),admin:0,name:'Demoperson '+String(i+1).padStart(2,'0'),email:'demo'+(i+1)+'@example.test'})):[];
   const galleryId='a'.repeat(32);
@@ -169,7 +170,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
-      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,video:!editMember}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
       json(otherRevoked?{detail:'Du har ikke adgang'}:{photos:otherPhotos,permissions:{upload:false,download:false,gps:false,video:false}},otherRevoked?403:200);return;
@@ -192,6 +193,12 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       send('image/svg+xml','<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><rect width="1200" height="800" fill="#dce9e2"/><circle cx="925" cy="180" r="80" fill="#e5be77"/><path d="M0 480 285 180 650 520 930 310 1200 510V800H0Z" fill="#779c8a"/><path d="M0 580 340 390 620 650 950 455 1200 610V800H0Z" fill="#416c57"/><path d="M0 620Q380 565 620 680T1200 650V800H0Z" fill="#83aab1"/><path d="M0 735Q390 650 700 740T1200 720V800H0Z" fill="#c3d5ce"/></svg>');return;
     }
     if(new RegExp('^'+base+'/api/photos/[a-f0-9]{32}/video$').test(url.pathname)){
+      videoRequests.push({method:req.method,path:url.pathname});
+      if(guestVideo&&req.method==='HEAD'){
+        const finish=()=>{if(videoStatus!==200){json({detail:'Syntetisk afvisning'},videoStatus);return;}res.setHeader('Accept-Ranges','bytes');send('video/mp4',video);};
+        if(holdVideoHeads)pendingVideoHeads.push(finish);else finish();return;
+      }
+      if(guestVideo&&videoStatus!==200){json({detail:'Syntetisk afvisning'},videoStatus);return;}
       if(denied){json({detail:'Du har ikke adgang'},403);return;}
       if(deleted.has(url.pathname.split('/').at(-2))){json({detail:'Foto findes ikke'},404);return;}
       res.setHeader('Accept-Ranges','bytes');send('video/mp4',video);return;
@@ -207,6 +214,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+    videoRequests,setVideoStatus:status=>{videoStatus=status;},setVideoFlag:flag=>{videoFlag=flag;},holdVideoHeads:()=>{holdVideoHeads=true;},releaseVideoHead:()=>{assert(pendingVideoHeads.length);pendingVideoHeads.shift()();},
     invitationCreates,galleryEdits,photoEdits,holdInvites:()=>{holdInvites=true;},releaseInvite:error=>{assert(pendingInvites.length,'an invitation must be pending');pendingInvites.shift()(error);},holdGalleryEdits:()=>{holdGalleryEdits=true;},releaseGalleryEdit:error=>{assert(pendingGalleryEdits.length,'a gallery update must be pending');pendingGalleryEdits.shift()(error);},disableMultiInvites:()=>{multiInviteCapability=false;},
     memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
     approvalRequests,deletionRequestPosts,deletionDecisions,
@@ -256,6 +264,46 @@ async function chrome(){
     await rm(profile,{recursive:true,force:true});
   }};
 }
+
+test('real Chromium: guest MP4 playback verifies a missing or false gallery flag against the protected stream',{
+  skip:binary?false:'Set TEST_BROWSER to Chromium/Chrome',timeout:60000,
+},async t=>{
+  const site=await fixture({member:true,guestVideo:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait("!!document.querySelector('[data-gallery]')",'guest galleries');
+    await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("[data-photo]")','guest gallery');
+    const open=()=>run('document.querySelector(\'[data-photo="'+site.photoId+'"]\').click()');
+    const close=async()=>{await run('document.querySelector("#close-modal").click()');await wait('!document.querySelector("#modal").open','closed viewer');};
+    await t.test('missing video flag: HEAD confirms access and the guest plays actual MP4 frames',async()=>{
+      await open();await wait('document.querySelector("#modal").open&&!!document.querySelector("#photo-video")&&document.querySelector("#photo-video").readyState>=2','guest MP4');
+      assert.equal(site.videoRequests[0].method,'HEAD');assert(site.videoRequests.some(request=>request.method==='GET'));
+      await run('(()=>{const player=document.querySelector("#photo-video");player.muted=true;return player.play();})()');
+      await wait('document.querySelector("#photo-video").currentTime>0.1','guest plays frames');await close();
+    });
+    await t.test('false video flag: protected stream approval permits playback without changing gallery rights',async()=>{
+      site.setVideoFlag(false);const before=site.videoRequests.length;
+      await open();await wait('document.querySelector("#modal").open&&!!document.querySelector("#photo-video")&&document.querySelector("#photo-video").readyState>=2','false flag MP4');
+      assert.equal(site.videoRequests[before].method,'HEAD');await close();
+    });
+    await t.test('server denies or cannot find the video: no GET is sent and the reason is visible',async()=>{
+      for(const status of [401,403,404,503]){
+        site.setVideoStatus(status);const before=site.videoRequests.length;await open();
+        await wait('document.querySelector("#modal").open&&!!document.querySelector(".media-notice")','failed HEAD notice');
+        assert.equal(await run('!!document.querySelector("#photo-video")'),false);
+        assert.deepEqual(site.videoRequests.slice(before).map(request=>request.method),['HEAD']);
+        const notice=await run('document.querySelector(".media-notice").textContent');assert.match(notice,status===401?/login er udløbet/:status===403?/Serveren afviser video-adgangen/:status===404?/ikke tilgængelig/:/kunne ikke bekræftes/);await close();
+      }
+    });
+    await t.test('late HEAD response cannot replace a newer opened photo',async()=>{
+      site.setVideoStatus(200);site.holdVideoHeads();const before=site.videoRequests.length;await open();
+      const until=Date.now()+5000;while(site.videoRequests.length===before&&Date.now()<until)await pause(20);assert.equal(site.videoRequests.length,before+1);
+      await run('document.querySelector(\'[data-photo="'+site.stillPhotoId+'"]\').click()');await wait('document.querySelector("#modal").open&&!!document.querySelector(".photo-stage>img")','new still photo');
+      site.releaseVideoHead();await pause(150);
+      assert.equal(await run('!!document.querySelector("#photo-video")'),false);assert(await run('document.querySelector(".photo-stage>img").src.includes('+JSON.stringify(site.stillPhotoId)+')'));
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
 
 test('real Chromium: photo overlay retains loaded grid and the installable app keeps private data online',{
   skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,

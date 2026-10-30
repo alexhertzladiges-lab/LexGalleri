@@ -29,6 +29,8 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 - MP4 fra Lychee afspilles med videokontroller på mobil og pc. Afspilning kræver både download- og GPS-adgang, fordi den bruger den uændrede original; admin har adgang.
 - Adgangskoder hashes med PHP `password_hash`; databaseforespørgsler bruger PDO-parametre. Loginforsøg begrænses i databasen på tværs af PHP-processer.
 
+Hvis gallerisvaret mangler videoflaget eller melder det som falsk, men gæsten har både download- og GPS-adgang, kontrollerer appen adgangen direkte ved videoens beskyttede endpoint med en HEAD-forespørgsel. Afspilleren åbnes kun efter et svar med status 200 og typen `video/mp4`. Der hentes ingen videobytes ved kontrollen. Serverafvisning, udløbet login, utilgængelig video og forbindelsesfejl vises særskilt; kontrollen giver ingen nye rettigheder.
+
 ## Repositoryets mapper
 
 | Mappe | Formål |
