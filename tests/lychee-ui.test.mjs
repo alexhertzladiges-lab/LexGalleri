@@ -340,6 +340,15 @@ test('an older photo request cannot replace a newer dialog or a changed gallery'
   assert.equal(f.elements.get('#modal').innerHTML,currentHtml);
  }
 });
+test('a queued close event from the previous dialog does not cancel a newly opened photo request',async()=>{
+ const f=await mediaFixture({video:true,download:true,gps:true});f.ctx.other=mediaPhoto({id:'photo-2',title:'Ny syntetisk visning'});f.run('photos.push(other)');await f.run('showPhoto(photo.id)');
+ const dialog=f.elements.get('#modal'),onClose=dialog.listeners.get('close');
+ dialog.close=()=>{dialog.open=false;};
+ f.run('closeModal()');let finish;f.ctx.delayedApi=()=>new Promise(resolve=>{finish=resolve});f.run('api=globalThis.delayedApi');
+ const pending=f.run('showPhoto(other.id)');onClose();
+ finish({permissions:{video:true,download:true,gps:true}});await pending;
+ assert.equal(dialog.open,true);assert(dialog.innerHTML.includes('Ny syntetisk visning'));
+});
 test('the import preview explains MP4 support before any transfer starts',()=>{
  const data={configured:true,migration_needed:false,job:null};
  assert(renderStatus(data).includes('JPEG, PNG, WebP og MP4-videoer kan importeres'));
