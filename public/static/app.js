@@ -276,10 +276,22 @@ function editGallery(gallery){
 }
 function date(p){return p.taken?(p.precision==='circa'?'ca. ':'')+p.taken.replace('T',' kl. '):'Dato ukendt'}
 function photoPath(p){return BASE+'/api/photos/'+encodeURIComponent(String(p.id??''))}
+async function checkedVideoRights(p,rights){
+  // Private PHP programs are installed separately. An older gallery response
+  // may omit or misreport the video flag even though the stream permits access.
+  // Only the protected endpoint can confirm it; never infer access from flags.
+  if(p.mime!=='video/mp4'||rights.video===true||(rights.video!==undefined&&rights.video!==false)||rights.download!==true||rights.gps!==true)return rights;
+  try{
+    const response=await fetch(photoPath(p)+'/video',{method:'HEAD',credentials:'same-origin',cache:'no-store',redirect:'error'});
+    if(response.status===200&&/^video\/mp4(?:\s*;|\s*$)/i.test(response.headers.get('Content-Type')||''))return {...rights,video:true};
+    const notice=response.status===401?'Dit login er udløbet. Log ind igen for at afspille videoen.':response.status===403?'Serveren afviser video-adgangen, selvom download og GPS er tilladt. Administratoren skal kontrollere installationen og rettighederne.':response.status===404?'Videoen er ikke tilgængelig på serveren. Kontakt administratoren.':'Video-adgangen kunne ikke bekræftes. Luk videoen, og prøv igen.';
+    return {...rights,video:false,videoNotice:notice};
+  }catch{return {...rights,video:false,videoNotice:'Forbindelsen til videoen kunne ikke bekræftes. Luk videoen, og prøv igen.'};}
+}
 function photoMedia(p,rights){
   const path=photoPath(p),title=esc(p.title);
   if(p.mime!=='video/mp4')return `<img src="${path}/image?size=view" alt="${title}">`;
-  if(rights.video!==true)return `<div class="viewer-media"><img src="${path}/image?size=view" alt="${title}"><p class="media-notice" role="status">Du har ikke adgang til at afspille denne video. Kontakt administratoren for at få adgang.</p></div>`;
+  if(rights.video!==true)return `<div class="viewer-media"><img src="${path}/image?size=view" alt="${title}"><p class="media-notice" role="status">${esc(rights.videoNotice||'Du har ikke adgang til at afspille denne video. Kontakt administratoren for at få adgang.')}</p></div>`;
   return `<div class="viewer-media"><video id="photo-video" controls playsinline preload="metadata" poster="${path}/image?size=view" src="${path}/video" aria-label="${title}"></video><p id="video-playback-error" class="media-notice" role="status" hidden></p></div>`;
 }
 function bindPhotoVideo(p,rights){
@@ -475,7 +487,8 @@ async function showPhoto(id){
   if(generation!==photoViewerGeneration||account!==accountGeneration||view!==requestView||current!==requestGallery)return;
   const fresh=Array.isArray(b.photos)?b.photos.find(photo=>photo.id===id):null;
   if(fresh){Object.assign(p,fresh);updatePhotoCard(p);}
-  const rights=b.permissions,previousFocus=document.activeElement?.id;
+  const rights=await checkedVideoRights(p,b.permissions),previousFocus=document.activeElement?.id;
+  if(generation!==photoViewerGeneration||account!==accountGeneration||view!==requestView||current!==requestGallery)return;
   modal('Billedvisning',`<div class="viewer"><div class="photo-stage">${photoMedia(p,rights)}<button class="photo-nav photo-prev" id="prev" type="button" aria-label="Forrige billede" title="Forrige billede"><span aria-hidden="true">‹</span></button><button class="photo-nav photo-next" id="next" type="button" aria-label="Næste billede" title="Næste billede"><span aria-hidden="true">›</span></button></div>${photoDetails(p,rights)}</div>`,true);
   bindPhotoVideo(p,rights);
   const infoButton=$('#photo-info-toggle'),infoPanel=$('#photo-info');let infoOpen=false;infoPanel.hidden=true;
