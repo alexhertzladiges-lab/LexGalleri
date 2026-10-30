@@ -14,7 +14,16 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const binary=[process.env.TEST_BROWSER,process.env.CHROME_BIN,'/usr/bin/chromium','/usr/bin/google-chrome','/opt/google/chrome/chrome'].find(path=>path && existsSync(path));
 const base='/lexgalleri';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function reloadPage(call,run,wait){const previous=await run('performance.timeOrigin');await call('Page.reload');await wait('performance.timeOrigin!=='+JSON.stringify(previous)+'&&document.readyState==="complete"','new document after reload');}
+async function reloadPage(call,run,wait){
+  const previous=await run('performance.timeOrigin');await call('Page.reload');
+  const until=Date.now()+12000;
+  while(Date.now()<until){
+    try{if(await run('performance.timeOrigin!=='+JSON.stringify(previous)+'&&document.readyState==="complete"'))return;}
+    catch(error){if(!/Inspected target navigated or closed|Execution context was destroyed|Cannot find context with specified id/.test(error.message))throw error;}
+    await pause(50);
+  }
+  throw Error('Browser wait timed out: new document after reload');
+}
 async function screenshot(call,name){
   if(!process.env.LEXGALLERI_VIEWER_SCREENSHOTS)return;
   await mkdir(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,{recursive:true});
