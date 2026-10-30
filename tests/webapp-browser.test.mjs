@@ -12,8 +12,18 @@ import {fileURLToPath} from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const binary=[process.env.TEST_BROWSER,process.env.CHROME_BIN,'/usr/bin/chromium','/usr/bin/google-chrome','/opt/google/chrome/chrome'].find(path=>path && existsSync(path));
-const base='/LexGalleri';
+const base='/lexgalleri';
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function reloadPage(call,run,wait){
+  const previous=await run('performance.timeOrigin');await call('Page.reload');
+  const until=Date.now()+12000;
+  while(Date.now()<until){
+    try{if(await run('performance.timeOrigin!=='+JSON.stringify(previous)+'&&document.readyState==="complete"'))return;}
+    catch(error){if(!/Inspected target navigated or closed|Execution context was destroyed|Cannot find context with specified id/.test(error.message))throw error;}
+    await pause(50);
+  }
+  throw Error('Browser wait timed out: new document after reload');
+}
 async function screenshot(call,name){
   if(!process.env.LEXGALLERI_VIEWER_SCREENSHOTS)return;
   await mkdir(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,{recursive:true});
@@ -21,8 +31,10 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false}={}){
+async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false}={}){
   const requests=[];let denied=false, disconnected=false;
+  let directoryUnavailable=false,holdDirectory=false;const pendingDirectories=[];
+  const extraMembers=adminDirectory?Array.from({length:8},(_,i)=>({id:(0x810+i).toString(16).padStart(32,'0'),admin:0,name:'Demoperson '+String(i+1).padStart(2,'0'),email:'demo'+(i+1)+'@example.test'})):[];
   const galleryId='a'.repeat(32);
   const otherGalleryId='c'.repeat(32),memberId='b'.repeat(32),grantWrites=[],pendingGrantWrites=[];
   const deleteRequests=[],pendingDeletes=[],deleted=new Set();
@@ -40,6 +52,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
   let installedThemes=[{id:'default',theme:defaultTheme},{id:activeThemeId,theme:{...defaultTheme,name:'Syntetisk aktiv pakke',colors:{...defaultTheme.colors,accent:'#735a88'},radius:27}},{id:inactiveThemeId,theme:{...defaultTheme,name:'Syntetisk anden pakke',radius:9}}];
   const activeTheme=()=>installedThemes.find(theme=>theme.id===currentThemeId)?.theme||defaultTheme;
   let grants=[{user_id:memberId,gallery_id:galleryId,upload:0,download:0,gps:0}];
+  if(adminDirectory)for(const user of extraMembers.slice(0,3))grants.push({user_id:user.id,gallery_id:galleryId,upload:0,download:0,gps:0});
   const photos=Array.from({length:60},(_,index)=>({
     id:(index+1).toString(16).padStart(32,'0'),gallery_id:galleryId,
     title:'Familie '+String(index+1).padStart(2,'0'),mime:'image/jpeg',
@@ -67,7 +80,9 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       const capabilities={...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
-    if(url.pathname===base+'/api/me'){json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
+    if(url.pathname===base+'/api/me'){if(authenticator){json({detail:'Bekræft login'},401);return;}json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
+    if(authenticator&&url.pathname===base+'/api/mfa/status'){json({mfa_required:true,mfa_enrollment_required:authenticator==='setup'});return;}
+    if(authenticator&&url.pathname===base+'/api/mfa/setup'){json({secret:'SYNTHETICSETUPKEY',otpauth_uri:'otpauth://totp/LexGalleri?secret=SYNTHETICSETUPKEY'});return;}
     if(url.pathname===base+'/api/theme'){json(activeTheme());return;}
     if(deletionRequests&&url.pathname===base+'/api/admin/deletion-requests'&&req.method==='GET'){
       if(member){json({detail:'Kun administrator'},403);return;}
@@ -114,8 +129,9 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       const visiblePhotos=photos.filter(photo=>!deleted.has(photo.id));
       json([{id:galleryId,name:galleryName,description:galleryDescription,count:visiblePhotos.length,cover:mediaDelete?visiblePhotos[0]?.id??null:null},...(permissions||multiInvites||member&&!otherRevoked?[{id:otherGalleryId,name:member?'Privat syntetisk galleri':'Et andet galleri',description:member?'Beskrivelse kun for inviterede':'Kun genererede testdata',count:member?37:0,cover:null}]:[]),...createdGalleries]);return;
     }
-    if((permissions||memberDelete||multiInvites)&&url.pathname===base+'/api/admin/users'){
-      json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},...(!memberDeleted?[{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}]:[])],grants});return;
+    if((permissions||memberDelete||multiInvites||adminDirectory)&&url.pathname===base+'/api/admin/users'){
+      const finish=()=>{if(directoryUnavailable){json({detail:'Medlemsoversigten er midlertidigt utilgængelig'},503);return;}json({users:[{id:'f'.repeat(32),admin:1,name:'Testkonto',email:'admin@example.test'},...(!memberDeleted?[{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test'}]:[]),...extraMembers],grants});};
+      if(holdDirectory)pendingDirectories.push(finish);else finish();return;
     }
     if(memberDelete&&url.pathname===base+'/api/admin/users/'+memberId){
       if(req.method==='GET'){json(memberDeleted?{detail:'Medlemmet findes ikke'}:{id:memberId,admin:0,name:'Syntetisk medlem',email:'member@example.test',upload_count:2,galleries:[]},memberDeleted?404:200);return;}
@@ -198,6 +214,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
     holdDeletionRequestPosts:()=>{holdRequestPosts=true;},releaseDeletionRequestPost:error=>{assert(pendingRequestPosts.length,'a deletion request must be pending');pendingRequestPosts.shift()(error);},
     holdDeletionDecisions:()=>{holdDecisions=true;},releaseDeletionDecision:error=>{assert(pendingDecisions.length,'an admin decision must be pending');pendingDecisions.shift()(error);},
     hasDeleted:id=>deleted.has(id),
+    failDirectory:()=>{directoryUnavailable=true;},restoreDirectory:()=>{directoryUnavailable=false;},holdDirectory:()=>{holdDirectory=true;},releaseDirectory:()=>{assert(pendingDirectories.length);pendingDirectories.shift()();},
     holdGrantWrites:()=>{holdGrantWrites=true;},releaseGrantWrite:error=>{assert(pendingGrantWrites.length,'a grant request must be pending');pendingGrantWrites.shift()(error);},
     holdDeletes:()=>{holdDeletes=true;},releaseDelete:error=>{assert(pendingDeletes.length,'a media deletion must be pending');pendingDeletes.shift()(error);},
     holdThemeDeletes:()=>{holdThemeDeletes=true;},releaseThemeDelete:error=>{assert(pendingThemeDeletes.length,'a package deletion must be pending');pendingThemeDeletes.shift()(error);},disableThemeDelete:()=>{themeDeleteCapability=false;},enableThemeDelete:()=>{themeDeleteCapability=true;},
@@ -369,6 +386,92 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
   }finally{if(browser)await browser.close();await site.close();}
 });
 
+test('real Chromium: administration combines member summaries, search and honest access states on desktop and mobile',{
+  skip:binary?false:'Chromium required',timeout:90000,
+},async()=>{
+  const site=await fixture({permissions:true,adminDirectory:true,multiInvites:true,memberDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const capture=async name=>{if(!process.env.LEXGALLERI_ADMIN_SCREENSHOTS)return;await mkdir(process.env.LEXGALLERI_ADMIN_SCREENSHOTS,{recursive:true});const result=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(process.env.LEXGALLERI_ADMIN_SCREENSHOTS,name),Buffer.from(result.data,'base64'));};
+    await call('Emulation.setDeviceMetricsOverride',{width:1280,height:1100,deviceScaleFactor:1,mobile:false});
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=admin]")','single administration entry');
+    assert(await run('document.querySelector("#admin-subnav").hidden'));
+    await run('document.querySelector("[data-view=admin]").click()');await wait('document.querySelectorAll("[data-member-row]").length===6','six member preview');
+    assert.equal(await run('document.querySelector("#admin-area").value'),'admin');
+    assert.equal(await run('document.querySelector("#overview-people strong").textContent'),'10');
+    assert(await run('document.querySelector("#overview-deletions small").textContent.includes("ikke bekræftet")'),'missing request status must not be shown as zero/OK');
+    const search=async value=>{await run('document.querySelector("#member-search").value='+JSON.stringify(value)+';document.querySelector("#member-search").dispatchEvent(new Event("input"))');};
+    await search('member@example.test');assert.equal(await run('document.querySelectorAll("[data-member-row]").length'),1);
+    assert(await run('document.querySelector(".member-card").textContent.includes("Syntetisk medlem")&&document.querySelector(".member-card").textContent.includes("Syntetisk galleri")&&document.querySelector(".member-state").textContent.includes("Har galleriadgang")'));
+    await search('findes-ikke');assert(await run('document.querySelector(".admin-empty").textContent.includes("Ingen personer fundet")'));
+    await search('');await capture('administration-overblik-desktop.png');
+    await run('document.querySelector("#all-members").click()');await wait('!!document.querySelector("#member-filter")','full directory');
+    assert.equal(await run('document.querySelectorAll("[data-member-row]").length'),10);
+    await run('document.querySelector("#member-filter").value="no-access";document.querySelector("#member-filter").dispatchEvent(new Event("change"))');
+    assert.equal(await run('document.querySelectorAll("[data-member-row]").length'),5);
+    assert(await run('[...document.querySelectorAll(".member-state")].every(n=>n.textContent.includes("Ingen galleriadgang"))'));
+    await run('document.querySelector("#member-filter").value="all";document.querySelector("#member-filter").dispatchEvent(new Event("change"))');
+    for(const width of [390,320]){
+      await call('Emulation.setDeviceMetricsOverride',{width,height:width===390?1400:844,deviceScaleFactor:1,mobile:true});
+      assert(await run('document.documentElement.scrollWidth<=innerWidth+1'),'directory must fit '+width+'px');
+      const select=await run('(()=>{const r=document.querySelector("#admin-area").getBoundingClientRect();return{left:r.left,right:r.right,height:r.height};})()');assert(select.left>=0&&select.right<=width&&select.height>=44);
+      if(width===390)await capture('administration-medlemmer-mobil.png');
+    }
+    assert.equal(site.grantWrites.length,0,'search and filtering never write rights');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: administration grant changes can be discarded, save sequentially and recover after a partial failure',{
+  skip:binary?false:'Chromium required',timeout:90000,
+},async()=>{
+  const site=await fixture({permissions:true,multiInvites:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const writes=async n=>{const until=Date.now()+5000;while(site.grantWrites.length<n&&Date.now()<until)await pause(20);assert.equal(site.grantWrites.length,n);};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=admin]")','admin entry');
+    await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector("[data-user]")','directory');await run('document.querySelector("[data-user]").click()');
+    await wait('!!document.querySelector("#grant-save-all")','grant workspace');
+    const first='document.querySelector(\'.grant[data-g="'+site.galleryId+'"]\')',second='document.querySelector(\'.grant[data-g="'+site.otherGalleryId+'"]\')';
+    assert(await run(second+'.elements.upload.disabled'));
+    await run(first+'.elements.upload.click();document.querySelector("#close-modal").click()');
+    assert(await run('document.querySelector("#modal").open&&!document.querySelector("#grant-leave-warning").hidden'));assert.equal(site.grantWrites.length,0);
+    await run('document.querySelector("#grant-stay").click();document.querySelector("#grant-reset-all").click()');
+    assert(await run('!'+first+'.elements.upload.checked&&document.querySelector("#grant-save-all").disabled'));assert.equal(site.grantWrites.length,0);
+    await run(first+'.elements.upload.click();'+second+'.elements.view.click();'+second+'.elements.edit.click()');
+    assert(await run('document.querySelector("#grant-save-all").textContent.includes("2 gallerier")'));
+    site.holdGrantWrites();await run('document.querySelector("#grant-save-all").click();document.querySelector("#grant-save-all").click()');await writes(1);
+    assert(await run('document.querySelector("#grant-save-all").disabled&&[...document.querySelectorAll(".grant input")].every(n=>n.disabled)'));
+    site.releaseGrantWrite();await writes(2);assert(await run(first+'.querySelector(".grant-feedback").dataset.state==="success"'));
+    site.releaseGrantWrite('Syntetisk fejl i andet galleri');await wait('document.querySelector("#grant-total-status").dataset.state==="error"','partial failure');
+    assert(await run('document.querySelector("#grant-total-status").textContent.includes("1 af 2")&&'+second+'.elements.view.checked&&'+second+'.elements.edit.checked&&!document.querySelector("#grant-save-all").disabled'));
+    await pause(80);assert.equal(site.grantWrites.length,2,'failed batch must not automatically retry');
+    await run('document.querySelector("#grant-save-all").click()');await writes(3);assert.equal(site.grantWrites[2].gallery_id,site.otherGalleryId);
+    site.releaseGrantWrite();await wait('document.querySelector("#grant-total-status").textContent.includes("Alle ændringer er gemt")','full server confirmation');
+    assert(await run('document.querySelector("#grant-save-all").disabled&&document.querySelector("[data-member-row=\\"'+site.memberId+'\\"]").textContent.includes("2 gallerier")'));
+    await run(first+'.elements.upload.click();document.querySelector("#close-modal").click();document.querySelector("#grant-discard-close").click()');
+    await wait('!document.querySelector("#modal").open','explicit discard');assert.equal(site.grantWrites.length,3);
+    await run('document.querySelector("[data-user]").click()');await wait('!!document.querySelector("#grant-save-all")','reopen');
+    assert(await run(first+'.elements.upload.checked'),'discard retains last server-confirmed rights');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: failed or stale administration reads never become an empty successful directory',{
+  skip:binary?false:'Chromium required',timeout:90000,
+},async()=>{
+  const site=await fixture({permissions:true,adminDirectory:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=admin]")','admin entry');
+    site.failDirectory();await run('document.querySelector("[data-view=admin]").click()');await wait('!!document.querySelector("#admin-retry")','explicit failure');
+    assert(await run('document.querySelector(".admin-load-error").textContent.includes("midlertidigt utilgængelig")&&!document.querySelector("#overview-people")&&!document.querySelector("[data-member-row]")'));
+    site.restoreDirectory();await run('document.querySelector("#admin-retry").click()');await wait('document.querySelectorAll("[data-member-row]").length===6','retry succeeds');
+    site.holdDirectory();await run('document.querySelector("[data-view=people]").click()');await wait('document.querySelector("#content").textContent.includes("Henter personer")','pending directory');
+    await run('document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("#gallery-grid")','different page');await run('window.__adminLeaveGrid=document.querySelector("#gallery-grid")');
+    site.releaseDirectory();await pause(100);assert(await run('__adminLeaveGrid===document.querySelector("#gallery-grid")&&!document.querySelector("[data-member-row]")'));
+    assert.equal(site.grantWrites.length,0);
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
 test('real Chromium: gallery permissions report pending, saved and failed changes inside the open dialog',{
   skip:binary?false:'Set TEST_BROWSER to a Chromium/Chrome executable for the optional browser smoke test',timeout:90000,
 },async t=>{
@@ -380,7 +483,7 @@ test('real Chromium: gallery permissions report pending, saved and failed change
     const feedback=form=>form+".querySelector('.grant-feedback')";
     const state=(form,name)=>feedback(form)+'.dataset.state==='+JSON.stringify(name);
     const reopen=async()=>{
-      await run("new Promise(resolve=>{const dialog=document.querySelector('#modal');dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();})");
+      await run("new Promise(resolve=>{const dialog=document.querySelector('#modal');dialog.addEventListener('close',()=>resolve(true),{once:true});document.querySelector('#close-modal').click();const warning=document.querySelector('#grant-leave-warning');if(warning&&!warning.hidden)document.querySelector('#grant-discard-close').click();})");
       await run('document.querySelector('+JSON.stringify('[data-user="'+site.memberId+'"]')+').click()');
       await wait('!!'+first,'reopened permission forms');
     };
@@ -404,12 +507,12 @@ test('real Chromium: gallery permissions report pending, saved and failed change
       await run('(()=>{const f='+first+';f.elements.upload.click();f.requestSubmit();f.requestSubmit();})()');
       await wait(state(first,'saving'),'pending permission save');await waitForWrites(1);
       const pending=await run('(()=>{const f='+first+';return{busy:f.getAttribute("aria-busy"),disabled:[...f.querySelectorAll("input,button[type=submit]")].every(element=>element.disabled),text:f.querySelector(".grant-feedback").textContent,otherEnabled:!'+second+'.querySelector("button[type=submit]").disabled};})()');
-      assert.equal(pending.busy,'true');assert(pending.disabled&&pending.otherEnabled);assert.equal(pending.text,'Gemmer rettigheder…');
+      assert.equal(pending.busy,'true');assert(pending.disabled&&!pending.otherEnabled,'the workspace locks other writes while one request is pending');assert.equal(pending.text,'Gemmer rettigheder…');
       assert.deepEqual(site.grantWrites[0],{user_id:site.memberId,gallery_id:site.galleryId,view:true,upload:true,download:false,gps:false});
       site.releaseGrantWrite();await wait(state(first,'success'),'acknowledged permission save');
       const saved=await visible(first,false);assert(saved.insideModal&&saved.visible,'saved feedback must be visible above the native dialog backdrop without scrolling after save');
       assert.equal(saved.text,'Rettighederne er gemt.');assert.equal(saved.role,'status');assert.equal(saved.live,'polite');
-      assert(await run(first+'.getAttribute("aria-busy")==="false"&&![...'+first+'.querySelectorAll("input,button[type=submit]")].some(element=>element.disabled)'));
+      assert(await run(first+'.getAttribute("aria-busy")==="false"&&![...'+first+'.querySelectorAll("input")].some(element=>element.disabled)&&'+first+'.querySelector("button[type=submit]").disabled'));
       assert.equal(site.requests.filter(path=>path===base+'/api/admin/users').length,1,'an acknowledged save must not depend on a second admin-list request');
       await reopen();assert(await run(first+'.elements.upload.checked&&'+first+'.elements.view.checked'),'reopening must retain the acknowledged rights');
     });
@@ -577,7 +680,7 @@ test('real Chromium: administrators confirm photo and MP4 removal without reload
     });
 
     await t.test('an older backend without the capability never exposes the delete action',async()=>{
-      site.disableMediaDelete();await call('Page.reload');await wait("!!document.querySelector('[data-gallery]')",'older backend overview');
+      site.disableMediaDelete();await reloadPage(call,run,wait);await wait("!!document.querySelector('[data-gallery]')",'older backend overview');
       await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===58','remaining media after reload');
       const id=await run('document.querySelector("[data-photo]").dataset.photo');await open(id);await run('document.querySelector("#photo-info-toggle").click()');
       assert(await run('!document.querySelector("#delete-photo")&&!!document.querySelector("#edit-photo")'));
@@ -983,7 +1086,7 @@ test('real Chromium: members request deletion approval only for their own media 
     });
 
     await t.test('pending requests remain visible after reload and cannot be selected again',async()=>{
-      await call('Page.reload');await wait('!!document.querySelector("[data-gallery]")','member reload');await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','gallery with pending requests');
+      await reloadPage(call,run,wait);await wait('!!document.querySelector("[data-gallery]")','member reload');await run('document.querySelector("[data-gallery]").click()');await wait('document.querySelectorAll("[data-photo]").length===60','gallery with pending requests');
       for(const id of [ownPhoto,ownVideo])assert(await run('!!'+photo(id)+'.querySelector(".deletion-request-badge")'));
       await run('document.querySelector("#gallery-delete-toggle").click()');
       for(const id of [ownPhoto,ownVideo])assert(await run(photo(id)+'.disabled'),'already pending own media cannot be submitted again');
@@ -1060,16 +1163,17 @@ test('real Chromium: administrators delete design packages with confirmation and
     const node=(attribute,id)=>'document.querySelector('+JSON.stringify('['+attribute+'="'+id+'"]')+')';
     const card=id=>node('data-theme-card',id),trigger=id=>node('data-theme-delete',id),box=id=>node('data-theme-delete-confirm',id),submit=id=>node('data-theme-delete-submit',id),cancel=id=>node('data-theme-delete-cancel',id),status=id=>node('data-theme-delete-status',id);
     const openDesign=async()=>{await wait('!!document.querySelector("[data-view=design]")','administrator navigation');await run('document.querySelector("[data-view=design]").click()');await wait('document.querySelectorAll("[data-theme-card]").length===3','installed packages');};
+    const reloadDesign=async()=>{const origin=await run('performance.timeOrigin');await reloadPage(call,run,wait);await wait('performance.timeOrigin!=='+JSON.stringify(origin)+'&&!!document.querySelector("[data-view=design]")','new document after reload');await openDesign();};
     const radius=()=>run('getComputedStyle(document.documentElement).getPropertyValue("--radius").trim()');
     const waitForDeletes=async count=>{const until=Date.now()+5000;while(site.themeDeleteRequests.length<count&&Date.now()<until)await pause(20);assert.equal(site.themeDeleteRequests.length,count,'package confirmation must send exactly one request');};
     await call('Page.navigate',{url:site.origin+base+'/'});await openDesign();
 
     await t.test('standard packages and older backends expose no delete action',async()=>{
       assert(await run('!!'+card('default')+'&&!'+trigger('default')+'&&!!'+trigger(site.activeThemeId)+'&&!!'+trigger(site.inactiveThemeId)));
-      site.disableThemeDelete();await call('Page.reload');await openDesign();
+      site.disableThemeDelete();await reloadDesign();
       assert.equal(await run('document.querySelectorAll("[data-theme-delete]").length'),0,'missing theme_delete capability must hide all package delete actions');
       assert.equal(site.themeDeleteRequests.length,0);
-      site.enableThemeDelete();await call('Page.reload');await openDesign();
+      site.enableThemeDelete();await reloadDesign();
       assert.equal(await radius(),'27px');
       await run('window.__defaultPackage='+card('default')+';window.__activePackage='+card(site.activeThemeId)+';window.__otherPackage='+card(site.inactiveThemeId));site.holdThemeDeletes();
     });
@@ -1141,9 +1245,44 @@ test('real Chromium: members create their own galleries without gaining administ
     });
 
     await t.test('an older backend without gallery_create keeps member creation hidden',async()=>{
-      site.disableGalleryCreate();await call('Page.reload');await wait('!!'+created,'existing creator gallery after reload');
+      const previousDocument=await run('performance.timeOrigin');site.disableGalleryCreate();await reloadPage(call,run,wait);await wait('performance.timeOrigin!=='+JSON.stringify(previousDocument)+'&&!!'+created,'existing creator gallery in reloaded document');
       assert(await run('!document.querySelector("#new-gallery")&&!document.querySelector("[data-view=people]")&&!document.querySelector("[data-view=design]")'));
       assert.equal(site.galleryCreates.length,2);
     });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: Authenticator opens a numeric keyboard and recovery codes retain a normal text keyboard',{
+  skip:binary?false:'Chromium required',timeout:90000,
+},async()=>{
+  for(const mode of ['login','setup']){
+    const site=await fixture({authenticator:mode});let browser;
+    try{
+      browser=await chrome();const {evaluate:run,wait,call}=browser;
+      await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+      await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("#mfa-form input[name=code]")','authenticator input');
+      assert.equal(await run('document.querySelector("#mfa-form input[name=code]").inputMode'),'numeric');
+      assert.equal(await run('document.querySelector("#mfa-form input[name=code]").getAttribute("enterkeyhint")'),'done');
+      const before=site.requests.length;
+      if(mode==='login'){
+        await run('document.querySelector("#mfa-form input[name=code]").value="001234";document.querySelector(".authenticator-mode-switch").click()');
+        assert(await run('document.querySelector("#mfa-form input[name=code]").inputMode==="text"&&document.querySelector("#mfa-form input[name=code]").value==="001234"'));
+        await run('document.querySelector("#mfa-form input[name=code]").value="DEMO-RECOVERY-CODE"');
+        assert(await run('new FormData(document.querySelector("#mfa-form")).get("code")==="DEMO-RECOVERY-CODE"&&document.querySelector("#mfa-form input[name=code]").maxLength===64'));
+        await run('document.querySelector(".authenticator-mode-switch").click()');assert.equal(await run('document.querySelector("#mfa-form input[name=code]").inputMode'),'numeric');
+        assert.equal(site.requests.length,before,'keyboard switch never submits a code');
+      }else{
+        assert(await run('!document.querySelector(".authenticator-mode-switch")&&document.querySelector("#mfa-form input[name=code]").maxLength===6'));
+      }
+    }finally{if(browser)await browser.close();await site.close();}
+  }
+  const site=await fixture({permissions:true,memberDelete:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=people]")','admin');await run('document.querySelector("[data-view=people]").click()');await wait('!!document.querySelector(\'[data-profile="'+site.memberId+'"]\')','member');
+    await run('document.querySelector(\'[data-profile="'+site.memberId+'"]\').click()');await wait('!!document.querySelector("#profile-edit")','member profile');await run('document.querySelector("#profile-edit").click()');
+    assert.equal(await run('document.querySelector("input[name=mfa_code]").inputMode'),'numeric');
+    await run('document.querySelector(".authenticator-mode-switch").click()');assert.equal(await run('document.querySelector("input[name=mfa_code]").inputMode'),'text');
+    assert(await run('!!document.querySelector("input[name=current_password]")'),'keyboard choice preserves required administrator proof');
   }finally{if(browser)await browser.close();await site.close();}
 });

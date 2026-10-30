@@ -23,9 +23,17 @@ FTPS_PORT="${FTPS_PORT:?FTPS_PORT mangler}"
 # The plan sets mandatory TLS+certificate+hostname verification before the first request.
 # ftp:// plus AUTH TLS is explicit FTPS on port 21 (not implicit FTPS on port 990).
 # --env-password keeps credentials out of arguments, files and generated command plans.
+if [[ "${1:-}" != "--diagnose" ]]; then
+  node scripts/ftps-integrity.mjs preflight "$task_deploy_tmp/preflight" "$task_deploy_tmp/existing-index.php"
+  LFTP_PASSWORD="$FTPS_PASSWORD" lftp --env-password -u "$FTPS_USERNAME" -p "$FTPS_PORT" "ftp://$FTPS_HOST" < "$task_deploy_tmp/preflight"
+  node scripts/ftps-integrity.mjs check-root "$task_deploy_tmp/existing-index.php"
+fi
 LFTP_PASSWORD="$FTPS_PASSWORD" lftp --env-password -u "$FTPS_USERNAME" -p "$FTPS_PORT" "ftp://$FTPS_HOST" < "$task_deploy_tmp/plan"
 if [[ "${1:-}" == "--diagnose" ]]; then
   echo 'FTPS-login, TLS og offentlig kontorod kontrolleret. Ingen filer er overført.'
 else
-  echo 'De offentlige appfiler er overført. Kontrollér HTTPS-adressen og log ind.'
+  node scripts/ftps-integrity.mjs verify-plan "$task_deploy_tmp/verify-plan" "$task_deploy_tmp/verified"
+  LFTP_PASSWORD="$FTPS_PASSWORD" lftp --env-password -u "$FTPS_USERNAME" -p "$FTPS_PORT" "ftp://$FTPS_HOST" < "$task_deploy_tmp/verify-plan"
+  node scripts/ftps-integrity.mjs check-files "$task_deploy_tmp/verified"
+  echo 'De offentlige appfiler er overført og genlæst med korrekte SHA-256-kontrolsummer.'
 fi

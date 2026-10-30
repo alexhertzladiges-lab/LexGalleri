@@ -10,15 +10,16 @@ export function connection(env) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/.test(host)) throw Error('FTPS_HOST mangler eller er ugyldig');
   if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$/.test(user)) throw Error('FTPS_USERNAME mangler eller er ugyldig');
   if (!/^[1-9]\d*$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw Error('FTPS_PORT mangler eller er ugyldig');
+  if (host !== 'web3.e-studio.dk' || user !== 'chatgpt@lexan.dk' || port !== '21') throw Error('FTPS-målet er ikke den godkendte LexGalleri-konto. Ingen filer overføres.');
   return { host, user, port };
 }
 
 // Every destination is relative to the FTP account root. The owner restricts that
-// account to /home/lexandkk/public_html/LexGalleri in the hosting control panel.
+// account to /home/lexandkk/public_html/lexgalleri in the hosting control panel.
 // There is no private-directory parameter, probe, directory traversal or upload.
 // App metadata and icons activate before the scripts and entry point that use
 // them. This is an explicit allowlist, never a recursive public-directory sync.
-const publicFiles = [
+export const publicFiles = Object.freeze([
   'static/icon.svg',
   'static/icon-192.png',
   'static/icon-512.png',
@@ -31,11 +32,11 @@ const publicFiles = [
   'static/app.js',
   '.htaccess',
   'index.php',
-];
+]);
 const q = s => '"' + s + '"';
-export function plan(env, root = process.cwd(), diagnostic = false) {
+export function connectionCommands(env) {
   connection(env);
-  const lines = [
+  return [
     'set cmd:fail-exit true',
     'set ftp:ssl-allow true',
     'set ftp:ssl-force true',
@@ -48,6 +49,9 @@ export function plan(env, root = process.cwd(), diagnostic = false) {
     'set net:timeout 20',
     'cd "/"', 'pwd',
   ];
+}
+export function plan(env, root = process.cwd(), diagnostic = false) {
+  const lines = connectionCommands(env);
   // Read-only listing of the restricted public root verifies the TLS data channel.
   if (diagnostic) return [...lines, 'cls -1', 'bye'].join('\n') + '\n';
   const revision = env.GITHUB_SHA || '';

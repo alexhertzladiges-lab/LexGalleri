@@ -28,19 +28,37 @@ function addPasswordToggles(root){
     toggle.onclick=event=>{event.preventDefault();const start=input.selectionStart,end=input.selectionEnd,visible=input.type==='password';input.type=visible?'text':'password';toggle.setAttribute('aria-pressed',String(visible));toggle.setAttribute('aria-label',(visible?'Skjul ':'Vis ')+description.toLowerCase());toggle.title=(visible?'Skjul ':'Vis ')+description.toLowerCase();field.classList.toggle('password-visible',visible);input.focus({preventScroll:true});if(start!==null&&end!==null)input.setSelectionRange(start,end);};
     field.append(toggle);
   }
+  addAuthenticatorKeyboards(root);
+}
+function addAuthenticatorKeyboards(root){
+  for(const input of root.querySelectorAll?.('input[name=code],input[name=mfa_code]')||[]){
+    input.setAttribute('inputmode','numeric');input.setAttribute('enterkeyhint','done');
+    if(input.dataset.authenticatorRecovery!=='true'||input.dataset.authenticatorReady==='true')continue;
+    input.dataset.authenticatorReady='true';
+    const label=input.parentElement?.tagName==='LABEL'?input.parentElement:null;
+    if(!label)continue;
+    if(!input.id)input.id='authenticator-code-'+(++passwordControlSequence);
+    const control=document.createElement('div');control.className='authenticator-control';
+    label.parentNode.insertBefore(control,label);control.append(label,input);label.htmlFor=input.id;label.textContent='Kode fra Authenticator';
+    const button=document.createElement('button');button.type='button';button.className='secondary authenticator-mode-switch';button.textContent='Brug reservekode';button.setAttribute('aria-controls',input.id);button.setAttribute('aria-pressed','false');
+    let recovery=false;
+    button.onclick=event=>{event.preventDefault();recovery=!recovery;input.setAttribute('inputmode',recovery?'text':'numeric');input.setAttribute('autocomplete',recovery?'off':'one-time-code');label.textContent=recovery?'Reservekode':'Kode fra Authenticator';button.textContent=recovery?'Brug Authenticator':'Brug reservekode';button.setAttribute('aria-pressed',String(recovery));input.focus({preventScroll:true});};
+    control.append(button);
+  }
 }
 function modal(title,html,photo=false){
+  grantDialog=null;
   cancelGalleryDeleteConfirmation();
   photoViewerGeneration++;photoViewerNavigation=null;privateAccountDialog=false;stopPhotoVideo();
   M.classList?.toggle('photo-dialog',photo);M.classList?.remove('photo-info-open');M.setAttribute?.('aria-labelledby','modal-title');
   M.innerHTML=`<div class="dialog-head${photo?' photo-toolbar':''}"><h2 id="modal-title"${photo?' class="photo-viewer-title"':''}>${esc(title)}</h2>${photo?'<button class="secondary" id="photo-info-toggle" type="button" aria-expanded="false" aria-controls="photo-info"><span aria-hidden="true">ⓘ</span> Info</button>':''}<button class="secondary" id="close-modal" type="button" aria-label="Luk">✕</button></div>${html}`;
-  addPasswordToggles(M);$('#close-modal').onclick=()=>{cancelGalleryDeleteConfirmation();photoViewerGeneration++;M.close()};if(!M.open)M.showModal();
+  addPasswordToggles(M);$('#close-modal').onclick=requestDialogClose;if(!M.open)M.showModal();
 }
 function formHandler(id,fn){$(id).onsubmit=async e=>{e.preventDefault();const btn=$('button[type=submit]',e.target);if(btn)btn.disabled=true;try{await fn(Object.fromEntries(new FormData(e.target)))}catch(err){const out=$('.error',e.target);if(out)out.textContent=err.message;else toast(err.message)}finally{if(btn)btn.disabled=false}}}
 function clearAccountWorkspace(){
-  cancelGalleryDeleteConfirmation();galleryDeleteState=null;
+  grantDialog=null;adminDirectoryData=null;cancelGalleryDeleteConfirmation();galleryDeleteState=null;
   accountGeneration++;profileGeneration++;navigationGeneration++;photoViewerGeneration++;stopLycheeView();stopPhotoVideo();galleries=[];photos=[];current=null;view='galleries';
-  if(M.open)M.close();M.innerHTML='';privateAccountDialog=false;
+  if(M.open)closeModal();M.innerHTML='';privateAccountDialog=false;
 }
 async function accountSignOut(){
   clearAccountWorkspace();me=null;A.innerHTML='<div class="login"><p role="status">Logger ud…</p></div>';
@@ -71,8 +89,8 @@ function localAuthenticatorQr(uri){
 async function mfaGate(challenge){
   clearAccountWorkspace();me=null;const generation=accountGeneration;
   const enrollment=challenge?.mfa_enrollment_required===true;
-  A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Administrator · ekstra beskyttelse</div><h1>${enrollment?'Tilføj Authenticator.':'Bekræft dit login.'}</h1><p>${enrollment?'Tilføj LexGalleri i fx Google Authenticator eller Microsoft Authenticator. Bekræft med den sekscifrede kode, før du får adgang.':'Åbn din Authenticator-app, og indtast en ny sekscifret kode. Du kan også bruge en ubrugt reservekode.'}</p><div id="mfa-setup">${enrollment?'<p role="status">Gør opsætningen klar…</p>':''}</div><form id="mfa-form"><label>${enrollment?'Kode fra Authenticator':'Kode fra Authenticator eller reservekode'}<input name="code" type="text" autocomplete="one-time-code" ${enrollment?'inputmode="numeric" pattern="[0-9]{6}" maxlength="6"':'maxlength="64" autocapitalize="off" spellcheck="false"'} required></label><p class="muted">En kode kan kun bruges én gang. Vent på en ny kode i appen, hvis du lige har brugt den.</p><div class="error" id="mfa-error" role="alert"></div><button type="submit" ${enrollment?'disabled':''}>${enrollment?'Bekræft Authenticator':'Log ind'} →</button></form><button class="secondary" id="mfa-cancel" type="button">Annullér og log ud</button></div>`;
-  $('#mfa-cancel').onclick=accountSignOut;
+  A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Administrator · ekstra beskyttelse</div><h1>${enrollment?'Tilføj Authenticator.':'Bekræft dit login.'}</h1><p>${enrollment?'Tilføj LexGalleri i fx Google Authenticator eller Microsoft Authenticator. Bekræft med den sekscifrede kode, før du får adgang.':'Åbn din Authenticator-app, og indtast en ny sekscifret kode. Du kan også bruge en ubrugt reservekode.'}</p><div id="mfa-setup">${enrollment?'<p role="status">Gør opsætningen klar…</p>':''}</div><form id="mfa-form"><label>${enrollment?'Kode fra Authenticator':'Kode fra Authenticator eller reservekode'}<input name="code" type="text" autocomplete="one-time-code" ${enrollment?'inputmode="numeric" pattern="[0-9]{6}" maxlength="6"':'inputmode="numeric" maxlength="64" autocapitalize="off" spellcheck="false" data-authenticator-recovery="true"'} required></label><p class="muted">En kode kan kun bruges én gang. Vent på en ny kode i appen, hvis du lige har brugt den.</p><div class="error" id="mfa-error" role="alert"></div><button type="submit" ${enrollment?'disabled':''}>${enrollment?'Bekræft Authenticator':'Log ind'} →</button></form><button class="secondary" id="mfa-cancel" type="button">Annullér og log ud</button></div>`;
+  addAuthenticatorKeyboards(A);$('#mfa-cancel').onclick=accountSignOut;
   formHandler('#mfa-form',async fields=>{const reply=await api(enrollment?'/mfa/confirm':'/mfa/verify','POST',{code:fields.code});if(generation===accountGeneration)await authResult(reply)});
   if(!enrollment)return;
   try{
@@ -94,9 +112,9 @@ function recoveryCodesView(codes,continueWith){
 function auth(setup=false,invite=null,prefill=''){clearAccountWorkspace();me=null;A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Kun for jer</div><h1>${setup?'Et hjem til jeres minder.':invite?'Du er inviteret.':'Velkommen hjem.'}</h1><p class="muted">${setup?'Opret familiens administrator for at komme i gang.':invite?'Vælg en adgangskode på mindst 12 tegn. Har du allerede en konto, skal du bruge dens adgangskode.':'Log ind og find tilbage til de øjeblikke, I deler.'}</p><form id="auth">${setup?'<label>Opsætningsnøgle<input name="token" type="password" required></label><label>Dit navn<input name="name" autocomplete="name" required></label>':''}${invite?'':`<label>E-mail<input name="email" type="email" autocomplete="email" value="${esc(prefill)}" required></label>`}<label>Adgangskode<input name="password" type="password" autocomplete="${setup||invite?'new-password':'current-password'}" minlength="${setup||invite?12:1}" required></label><div class="error" role="alert"></div><button type="submit">${setup?'Opret familiearkiv':invite?'Acceptér invitation':'Log ind'} →</button></form><p class="muted" style="font-size:12px;margin-top:26px">Private billeder. Fælles minder.</p></div>`;addPasswordToggles(A);formHandler('#auth',async b=>{if(invite)b.token=invite;const result=await api(setup?'/setup':invite?'/accept':'/login','POST',b);await authResult(result,true)})}
 async function init(){try{const s=await api('/status');serverCapabilities=s.capabilities&&typeof s.capabilities==='object'?s.capabilities:{};if(s.account_security_version!==1||(!s.setup&&s.account_security_ready!==true))return accountMaintenance();const token=new URLSearchParams(location.search).get('invite');if(token)return auth(false,token);if(s.setup)return auth(true);try{me=await api('/me')}catch(error){if(error.status&&error.status!==401)throw error;let pending;try{pending=await api('/mfa/status')}catch(problem){if(problem.status&&![401,404].includes(problem.status))throw problem;return auth()}return mfaGate(pending)}await start()}catch(e){A.innerHTML='<div class="login"><h1>Kunne ikke starte</h1><p>'+esc(e.message)+'</p></div>'}}
 async function start(){const generation=++navigationGeneration,account=accountGeneration;const theme=await api('/theme');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;const list=await api('/galleries');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;applyTheme(theme);galleries=list;shell();await render()}
-function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?'<button data-view="people">♧ &nbsp; Familie & gæster</button><button data-view="design">◐ &nbsp; Design</button><button data-view="deletions">⌫ &nbsp; Sletteønsker</button>':''}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
-async function render(){if(view!=='lychee')stopLycheeView();document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const C=$('#content');if(view==='galleries'&&!current){C.innerHTML=`<div class="heading"><div><div class="eyebrow">Saml på øjeblikkene</div><h1 style="margin:12px 0">Jeres gallerier</h1><p class="muted">Små hverdage. Store oplevelser. Alt det, I gerne vil huske.</p></div><div class="gallery-actions">${me.admin||serverCapabilities.gallery_create===true?'<button id="new-gallery">＋ Nyt galleri</button>':''}${galleryDeletionOverviewMarkup()}</div></div><div class="tools"><input id="search-gallery" placeholder="Søg i gallerier…" aria-label="Søg i gallerier"><span class="muted">${galleries.length} gallerier · privat adgang</span></div><div id="gallery-grid" class="grid"></div>`;const draw=()=>{$('#gallery-grid').innerHTML=galleries.filter(g=>g.name.toLowerCase().includes($('#search-gallery').value.toLowerCase())).map(g=>`<article class="card"><button data-gallery="${g.id}">${g.cover?`<img class="cover" src="${BASE}/api/photos/${g.cover}/image" loading="lazy" alt="">`:'<div class="cover placeholder">◈</div>'}<div class="card-body"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description||'Et sted til jeres minder')}</p><span class="badge">${g.count} billeder</span> <span class="badge">${me.admin?'Fuld adgang · Admin':'Delt med dig'}</span></div></button></article>`).join('')||'<div class="empty"><h2>Her begynder minderne</h2><p>Gallerier vises her, når de er oprettet og delt med dig.</p></div>';document.querySelectorAll('[data-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.gallery))};draw();$('#search-gallery').oninput=draw;if($('#new-gallery'))$('#new-gallery').onclick=newGallery;if($('#gallery-delete-overview'))$('#gallery-delete-overview').onclick=chooseDeletionGallery;
-}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){await collectionView()}else if(view==='profile'){await profileView()}else if(view==='people'){await peopleView()}else if(view==='design'){await designView()}else if(view==='deletions'&&me.admin){await deletionRequestsView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
+function shell(){A.innerHTML=`<div class="shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><button data-view="galleries">▧ &nbsp; Gallerier</button><button data-view="timeline">◷ &nbsp; Tidslinje</button><button data-view="favorites">♡ &nbsp; Favoritter</button><button data-view="profile">♙ &nbsp; Min profil</button>${me.admin?`<button data-view="admin" aria-controls="admin-subnav" aria-expanded="false">⚙ &nbsp; Administration</button><div class="admin-subnav" id="admin-subnav" hidden>${adminAreas.filter(([key])=>key!=="admin").map(([key,label])=>`<button type="button" data-view="${key}">${label}</button>`).join("")}</div>`:""}<div class="foot"><span class="badge">🔒 Privat familiearkiv</span><p>Et lille sted til<br>de store øjeblikke.</p><button id="logout">Log ud</button></div></aside><main><div class="top"><span>VORES FÆLLES MINDER</span><span><span class="avatar">${esc(me.name[0])}</span>${esc(me.name)} ${me.admin?'· Admin':''} <button id="mobile-logout" class="secondary" aria-label="Log ud">↪</button></span></div><div id="content"></div></main></div>`;document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));const logout=async()=>{stopLycheeView();await api('/logout','POST');location.reload()};if($('#logout'))$('#logout').onclick=logout;$('#mobile-logout').onclick=logout}
+async function render(){if(isAdminView(view)&&!me?.admin){view='galleries';current=null;}updateAdminNavigation();if(view!=='lychee')stopLycheeView();document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));const C=$('#content');if(view==='galleries'&&!current){C.innerHTML=`<div class="heading"><div><div class="eyebrow">Saml på øjeblikkene</div><h1 style="margin:12px 0">Jeres gallerier</h1><p class="muted">Små hverdage. Store oplevelser. Alt det, I gerne vil huske.</p></div><div class="gallery-actions">${me.admin||serverCapabilities.gallery_create===true?'<button id="new-gallery">＋ Nyt galleri</button>':''}${galleryDeletionOverviewMarkup()}</div></div><div class="tools"><input id="search-gallery" placeholder="Søg i gallerier…" aria-label="Søg i gallerier"><span class="muted">${galleries.length} gallerier · privat adgang</span></div><div id="gallery-grid" class="grid"></div>`;const draw=()=>{$('#gallery-grid').innerHTML=galleries.filter(g=>g.name.toLowerCase().includes($('#search-gallery').value.toLowerCase())).map(g=>`<article class="card"><button data-gallery="${g.id}">${g.cover?`<img class="cover" src="${BASE}/api/photos/${g.cover}/image" loading="lazy" alt="">`:'<div class="cover placeholder">◈</div>'}<div class="card-body"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description||'Et sted til jeres minder')}</p><span class="badge">${g.count} billeder</span> <span class="badge">${me.admin?'Fuld adgang · Admin':'Delt med dig'}</span></div></button></article>`).join('')||'<div class="empty"><h2>Her begynder minderne</h2><p>Gallerier vises her, når de er oprettet og delt med dig.</p></div>';document.querySelectorAll('[data-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.gallery))};draw();$('#search-gallery').oninput=draw;if($('#new-gallery'))$('#new-gallery').onclick=newGallery;if($('#gallery-delete-overview'))$('#gallery-delete-overview').onclick=chooseDeletionGallery;
+}else if(current){await galleryView()}else if(view==='timeline'||view==='favorites'){await collectionView()}else if(view==='profile'){await profileView()}else if(view==='admin'){await adminOverview()}else if(view==='people'){await peopleView()}else if(view==='admin-content'){adminContentView()}else if(view==='admin-security'){await adminSecurityView()}else if(view==='design'){await designView()}else if(view==='deletions'&&me.admin){await deletionRequestsView()}else if(view==='lychee'&&me.admin){await lycheeView()}}
 function newGallery(){
   const account=accountGeneration;
   modal('Et nyt kapitel',`<div class="dialog-content"><form id="new"><label>Galleriets navn<input name="name" required maxlength="100" placeholder="Fx Sommer ved Vesterhavet"></label><label>Beskrivelse<textarea name="description" rows="3" maxlength="1000"></textarea></label><p class="muted">${me.admin?'Kun admin har adgang fra start. Del det bagefter med familien.':'Du og admin har adgang fra start. Admin kan dele galleriet med familien.'}</p><div class="error" role="alert"></div><button type="submit">Opret galleri</button></form></div>`);
@@ -105,7 +123,7 @@ function newGallery(){
     await api('/galleries','POST',fields);
     if(account!==accountGeneration||!me)return;
     if(generation!==photoViewerGeneration){toast('Galleriet er oprettet.');return;}
-    M.close();await refreshGalleryView('galleries');
+    closeModal();await refreshGalleryView('galleries');
     if(account===accountGeneration&&me)toast('Galleriet er oprettet.');
   });
 }
@@ -120,7 +138,7 @@ function navigateView(nextView){
 async function refreshGalleryView(nextView='galleries'){
   const generation=++navigationGeneration,account=accountGeneration;
   photoViewerGeneration++;stopLycheeView();view=nextView;current=null;photos=[];permissions={};galleries=[];
-  if(M.open)M.close();
+  if(M.open)closeModal();
   const content=$('#content');content.innerHTML='<p role="status">Henter dine gallerier…</p>';
   try{
     const list=await api('/galleries');
@@ -196,7 +214,8 @@ async function deletionRequestsView(){
   const generation=navigationGeneration,account=accountGeneration,content=$('#content');
   if(!me?.admin)return;
   content.innerHTML='<div class="heading"><div><h1>Sletteønsker</h1><p>Medlemmer markerer egne billeder og videoer. Filerne slettes først, når du godkender.</p></div></div>';
-  if(serverCapabilities.media_delete_requests!==true){content.insertAdjacentHTML('beforeend','<div class="panel"><p role="status">Godkendelse af sletning er ikke aktiveret endnu. Installér den nye private app.php og SQL-migrering 005.</p><a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/ACCOUNTS.md#markering-til-sletning-og-admins-godkendelse" target="_blank" rel="noopener">Se installationsvejledningen</a></div>');return;}
+  decorateAdmin('deletions');
+  if(serverCapabilities.media_delete_requests!==true){content.insertAdjacentHTML('beforeend','<div class="panel"><p role="status">Godkendelse af sletning er ikke aktiveret endnu. Opsætningen skal færdiggøres, før du kan behandle markeringer.</p><a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/ACCOUNTS.md#markering-til-sletning-og-admins-godkendelse" target="_blank" rel="noopener">Se installationsvejledningen</a></div>');return;}
   content.insertAdjacentHTML('beforeend','<p role="status" id="deletion-request-loading">Henter markeringer…</p>');
   const active=()=>galleryRequestActive(generation,account,'deletions',null)&&!!me?.admin;
   let requests;
@@ -219,7 +238,7 @@ async function deletionRequestsView(){
       modal(approve?'Godkend sletning':'Afvis sletning',`<div class="dialog-content" id="deletion-decision-confirm"><p>${approve?'Vil du godkende sletning af':'Vil du afvise sletning af'} <strong>${esc(request.title)}</strong> i <strong>${esc(request.gallery_name||'Galleri')}</strong>?</p><p>Markeret af ${esc(request.requester_name)}.</p><p>${approve?'Billedet eller videoen fjernes fra dette galleri. Handlingen kan ikke fortrydes her.':'Billedet eller videoen bevares, og markeringen fjernes.'}</p><p id="deletion-decision-status" role="status" aria-live="polite"></p><div class="gallery-delete-actions"><button id="deletion-decision-submit" class="${approve?'danger':'secondary'}" type="button">${approve?'Godkend sletning':'Afvis markering'}</button><button id="deletion-decision-cancel" class="secondary" type="button">Annullér</button></div></div>`);
       const dialogGeneration=photoViewerGeneration,submit=$('#deletion-decision-submit'),cancel=$('#deletion-decision-cancel'),status=$('#deletion-decision-status');let pending=false,resolved=false;
       const dialogActive=()=>active()&&M.open&&dialogGeneration===photoViewerGeneration;
-      cancel.onclick=()=>{if(!pending)M.close();};
+      cancel.onclick=()=>{if(!pending)closeModal();};
       submit.onclick=async()=>{
         if(pending||resolved||!dialogActive())return;pending=true;submit.disabled=true;cancel.disabled=true;card.dataset.pending='true';status.textContent=approve?'Godkender sletning…':'Afviser markering…';status.classList.remove('error');
         card.querySelectorAll('button').forEach(button=>button.disabled=true);
@@ -231,7 +250,7 @@ async function deletionRequestsView(){
           requests=requests.filter(item=>item.id!==request.id);card.remove();updateCount();
           $('#deletion-request-feedback').textContent=approve?'Sletningen er godkendt. Filen er slettet fra galleriet.':'Markeringen er afvist. Filen er bevaret.';
           if(approve){const gallery=galleries.find(item=>item.id===request.gallery_id);if(gallery){gallery.count=Math.max(0,(Number(gallery.count)||0)-1);if(gallery.cover===request.photo_id)gallery.cover=null;}photos=photos.filter(photo=>photo.id!==request.photo_id);}
-          if(dialogActive()){stopPhotoVideo();M.close();}
+          if(dialogActive()){stopPhotoVideo();closeModal();}
         }catch(error){if(dialogActive()){status.textContent='Handlingen kunne ikke gennemføres: '+error.message;status.classList.add('error');}else if(active())$('#deletion-request-feedback').textContent='Handlingen kunne ikke gennemføres: '+error.message;}
         finally{pending=false;card.dataset.pending='false';card.querySelectorAll('button').forEach(button=>button.disabled=false);if(dialogActive()){submit.disabled=false;cancel.disabled=false;}}
       };
@@ -252,7 +271,7 @@ function editGallery(gallery){
     if(account!==accountGeneration||!me)return;
     if(galleries.includes(gallery))Object.assign(gallery,fields);
     if(navigation===navigationGeneration&&current===gallery){$('#gallery-title').textContent=fields.name;$('#gallery-description').textContent=fields.description;}
-    if(generation===photoViewerGeneration&&M.open)M.close();toast('Galleriets oplysninger er gemt.');
+    if(generation===photoViewerGeneration&&M.open)closeModal();toast('Galleriets oplysninger er gemt.');
   });
 }
 function date(p){return p.taken?(p.precision==='circa'?'ca. ':'')+p.taken.replace('T',' kl. '):'Dato ukendt'}
@@ -286,7 +305,7 @@ function chooseDeletionGallery(){
   formHandler('#gallery-delete-choose',async fields=>{
     if(account!==accountGeneration||generation!==photoViewerGeneration||!M.open||!galleryDeletionAllowed())return;
     if(!galleries.some(gallery=>gallery.id===fields.gallery_id))throw Error('Vælg et galleri fra listen.');
-    M.close();await openGallery(fields.gallery_id);
+    closeModal();await openGallery(fields.gallery_id);
     if(account!==accountGeneration||current?.id!==fields.gallery_id||!galleryDeleteActive(galleryDeleteState))return;
     $('#gallery-delete-toggle').click();$('#gallery-delete-tools').scrollIntoView?.({block:'start'});
   });
@@ -345,7 +364,7 @@ function reviewGalleryDelete(state){
   const submit=$('#gallery-delete-submit'),cancel=$('#gallery-delete-cancel'),status=$('#gallery-delete-status'),list=$('#gallery-delete-list'),total=$('#gallery-delete-total');
   const active=()=>galleryDeleteActive(state)&&state.confirmation===confirmation&&!confirmation.cancelled&&confirmation.generation===photoViewerGeneration&&M.open;
   const showRemaining=()=>{total.textContent=confirmation.remaining.length+' filer';list.innerHTML=confirmation.remaining.map(photo=>`<li>${esc(photo.title)} <span class="muted">(${photo.mime==='video/mp4'?'Video':'Billede'})</span></li>`).join('');};showRemaining();
-  cancel.onclick=()=>{confirmation.cancelled=true;M.close();};
+  cancel.onclick=()=>{confirmation.cancelled=true;closeModal();};
   submit.onclick=async()=>{
     if(!active()||state.pending||!confirmation.remaining.length)return;
     state.pending=true;submit.disabled=true;cancel.textContent='Stop efter denne fil';status.classList.remove('error');
@@ -365,7 +384,7 @@ function reviewGalleryDelete(state){
         if(active()){showRemaining();syncGalleryDelete(state);}
       }
       if(active()&&!confirmation.remaining.length){
-        state.active=false;state.selected.clear();$('#gallery-delete-feedback').textContent=completed+(state.requestOnly?' filer er markeret til sletning og afventer admins godkendelse.':' filer er slettet fra galleriet.');confirmation.cancelled=true;M.close();
+        state.active=false;state.selected.clear();$('#gallery-delete-feedback').textContent=completed+(state.requestOnly?' filer er markeret til sletning og afventer admins godkendelse.':' filer er slettet fra galleriet.');confirmation.cancelled=true;closeModal();
       }
     }catch(error){if(active()){showRemaining();status.textContent=(state.requestOnly?'Markeringen':'Sletningen')+' er stoppet. '+completed+(state.requestOnly?' filer er markeret':' filer er slettet')+' i dette forsøg. '+(error?.message||'Prøv igen.');status.classList.add('error');submit.textContent='Prøv igen ('+confirmation.remaining.length+')';}}
     finally{
@@ -440,7 +459,7 @@ function bindPhotoDelete(photo){
       if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte sletningen.');
       if(account!==accountGeneration||!me)return;
       removeDeletedPhoto(photo,gallerySnapshot);
-      if(generation===photoViewerGeneration&&M.open){stopPhotoVideo();M.close();}
+      if(generation===photoViewerGeneration&&M.open){stopPhotoVideo();closeModal();}
       toast(photo.mime==='video/mp4'?'Videoen er slettet fra galleriet.':'Billedet er slettet fra galleriet.');
     }catch(error){if(generation===photoViewerGeneration&&account===accountGeneration){status.textContent='Kunne ikke slette: '+(error?.message||'Prøv igen.');status.classList.add('error');}}
     finally{pending=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);confirmation.setAttribute('aria-busy','false');}
@@ -493,13 +512,13 @@ function editPhoto(p,rights={edit:!!me?.admin,gps:!!me?.admin}){
     const reply=await api('/photos/'+p.id,'PATCH',fields);if(reply?.ok!==true)throw Error('Serveren kunne ikke bekræfte ændringen.');
     if(account!==accountGeneration||!me)return;
     if(photos.includes(p)){Object.assign(p,fields);updatePhotoCard(p);}
-    if(generation===photoViewerGeneration&&M.open)M.close();toast('Oplysninger gemt');
+    if(generation===photoViewerGeneration&&M.open)closeModal();toast('Oplysninger gemt');
   });
 }
 function profileMarkup(profile,own,security){
   const count=Number(profile.upload_count),uploads=Number.isSafeInteger(count)&&count>=0?count:0;
   const memberships=Array.isArray(profile.galleries)?profile.galleries:[],canEdit=own||!!me?.admin;
-  return `<div class="heading"><div><div class="eyebrow">${own?'Din konto':'Familiens konti'}</div><h1>${own?'Min profil':esc(profile.name)}</h1><p class="muted">Kontaktoplysninger og adgang til familiens gallerier.</p></div><div class="gallery-actions">${canEdit?'<button id="profile-edit">Redigér profil</button>':''}${memberDeleteMarkup(profile)}</div></div>${own?'':'<p><button id="profile-back" class="secondary">← Familie & gæster</button></p>'}<div class="panel account-profile"><h2>${esc(profile.name)}</h2><dl class="profile-summary"><dt>E-mail</dt><dd>${esc(profile.email)}</dd><dt>Rolle</dt><dd>${profile.admin?'Administrator':'Medlem / gæst'}</dd><dt>Uploadede billeder og videoer</dt><dd>${uploads}</dd>${profile.admin?`<dt>Authenticator</dt><dd>${profile.mfa_enabled?'Aktiveret':'Skal sættes op ved login'}</dd>`:''}</dl></div><div class="panel"><h2>Gallerier og rettigheder</h2>${profile.admin?'<p>Administratorer har adgang til alle gallerier og indstillinger.</p>':''}<ul class="profile-galleries">${memberships.map(g=>`<li><strong>${esc(g.name)}</strong><span>Se galleri${g.upload?' · Uploade billeder':''}${g.edit?' · Redigere galleri og billedoplysninger':''}${g.download?' · Hente originaler':''}${g.gps?' · Se præcis GPS':''}</span></li>`).join('')||'<li>Der er endnu ikke delt gallerier med denne konto.</li>'}</ul></div>${own&&profile.admin?`<div class="panel"><h2>Login og Authenticator</h2><p>Administratorlogin kræver din adgangskode og en kode fra Authenticator. Opbevar reservekoderne et privat sted, adskilt fra telefonen.</p><p>Ubrugte reservekoder: <strong>${Math.max(0,Math.floor(Number(security?.recovery_codes_remaining)||0))}</strong></p><div class="security-actions"><button id="mfa-recovery-renew" class="secondary">Nye reservekoder</button><button id="mfa-replace" class="secondary">Skift Authenticator</button></div></div>`:''}`;
+  return `<div class="heading"><div><div class="eyebrow">${own?'Din konto':'Familiens konti'}</div><h1>${own?'Min profil':esc(profile.name)}</h1><p class="muted">Kontaktoplysninger og adgang til familiens gallerier.</p></div><div class="gallery-actions">${canEdit?'<button id="profile-edit">Redigér profil</button>':''}${memberDeleteMarkup(profile)}</div></div>${own?'':'<p><button id="profile-back" class="secondary">← Personer og adgang</button></p>'}<div class="panel account-profile"><h2>${esc(profile.name)}</h2><dl class="profile-summary"><dt>E-mail</dt><dd>${esc(profile.email)}</dd><dt>Rolle</dt><dd>${profile.admin?'Administrator':'Medlem / gæst'}</dd><dt>Uploadede billeder og videoer</dt><dd>${uploads}</dd>${profile.admin?`<dt>Authenticator</dt><dd>${profile.mfa_enabled?'Aktiveret':'Skal sættes op ved login'}</dd>`:''}</dl></div><div class="panel"><h2>Gallerier og rettigheder</h2>${profile.admin?'<p>Administratorer har adgang til alle gallerier og indstillinger.</p>':''}<ul class="profile-galleries">${memberships.map(g=>`<li><strong>${esc(g.name)}</strong><span>Se galleri${g.upload?' · Uploade billeder':''}${g.edit?' · Redigere galleri og billedoplysninger':''}${g.download?' · Hente originaler':''}${g.gps?' · Se præcis GPS':''}</span></li>`).join('')||'<li>Der er endnu ikke delt gallerier med denne konto.</li>'}</ul></div>${own&&profile.admin?`<div class="panel"><h2>Login og Authenticator</h2><p>Administratorlogin kræver din adgangskode og en kode fra Authenticator. Opbevar reservekoderne et privat sted, adskilt fra telefonen.</p><p>Ubrugte reservekoder: <strong>${Math.max(0,Math.floor(Number(security?.recovery_codes_remaining)||0))}</strong></p><div class="security-actions"><button id="mfa-recovery-renew" class="secondary">Nye reservekoder</button><button id="mfa-replace" class="secondary">Skift Authenticator</button></div></div>`:''}`;
 }
 async function profileView(id=null){
   const own=!id||id===me.id;if(!own&&!me.admin)throw Error('Du har ikke adgang til andre profiler');
@@ -508,7 +527,7 @@ async function profileView(id=null){
   try{
     const [profile,security]=await Promise.all([api(own?'/profile':'/admin/users/'+encodeURIComponent(id)),own&&me.admin?api('/security/mfa'):Promise.resolve(null)]);
     if(generation!==profileGeneration||view!==requestView)return;
-    content.innerHTML=profileMarkup(profile,own,security);
+    content.innerHTML=profileMarkup(profile,own,security);if(isAdminView(view))decorateAdmin('people');
     if($('#profile-edit'))$('#profile-edit').onclick=()=>editAccountProfile(profile,own);bindMemberDelete(profile);
     if($('#profile-back'))$('#profile-back').onclick=()=>peopleView().catch(error=>toast(error.message));
     if($('#mfa-recovery-renew'))$('#mfa-recovery-renew').onclick=()=>accountSecurityAction('recovery-codes');
@@ -516,7 +535,7 @@ async function profileView(id=null){
   }catch(error){if(generation===profileGeneration&&view===requestView)content.innerHTML='<div class="panel"><h2>Profilen kunne ikke hentes</h2><p class="error" role="alert">'+esc(error.message)+'</p></div>';}
 }
 function accountProofFields(){
-  return `<label>${me.admin?'Din administratoradgangskode':'Din nuværende adgangskode'}<input type="password" name="current_password" autocomplete="current-password" required maxlength="72"></label>${me.admin?'<label>Ny kode fra Authenticator eller reservekode<input type="text" name="mfa_code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required maxlength="64"></label><p class="muted">Brug en ny kode fra din egen Authenticator. En allerede brugt kode accepteres ikke igen.</p>':''}`;
+  return `<label>${me.admin?'Din administratoradgangskode':'Din nuværende adgangskode'}<input type="password" name="current_password" autocomplete="current-password" required maxlength="72"></label>${me.admin?'<label>Ny kode fra Authenticator eller reservekode<input type="text" name="mfa_code" inputmode="numeric" data-authenticator-recovery="true" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required maxlength="64"></label><p class="muted">Brug en ny kode fra din egen Authenticator. En allerede brugt kode accepteres ikke igen.</p>':''}`;
 }
 function editAccountProfile(profile,own){
   if(!own&&!me.admin)return;
@@ -529,7 +548,7 @@ function editAccountProfile(profile,own){
     const response=await api(own?'/profile':'/admin/users/'+encodeURIComponent(profile.id),'PATCH',body);
     if(response.reauthentication_required===true){auth(false,null,response.user?.email||fields.email);toast('Profilen er opdateret. Log ind igen med de nye oplysninger.');return;}
     if(generation!==photoViewerGeneration){toast('Profilen er opdateret');return;}
-    M.close();await profileView(own?null:profile.id);toast('Profilen er opdateret');
+    closeModal();await profileView(own?null:profile.id);toast('Profilen er opdateret');
   });
 }
 function accountSecurityAction(action){
@@ -544,7 +563,6 @@ function accountSecurityAction(action){
     recoveryCodesView(result.recovery_codes,async()=>{view='profile';await start()});
   });
 }
-async function peopleView(){profileGeneration++;const generation=navigationGeneration,account=accountGeneration,requestView=view,requestGallery=current;const data=await api('/admin/users');if(!galleryRequestActive(generation,account,requestView,requestGallery))return;$('#content').innerHTML=`<div class="heading"><div><div class="eyebrow">Kun dem, I vælger</div><h1>Familie & gæster</h1><p class="muted">Adgang styres separat for hvert galleri.</p></div><button id="invite">＋ Invitér en gæst</button></div><p id="member-delete-feedback" role="status" aria-live="polite"></p><div class="panel"><h2>Familiens konti</h2>${memberDeleteNotice()}${data.users.map(u=>`<div class="user-row" data-member-row="${esc(u.id)}"><strong>${esc(u.name)}</strong> <span class="badge">${u.admin?'Administrator':'Gæst / medlem'}</span><br><span class="muted">${esc(u.email)}</span><br><button class="secondary" data-profile="${esc(u.id)}">Se/redigér profil</button>${memberDeleteMarkup(u)}${!u.admin?`<br><button class="secondary" data-user="${u.id}">Redigér gallerirettigheder</button>`:'<p class="muted">Fuld adgang til alle gallerier og indstillinger.</p>'}</div>`).join('')}</div><div class="panel"><h2>Sådan fungerer invitationer</h2><p>Opret et personligt engangslink med adgang og rettigheder til de valgte gallerier. Linket udløber efter 7 dage. Send det selv til gæsten. Eksisterende konti kan få flere gallerier her i adminpanelet.</p><p class="muted">Originalfiler kan indeholde GPS-data. Download af originaler og afspilning af videoer kræver derfor både download- og GPS-adgang.</p></div>`;$('#invite').onclick=inviteForm;data.users.forEach(bindMemberDelete);document.querySelectorAll('[data-profile]').forEach(button=>button.onclick=()=>profileView(button.dataset.profile));document.querySelectorAll('[data-user]').forEach(button=>button.onclick=()=>galleryAccessForm(data.users.find(u=>u.id===button.dataset.user),data))}
 function memberDeleteMarkup(member){
   if(!me?.admin||member.admin||member.id===me.id)return '';
   return `<button class="secondary member-delete-action" data-member-delete="${esc(member.id)}" type="button" ${serverCapabilities.member_delete===true?'':'disabled'}>Slet medlem</button>`;
@@ -564,7 +582,7 @@ function deleteMember(member){
   const generation=photoViewerGeneration,submit=$('#delete-member-submit'),cancel=$('#delete-member-cancel'),status=$('#delete-member-status');let pending=false;
   const pageActive=()=>galleryRequestActive(navigation,account,requestView,requestGallery)&&profile===profileGeneration&&!!me?.admin;
   const dialogActive=()=>pageActive()&&generation===photoViewerGeneration&&M.open;
-  cancel.onclick=()=>{if(!pending)M.close();};
+  cancel.onclick=()=>{if(!pending)closeModal();};
   $('#delete-member').onsubmit=async event=>{
     event.preventDefault();if(pending||!dialogActive())return;
     pending=true;submit.disabled=true;cancel.disabled=true;status.textContent='Sletter medlem…';status.classList.remove('error');
@@ -572,38 +590,83 @@ function deleteMember(member){
       const result=await api('/admin/users/'+encodeURIComponent(member.id),'DELETE',{confirm:true});
       if(result?.ok!==true||result.id!==member.id)throw Error('Serveren kunne ikke bekræfte sletningen.');
       if(!pageActive())return;
-      if(dialogActive())M.close();
+      if(dialogActive())closeModal();
       const row=Array.from(document.querySelectorAll('[data-member-row]')).find(element=>element.dataset.memberRow===member.id);
-      if(row)row.remove();else{await peopleView();if(account!==accountGeneration||navigation!==navigationGeneration||view!==requestView)return;}
+      if(adminDirectoryData){adminDirectoryData.users=adminDirectoryData.users.filter(u=>u.id!==member.id);adminDirectoryData.grants=adminDirectoryData.grants.filter(g=>g.user_id!==member.id);}
+      if(row){row.remove();const count=$('#member-search-count');if(count)count.textContent=document.querySelectorAll('[data-member-row]').length+' personer';}else{await peopleView();if(account!==accountGeneration||navigation!==navigationGeneration||view!==requestView)return;}
       const feedback=$('#member-delete-feedback');if(feedback)feedback.textContent=member.name+' er slettet. Billeder og videoer er bevaret.';
     }catch(error){if(dialogActive()){status.textContent='Kunne ikke slette medlemmet: '+error.message;status.classList.add('error');}else if(pageActive()){const feedback=$('#member-delete-feedback');if(feedback)feedback.textContent='Kunne ikke slette medlemmet: '+error.message;}}
     finally{pending=false;if(dialogActive()){submit.disabled=false;cancel.disabled=false;}}
   };
 }
 function galleryAccessForm(user,data){
-  modal('Adgang · '+user.name,`<div class="dialog-content">${galleries.map(g=>{const a=data.grants.find(a=>a.user_id===user.id&&a.gallery_id===g.id)||{};return `<form class="grant" data-g="${g.id}" aria-label="Adgang til ${esc(g.name)}"><h3>${esc(g.name)}</h3>${[['view','Se galleri',!!a.gallery_id],['upload','Uploade billeder',a.upload],...(serverCapabilities.multi_gallery_invitations===true?[['edit','Redigere galleri og billedoplysninger',a.edit]]:[]),['download','Hente originaler',a.download],['gps','Se præcis GPS',a.gps]].map(([k,n,v])=>`<label class="check"><input type="checkbox" name="${k}" ${v?'checked':''}>${n}</label>`).join('')}<div class="grant-feedback" role="status" aria-live="polite" aria-atomic="true"></div><button type="submit">Gem adgang</button><hr></form>`}).join('')||'<p>Opret først et galleri.</p>'}</div>`);
-  document.querySelectorAll('.grant').forEach(form=>{
-    const button=$('button[type=submit]',form),feedback=$('.grant-feedback',form),keys=['view','upload','download','gps',...(serverCapabilities.multi_gallery_invitations===true?['edit']:[])];
-    const controls=keys.map(key=>form.elements[key]);
-    const report=(message,state)=>{feedback.textContent=message;feedback.dataset.state=state;};
-    form.onchange=()=>report('Ændringerne er ikke gemt.','changed');
-    form.onsubmit=async event=>{
-      event.preventDefault();if(button.disabled)return;
-      const values=Object.fromEntries(keys.map(key=>[key,form.elements[key].checked]));
-      const payload={user_id:user.id,gallery_id:form.dataset.g,...values};
-      button.disabled=true;button.textContent='Gemmer…';controls.forEach(control=>control.disabled=true);
-      form.setAttribute('aria-busy','true');report('Gemmer rettigheder…','saving');
+  if(!me?.admin||adminFlag(user.admin))return;
+  const account=accountGeneration;
+  const labels=[['view','Se galleri'],['upload','Uploade billeder'],...(serverCapabilities.multi_gallery_invitations===true?[['edit','Redigere galleri og billedoplysninger']]:[]),['download','Hente originaler'],['gps','Se præcis GPS']];
+  const keys=labels.map(([key])=>key);
+  modal('Galleriadgang · '+user.name,`<div class="dialog-content grant-workspace"><p>Vælg gallerier og handlinger for <strong>${esc(user.name)}</strong>. Ændringer træder i kraft, når serveren har bekræftet dem.</p><div class="grant-gallery-list">${galleries.map(g=>{const a=data.grants.find(a=>a.user_id===user.id&&a.gallery_id===g.id)||{};return `<form class="grant" data-g="${esc(g.id)}" aria-label="Adgang til ${esc(g.name)}"><h3>${esc(g.name)}</h3><div class="grant-rights">${labels.map(([key,label])=>`<label class="check"><input type="checkbox" name="${key}" ${(key==='view'?!!a.gallery_id:adminFlag(a[key]))?'checked':''}>${label}</label>`).join('')}</div><p class="grant-current-summary"></p><div class="grant-feedback" role="status" aria-live="polite" aria-atomic="true" data-state="success">Gemt</div><div class="grant-row-actions"><button type="submit">Gem adgang</button><button class="secondary" data-grant-reset type="button">Fortryd valg</button></div></form>`}).join('')||'<p>Opret først et galleri.</p>'}</div><aside class="grant-leave-warning" id="grant-leave-warning" hidden><h3>Du har ugemte ændringer</h3><p>Lukker du nu, bliver de ugemte valg ikke sendt til serveren.</p><button class="secondary" id="grant-stay" type="button">Bliv her</button><button class="danger" id="grant-discard-close" type="button">Luk uden at gemme</button></aside><div class="grant-savebar"><div id="grant-total-status" role="status" aria-live="polite">Alle viste rettigheder er hentet fra serveren.</div><div><button id="grant-save-all" type="button" disabled>Gem ændringer</button><button id="grant-reset-all" class="secondary" type="button" disabled>Fortryd ugemte valg</button></div></div></div>`);
+  const generation=photoViewerGeneration;
+  const active=()=>account===accountGeneration&&generation===photoViewerGeneration&&M.open&&!!me?.admin;
+  const rows=Array.from(M.querySelectorAll('.grant')).map(form=>{
+    const read=()=>Object.fromEntries(keys.map(key=>[key,!!form.elements[key].checked]));
+    return {form,read,saved:read(),feedback:$('.grant-feedback',form),button:$('button[type=submit]',form),reset:$('[data-grant-reset]',form)};
+  });
+  const same=(a,b)=>keys.every(key=>a[key]===b[key]);
+  const dirty=row=>!same(row.read(),row.saved);
+  const changed=()=>rows.filter(dirty);
+  const total=$('#grant-total-status'),all=$('#grant-save-all'),undo=$('#grant-reset-all');
+  const dialog={busy:false,dirty:()=>changed().length>0};grantDialog=dialog;
+  const dependency=row=>{const visible=row.form.elements.view.checked;keys.filter(key=>key!=='view').forEach(key=>{row.form.elements[key].disabled=dialog.busy||!visible;});row.form.elements.view.disabled=dialog.busy;};
+  const summary=row=>{const values=row.read();$('.grant-current-summary',row.form).textContent=values.view?labels.filter(([key])=>key!=='view'&&values[key]).map(([,label])=>label).join(' · ')||'Kan se galleriet.':'Ingen adgang til dette galleri.';};
+  const report=(row,message,state)=>{row.feedback.textContent=message;row.feedback.dataset.state=state;};
+  const refresh=()=>{
+    const count=changed().length;if(!count)$('#grant-leave-warning').hidden=true;all.disabled=dialog.busy||!count;undo.disabled=dialog.busy||!count;
+    if(!dialog.busy)all.textContent=count?'Gem '+count+' '+(count===1?'galleri':'gallerier'):'Gem ændringer';
+    for(const row of rows){dependency(row);summary(row);row.button.disabled=dialog.busy||!dirty(row);row.reset.disabled=dialog.busy||!dirty(row);row.form.setAttribute('aria-busy',String(dialog.busy));}
+  };
+  const updateDirectory=()=>{if(adminDirectoryData===data&&$('#admin-member-list'))drawDirectory(data,view==='admin');};
+  const save=async selected=>{
+    if(dialog.busy||!active())return;
+    const pending=selected.filter(dirty);if(!pending.length)return;
+    dialog.busy=true;refresh();all.textContent='Gemmer…';total.textContent='Gemmer valgte rettigheder…';let saved=0,failed=false;
+    for(const row of pending){
+      if(!active())break;
+      const values=row.read(),payload={user_id:user.id,gallery_id:row.form.dataset.g,...values};
+      report(row,'Gemmer rettigheder…','saving');row.button.textContent='Gemmer…';
       try{
         const result=await api('/admin/grants','PUT',payload);
         if(result?.ok!==true)throw Error('Serveren kunne ikke bekræfte ændringen.');
-        data.grants=data.grants.filter(grant=>grant.user_id!==user.id||grant.gallery_id!==payload.gallery_id);
-        if(values.view)data.grants.push({user_id:user.id,gallery_id:payload.gallery_id,upload:Number(values.upload),download:Number(values.download),gps:Number(values.gps),edit:Number(values.edit||false)});
-        report('Rettighederne er gemt.','success');
-      }catch(error){report('Rettighederne kunne ikke gemmes: '+(error?.message||'Prøv igen.'),'error');}
-      finally{button.disabled=false;button.textContent='Gem adgang';controls.forEach(control=>control.disabled=false);form.setAttribute('aria-busy','false');}
+        if(account!==accountGeneration||!me?.admin)return;
+        data.grants=data.grants.filter(g=>g.user_id!==user.id||g.gallery_id!==payload.gallery_id);
+        if(values.view)data.grants.push({user_id:user.id,gallery_id:payload.gallery_id,...Object.fromEntries(keys.filter(key=>key!=='view').map(key=>[key,Number(values[key])]))});
+        row.saved={...values};saved++;
+        if(active())report(row,'Rettighederne er gemt.','success');
+      }catch(error){failed=true;if(active())report(row,'Rettighederne kunne ikke gemmes: '+(error?.message||'Prøv igen.'),'error');break;}
+      finally{row.button.textContent='Gem adgang';}
+    }
+    dialog.busy=false;
+    if(!active())return;
+    updateDirectory();refresh();
+    total.textContent=failed?saved+' af '+pending.length+' gallerier gemt. De resterende valg er ikke gemt. Ret fejlen og prøv igen.':changed().length?saved+' '+(saved===1?'galleri gemt.':'gallerier gemt.')+' Der er stadig ugemte valg.':'Alle ændringer er gemt og bekræftet af serveren.';
+    total.dataset.state=failed?'error':'success';
+  };
+  const reset=row=>{for(const key of keys)row.form.elements[key].checked=row.saved[key];report(row,'Gemt · ugemte valg er fortrudt.','success');};
+  for(const row of rows){
+    row.form.onchange=()=>{
+      if(!row.form.elements.view.checked)keys.filter(key=>key!=='view').forEach(key=>row.form.elements[key].checked=false);
+      const unsaved=dirty(row);report(row,unsaved?'Ændringerne er ikke gemt.':'Gemt',unsaved?'changed':'success');
+      refresh();total.textContent=changed().length+' '+(changed().length===1?'galleri har':'gallerier har')+' ugemte ændringer.';total.dataset.state='changed';
     };
-  });
+    row.form.onsubmit=event=>{event.preventDefault();return save([row]);};
+    row.reset.onclick=()=>{reset(row);refresh();total.textContent=changed().length?'Der er stadig ugemte valg.':'Ugemte valg er fortrudt. De gemte rettigheder er bevaret.';};
+  }
+  all.onclick=()=>save(rows);
+  undo.onclick=()=>{rows.filter(dirty).forEach(reset);refresh();total.textContent='Ugemte valg er fortrudt. De gemte rettigheder er bevaret.';total.dataset.state='success';};
+  $('#grant-stay').onclick=()=>{$('#grant-leave-warning').hidden=true;};
+  $('#grant-discard-close').onclick=()=>{if(dialog.busy)return;grantDialog=null;closeModal();};
+  refresh();
 }
+
 function inviteForm(){
   if(!me?.admin)return;
   const multi=serverCapabilities.multi_gallery_invitations===true,account=accountGeneration;
@@ -661,7 +724,7 @@ function bindThemeDelete(){
     };
   });
 }
-async function designView(){const generation=navigationGeneration,account=accountGeneration,requestView=view,requestGallery=current;const list=await api('/admin/themes');if(!galleryRequestActive(generation,account,requestView,requestGallery))return;themes=list;$('#content').innerHTML=`<div class="heading"><div><div class="eyebrow">Gør arkivet til jeres</div><h1>Design & udtryk</h1><p class="muted">Installér en designpakke, prøv den, og aktivér den for hele familien.</p></div><button id="theme-upload">＋ Upload designpakke</button><input id="theme-file" type="file" accept=".json,.zip" hidden></div><p id="theme-delete-feedback" class="theme-delete-feedback" role="status" aria-live="polite" aria-atomic="true"></p><div class="grid" id="theme-grid">${themes.map(x=>`<article class="card" data-theme-card="${esc(x.id)}"><div class="theme-swatch" style="background:${x.theme.colors.background}">${Object.values(x.theme.colors).map(v=>`<span style="background:${v};border:1px solid #8883"></span>`).join('')}</div><div class="theme-card"><h2>${esc(x.theme.name)}</h2><p class="muted">${x.theme.font==='serif'?'Klassisk':'Enkel'} typografi · ${x.theme.radius}px hjørner</p><button class="secondary" data-preview="${x.id}">Forhåndsvis</button><button data-activate="${x.id}">Aktivér</button>${themeDeleteMarkup(x)}</div></article>`).join('')}</div><div class="panel" style="margin-top:25px"><h2>Jeres egen designpakke</h2><p>En JSON-fil eller en ZIP med én fil: <code>theme.json</code>. Pakken styrer fire farver, skrifttype, hjørner og afstand. Admin kan skifte tilbage til standardtemaet når som helst.</p><button id="download-theme" class="secondary">↓ Hent eksempelpakke</button> <button id="cancel-preview" class="secondary">Gendan aktivt design</button><p class="muted" style="margin-top:15px">Forhåndsvisning gælder kun denne side, indtil du aktiverer temaet.</p></div>`;bindThemeDelete();document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>{applyTheme(themes.find(t=>t.id===b.dataset.preview).theme);toast('Forhåndsvisning · ikke aktiveret')});document.querySelectorAll('[data-activate]').forEach(b=>b.onclick=async()=>{try{await api('/admin/themes/'+b.dataset.activate+'/activate','POST');applyTheme(await api('/theme'));toast('Designet er aktiveret for alle')}catch(e){toast(e.message)}});$('#cancel-preview').onclick=async()=>applyTheme(await api('/theme'));$('#theme-upload').onclick=()=>$('#theme-file').click();$('#theme-file').onchange=async e=>{if(!e.target.files[0])return;const f=new FormData();f.append('file',e.target.files[0]);try{await api('/admin/themes','POST',f);await designView();toast('Designpakke installeret. Klar til forhåndsvisning.')}catch(err){toast(err.message)}};$('#download-theme').onclick=()=>{const blob=new Blob([JSON.stringify(themes[0].theme,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='theme.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}}
+async function designView(){const generation=navigationGeneration,account=accountGeneration,requestView=view,requestGallery=current;const list=await api('/admin/themes');if(!galleryRequestActive(generation,account,requestView,requestGallery))return;themes=list;$('#content').innerHTML=`<div class="heading"><div><div class="eyebrow">Gør arkivet til jeres</div><h1>Design & udtryk</h1><p class="muted">Installér en designpakke, prøv den, og aktivér den for hele familien.</p></div><button id="theme-upload">＋ Upload designpakke</button><input id="theme-file" type="file" accept=".json,.zip" hidden></div><p id="theme-delete-feedback" class="theme-delete-feedback" role="status" aria-live="polite" aria-atomic="true"></p><div class="grid" id="theme-grid">${themes.map(x=>`<article class="card" data-theme-card="${esc(x.id)}"><div class="theme-swatch" style="background:${x.theme.colors.background}">${Object.values(x.theme.colors).map(v=>`<span style="background:${v};border:1px solid #8883"></span>`).join('')}</div><div class="theme-card"><h2>${esc(x.theme.name)}</h2><p class="muted">${x.theme.font==='serif'?'Klassisk':'Enkel'} typografi · ${x.theme.radius}px hjørner</p><button class="secondary" data-preview="${x.id}">Forhåndsvis</button><button data-activate="${x.id}">Aktivér</button>${themeDeleteMarkup(x)}</div></article>`).join('')}</div><div class="panel" style="margin-top:25px"><h2>Jeres egen designpakke</h2><p>En JSON-fil eller en ZIP med én fil: <code>theme.json</code>. Pakken styrer fire farver, skrifttype, hjørner og afstand. Admin kan skifte tilbage til standardtemaet når som helst.</p><button id="download-theme" class="secondary">↓ Hent eksempelpakke</button> <button id="cancel-preview" class="secondary">Gendan aktivt design</button><p class="muted" style="margin-top:15px">Forhåndsvisning gælder kun denne side, indtil du aktiverer temaet.</p></div>`;decorateAdmin('design');bindThemeDelete();document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>{applyTheme(themes.find(t=>t.id===b.dataset.preview).theme);toast('Forhåndsvisning · ikke aktiveret')});document.querySelectorAll('[data-activate]').forEach(b=>b.onclick=async()=>{try{await api('/admin/themes/'+b.dataset.activate+'/activate','POST');applyTheme(await api('/theme'));toast('Designet er aktiveret for alle')}catch(e){toast(e.message)}});$('#cancel-preview').onclick=async()=>applyTheme(await api('/theme'));$('#theme-upload').onclick=()=>$('#theme-file').click();$('#theme-file').onchange=async e=>{if(!e.target.files[0])return;const f=new FormData();f.append('file',e.target.files[0]);try{await api('/admin/themes','POST',f);await designView();toast('Designpakke installeret. Klar til forhåndsvisning.')}catch(err){toast(err.message)}};$('#download-theme').onclick=()=>{const blob=new Blob([JSON.stringify(themes[0].theme,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='theme.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}}
 // Lychee import is driven in small, explicitly requested batches in this tab.
 // Leaving this view invalidates the loop; an already requested batch may finish.
 let lycheeGeneration=0,lycheeSession=null;
@@ -786,7 +849,119 @@ async function lycheeAction(session,action){
   finally{if(lycheeActive(session)){session.busy=false;lycheeDraw(session)}}
 }
 
+// Administration uses the existing account and gallery APIs.
+const adminAreas=[['admin','Overblik'],['people','Personer og adgang'],['admin-content','Indhold'],['design','Udseende'],['deletions','Sletteønsker'],['admin-security','Drift og sikkerhed']];
+let adminDirectoryData=null,grantDialog=null;
+let pendingModalCloses=0;
+function closeModal(){photoViewerGeneration++;photoViewerNavigation=null;if(M.open){pendingModalCloses++;M.close();}}
+const adminFlag=value=>value===true||value===1||value==='1';
+const isAdminView=value=>adminAreas.some(([key])=>key===value);
+function adminStatus(text,state='neutral'){
+  const symbol={ok:'✓',warning:'!',error:'!',saving:'…',neutral:'?'}[state]||'?';
+  return `<span class="admin-status admin-status-${state}"><span aria-hidden="true">${symbol}</span>${esc(text)}</span>`;
+}
+function updateAdminNavigation(){
+  const menu=$('#admin-subnav');if(menu)menu.hidden=!isAdminView(view);
+  const entry=$('[data-view=admin]');if(entry){entry.classList.toggle('active',isAdminView(view));entry.setAttribute('aria-expanded',String(isAdminView(view)));}
+}
+function decorateAdmin(area=view){
+  if(!me?.admin||!isAdminView(view))return;
+  const content=$('#content');
+  if(!$('#admin-heading'))content.insertAdjacentHTML('afterbegin',`<div class="admin-heading" id="admin-heading"><div><div class="eyebrow">Et overblik, der er til at handle på</div><h1>Administration</h1></div><label class="admin-area-label">Administrationsområde<select id="admin-area">${adminAreas.map(([key,label])=>`<option value="${key}" ${key===area?'selected':''}>${label}</option>`).join('')}</select></label></div>`);
+  const selector=$('#admin-area');if(selector){selector.value=area;selector.onchange=()=>navigateView(selector.value);}
+  updateAdminNavigation();
+}
+function directoryValid(data){return data&&Array.isArray(data.users)&&Array.isArray(data.grants);}
+function memberAccessSummary(user,data){
+  if(adminFlag(user.admin))return {text:'Fuld adgang',state:'ok',detail:'Administrator · Alle gallerier',names:galleries.map(g=>g.name),count:galleries.length};
+  if(!Array.isArray(data?.grants))return {text:'Ikke kontrolleret',state:'neutral',detail:'Galleriadgang kunne ikke bekræftes',names:[],count:null};
+  const ids=[...new Set(data.grants.filter(grant=>grant.user_id===user.id).map(grant=>grant.gallery_id))];
+  const names=ids.map(id=>galleries.find(g=>g.id===id)?.name||'Galleri uden navn');
+  return {text:ids.length?'Har galleriadgang':'Ingen galleriadgang',state:ids.length?'ok':'warning',detail:'Medlem · '+ids.length+' '+(ids.length===1?'galleri':'gallerier'),names,count:ids.length};
+}
+function memberCard(user,data,compact=false){
+  const access=memberAccessSummary(user,data),names=access.names.slice(0,3),rest=access.names.length-names.length;
+  return `<article class="member-card" data-member-row="${esc(user.id)}"><div class="member-card-main"><div class="member-avatar" aria-hidden="true">${esc((user.name||'?').trim().charAt(0).toUpperCase())}</div><div class="member-identity"><button class="member-name" data-profile="${esc(user.id)}" type="button">${esc(user.name)}</button><p class="member-email">${esc(user.email)}</p><p class="member-role">${esc(access.detail)}</p>${names.length?`<p class="member-galleries">${names.map(esc).join(' · ')}${rest>0?' · +'+rest+' mere':''}</p>`:''}</div><div class="member-state">${adminStatus(access.text,access.state)}</div></div>${compact?'':`<div class="member-actions"><button class="secondary" data-profile="${esc(user.id)}" type="button">Profil</button>${!adminFlag(user.admin)?`<button class="secondary" data-user="${esc(user.id)}" type="button">Galleriadgang</button>${memberDeleteMarkup(user)}`:''}</div>`}</article>`;
+}
+function bindMemberCards(data){
+  for(const user of data.users)bindMemberDelete(user);
+  document.querySelectorAll('[data-profile]').forEach(button=>button.onclick=()=>profileView(button.dataset.profile));
+  document.querySelectorAll('[data-user]').forEach(button=>button.onclick=()=>{const user=data.users.find(u=>u.id===button.dataset.user);if(user)galleryAccessForm(user,data);});
+}
+function drawDirectory(data,compact=false){
+  const list=$('#admin-member-list');if(!list||!me?.admin)return;
+  const query=($('#member-search')?.value||'').trim().toLocaleLowerCase('da-DK'),filter=$('#member-filter')?.value||'all';
+  const matches=data.users.filter(user=>{
+    const access=memberAccessSummary(user,data),search=[user.name,user.email,access.detail,...access.names].join(' ').toLocaleLowerCase('da-DK');
+    return (!query||search.includes(query))&&(filter==='all'||filter==='admin'&&adminFlag(user.admin)||filter==='no-access'&&!adminFlag(user.admin)&&access.count===0);
+  }).sort((a,b)=>(a.name||'').localeCompare(b.name||'','da-DK'));
+  const shown=compact?matches.slice(0,6):matches;
+  list.innerHTML=shown.map(user=>memberCard(user,data,compact)).join('')||'<div class="admin-empty"><h3>Ingen personer fundet</h3><p>Prøv et andet navn, en e-mail eller et galleri.</p></div>';
+  const count=$('#member-search-count');if(count)count.textContent=compact&&matches.length>6?'Viser 6 af '+matches.length+' personer':matches.length+' '+(matches.length===1?'person':'personer');
+  bindMemberCards(data);
+}
+function directoryMarkup(data,compact=false){
+  return `<section class="panel admin-directory"><div class="admin-section-title"><div><h2>${compact?'Medlemmer':'Familiens konti'}</h2><p class="muted">Navn, kontakt og galleriadgang samlet ét sted.</p></div><span id="member-search-count" role="status"></span></div><div class="member-tools"><label class="member-search-label"><span>Søg medlem</span><input id="member-search" type="search" placeholder="Navn, e-mail eller galleri" autocomplete="off"></label>${compact?'':`<label>Vis<select id="member-filter"><option value="all">Alle personer</option><option value="admin">Administratorer</option><option value="no-access">Uden galleriadgang</option></select></label>`}</div><div id="admin-member-list" class="admin-member-list"></div>${compact?'<button class="admin-text-link" id="all-members" type="button">Vis alle medlemmer →</button>':''}</section>`;
+}
+function bindDirectory(data,compact=false){
+  drawDirectory(data,compact);$('#member-search').oninput=()=>drawDirectory(data,compact);
+  if($('#member-filter'))$('#member-filter').onchange=()=>drawDirectory(data,compact);
+  if($('#all-members'))$('#all-members').onclick=()=>navigateView('people');
+}
+function adminPageFailure(title,error,retry){
+  $('#content').innerHTML=`<section class="panel admin-load-error"><h2>${esc(title)}</h2><p class="error" role="alert">${esc(error?.message||'Prøv igen.')}</p><p>Ingen ændringer er gemt.</p><button id="admin-retry" class="secondary" type="button">Prøv igen</button></section>`;
+  decorateAdmin();$('#admin-retry').onclick=retry;
+}
+async function adminOverview(){
+  if(!me?.admin)return;
+  const generation=navigationGeneration,account=accountGeneration;
+  $('#content').innerHTML='<p role="status">Henter administrationen…</p>';decorateAdmin('admin');
+  const [directory,requests]=await Promise.allSettled([api('/admin/users'),serverCapabilities.media_delete_requests===true?api('/admin/deletion-requests'):Promise.resolve(null)]);
+  if(!galleryRequestActive(generation,account,'admin',null)||!me?.admin)return;
+  if(directory.status!=='fulfilled'||!directoryValid(directory.value)){adminPageFailure('Medlemsoversigten kunne ikke hentes',directory.reason||Error('Serveren kunne ikke bekræfte konti og rettigheder.'),()=>navigateView('admin'));return;}
+  const data=directory.value;adminDirectoryData=data;
+  const pending=requests.status==='fulfilled'&&Array.isArray(requests.value)?requests.value.length:null;
+  const without=data.users.filter(user=>!adminFlag(user.admin)&&memberAccessSummary(user,data).count===0).length;
+  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Overblik</h2><p class="muted">Familien, adgang og opgaver, der venter på dig.</p></div><button id="invite" type="button">＋ Invitér en person</button></div><div class="admin-overview-cards"><button class="panel admin-summary-card" id="overview-people" type="button"><span>Personer</span><strong>${data.users.length}</strong><small>${without?without+' uden galleriadgang':'Åbn personer og adgang'}</small></button><button class="panel admin-summary-card" id="overview-galleries" type="button"><span>Gallerier</span><strong>${galleries.length}</strong><small>Indhold og deling</small></button><button class="panel admin-summary-card" id="overview-deletions" type="button"><span>Sletteønsker</span><strong>${pending===null?'—':pending}</strong><small>${pending===null?'Status er ikke bekræftet':pending?'Afventer din godkendelse':'Ingen afventende sletteønsker'}</small></button></div>${without?`<div class="admin-notice">${adminStatus('Adgang kræver et valg','warning')}<p>${without} ${without===1?'person har':'personer har'} ingen delte gallerier. Du kan tildele adgang under Personer og adgang.</p></div>`:''}${pending===null?'<p class="admin-quiet-status">Sletteønsker er ikke kontrolleret. Åbn området for at se status og eventuel opsætning.</p>':''}${directoryMarkup(data,true)}`;
+  decorateAdmin('admin');bindDirectory(data,true);$('#invite').onclick=inviteForm;
+  $('#overview-people').onclick=()=>navigateView('people');$('#overview-galleries').onclick=()=>navigateView('admin-content');$('#overview-deletions').onclick=()=>navigateView('deletions');
+}
+async function peopleView(){
+  if(!me?.admin)return;
+  profileGeneration++;const generation=navigationGeneration,account=accountGeneration,requestView=view,requestGallery=current;
+  $('#content').innerHTML='<p role="status">Henter personer og adgang…</p>';decorateAdmin('people');
+  let data;try{data=await api('/admin/users');if(!directoryValid(data))throw Error('Serveren kunne ikke bekræfte konti og rettigheder.');}
+  catch(error){if(galleryRequestActive(generation,account,requestView,requestGallery))adminPageFailure('Personerne kunne ikke hentes',error,()=>navigateView('people'));return;}
+  if(!galleryRequestActive(generation,account,requestView,requestGallery)||!me?.admin)return;
+  adminDirectoryData=data;
+  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Personer og adgang</h2><p class="muted">Find en person, åbn profilen eller vælg personens gallerier.</p></div><button id="invite" type="button">＋ Invitér en person</button></div><p id="member-delete-feedback" role="status" aria-live="polite"></p>${memberDeleteNotice()}${directoryMarkup(data)}<details class="panel admin-help"><summary>Sådan fungerer konti og invitationer</summary><p>Listen viser oprettede konti. En invitation bliver først til en ny konto, når den accepteres. Invitationer til eksisterende konti kan give adgang til flere gallerier.</p><p>Et personligt invitationslink kan bruges én gang og udløber efter 7 dage. Du vælger gallerier og rettigheder fra starten.</p><p>Originalfiler kan indeholde GPS-data. Download af originaler og afspilning af videoer kræver både download- og GPS-adgang.</p></details>`;
+  decorateAdmin('people');bindDirectory(data);$('#invite').onclick=inviteForm;
+}
+function adminContentView(){
+  if(!me?.admin)return;
+  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Indhold</h2><p class="muted">Åbn et galleri for at rette navn, tilføje medier eller vælge billeder til sletning.</p></div><button id="admin-new-gallery" type="button">＋ Nyt galleri</button></div><div class="panel admin-gallery-list">${galleries.map(g=>`<div class="admin-gallery-row"><div><h3>${esc(g.name)}</h3><p class="muted">${Math.max(0,Number(g.count)||0)} billeder og videoer</p></div><button class="secondary" type="button" data-admin-gallery="${esc(g.id)}">Åbn galleri</button></div>`).join('')||'<p>Der er endnu ingen gallerier.</p>'}</div><button class="secondary" id="admin-deletions" type="button">Gennemgå sletteønsker</button>`;
+  decorateAdmin('admin-content');$('#admin-new-gallery').onclick=newGallery;$('#admin-deletions').onclick=()=>navigateView('deletions');document.querySelectorAll('[data-admin-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.adminGallery));
+}
+async function adminSecurityView(){
+  if(!me?.admin)return;
+  const generation=navigationGeneration,account=accountGeneration;
+  $('#content').innerHTML='<p role="status">Kontrollerer opsætningen…</p>';decorateAdmin('admin-security');
+  let status;try{status=await api('/status');if(status.account_security_version!==1||status.account_security_ready!==true)throw Error('Serveren kunne ikke bekræfte kontosikkerheden.');}
+  catch(error){if(galleryRequestActive(generation,account,'admin-security',null))adminPageFailure('Status kunne ikke bekræftes',error,()=>navigateView('admin-security'));return;}
+  if(!galleryRequestActive(generation,account,'admin-security',null)||!me?.admin)return;
+  serverCapabilities=status.capabilities&&typeof status.capabilities==='object'?status.capabilities:{};
+  const checks=[['gallery_create','Oprettelse af gallerier'],['gallery_edit','Redigering af gallerier'],['multi_gallery_invitations','Invitation til flere gallerier'],['media_delete_requests','Godkendelse af sletteønsker'],['member_delete','Sletning af medlemskonti'],['theme_delete','Sletning af designpakker']];
+  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Drift og sikkerhed</h2><p class="muted">Kontrolleret ${esc(new Date().toLocaleTimeString('da-DK',{hour:'2-digit',minute:'2-digit'}))}. Status er de funktioner, serveren oplyser, at den understøtter.</p></div><button id="admin-status-refresh" class="secondary" type="button">Kontrollér igen</button></div><section class="panel"><h2>Din konto og Authenticator</h2><p>Se dine profiloplysninger, skift adgangskode og administrér Authenticator og reservekoder fra din profil.</p><button class="secondary" id="admin-own-security" type="button">Åbn min profil</button></section><section class="panel"><h2>Funktioner i installationen</h2><div class="admin-checks">${checks.map(([key,label])=>`<div class="admin-check"><span>${label}</span>${serverCapabilities[key]===true?adminStatus('Tilgængelig','ok'):adminStatus('Ikke bekræftet','neutral')}</div>`).join('')}</div><p class="muted">Ikke bekræftet betyder, at opsætningen skal undersøges, før funktionen kan regnes som klar.</p><a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/ACCOUNTS.md" target="_blank" rel="noopener">Åbn vejledningen til opsætning</a></section>`;
+  decorateAdmin('admin-security');$('#admin-status-refresh').onclick=()=>navigateView('admin-security');$('#admin-own-security').onclick=()=>navigateView('profile');
+}
+function requestDialogClose(){
+  if(grantDialog?.busy)return;
+  if(grantDialog?.dirty()){$('#grant-leave-warning').hidden=false;$('#grant-stay').focus();return;}
+  cancelGalleryDeleteConfirmation();photoViewerGeneration++;closeModal();
+}
+
+if(typeof window!=='undefined')window.addEventListener('beforeunload',event=>{if(grantDialog?.dirty()){event.preventDefault();event.returnValue='';}});
 M.addEventListener('keydown',photoViewerKeydown);
-M.addEventListener('cancel',()=>{cancelGalleryDeleteConfirmation();photoViewerGeneration++;photoViewerNavigation=null});
-M.addEventListener('close',()=>{if(M.open)return;photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
+M.addEventListener('cancel',event=>{event?.preventDefault?.();if(grantDialog&&(grantDialog.busy||grantDialog.dirty())){requestDialogClose();return;}cancelGalleryDeleteConfirmation();closeModal();});
+M.addEventListener('close',()=>{const handled=pendingModalCloses>0;if(handled)pendingModalCloses--;if(M.open)return;grantDialog=null;if(!handled)photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
 init();
