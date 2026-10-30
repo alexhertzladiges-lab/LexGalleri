@@ -7,7 +7,7 @@ import { plan } from '../scripts/ftps-plan.mjs';
 
 const binary = process.env.LEXGALLERI_TEST_LFTP || 'lftp';
 const env = {
-  FTPS_HOST:'ftps.example.test', FTPS_USERNAME:'gallery-user', FTPS_PORT:'21',
+  FTPS_HOST:'web3.e-studio.dk', FTPS_USERNAME:'chatgpt@lexan.dk', FTPS_PORT:'21',
   GITHUB_SHA:'a'.repeat(40), GITHUB_RUN_ID:'123', GITHUB_RUN_ATTEMPT:'1',
 };
 function preparation() {
