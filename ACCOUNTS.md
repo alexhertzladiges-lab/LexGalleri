@@ -73,7 +73,7 @@ Medlemmernes gallerioversigt indeholder kun de gallerier, de har adgang til. Lis
 
 Gæster og medlemmer kan også vælge **Nyt galleri**. Et galleri oprettet af et medlem er fra start kun synligt for medlemmet selv og administratorer. Opretteren får adgang til at uploade, hente originaler og se GPS i sit nye galleri. Administratoren styrer fortsat deling med andre konti.
 
-Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Det kan bruges én gang og udløber efter syv dage. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
+Du inviterer nye medlemmer med **Invitér en gæst** og sender selv invitationslinket. Efter migrering 007 kan det åbnes igen med samme kontos adgangskode indtil udløb efter syv dage eller tilbagekaldelse. Et medlem kan kun se og rette sin egen profil; administratoren administrerer medlemmerne.
 
 ## Invitation til flere gallerier
 

@@ -8,7 +8,7 @@ Udgangspunkt: main `4ca46ccdeda02f1a8637b7595c41ef0cd44a82d5`. Ændringer forber
 - Første accept opretter eller autentificerer kontoen og anvender kun admins valgte rettigheder. Senere genbesøg kræver den samme kontos aktuelle adgangskode og genskaber **ingen** grants. Token låses under transaktion; databasen gemmer kun SHA-256-hash. Syv dages udløb, admin-tilbagekaldelse og loginbegrænsning bevares.
 - Telefonkontoen understøttes i almindeligt login, profilrettelser og kontosletning. Admin skal fortsat have e-mail og Authenticator.
 - MP4: 100 MiB pr. fil; billeder: 25 MiB. Serveren kontrollerer containerstruktur og videospor med den eksisterende begrænsede MP4-parser. Ingen FFmpeg, ekstern tjeneste eller Lychee-forbindelse bruges. Der genereres neutral JPEG-miniature. Afspilning/original kræver fortsat download **og** GPS, med sessionskontrol, byte ranges og privat cachepolitik som før.
-- Manglende migreringsmarkør blokerer telefonfunktionerne. Den gamle e-mailfunktion bevares før migrering. Manglende privat videomodul afviser video uden publicering.
+- Manglende migreringsmarkør blokerer telefonfunktionerne, også accept af en telefoninvitation oprettet inden en afbrudt opgradering. Den gamle e-mailfunktion bevares før migrering. Manglende privat videomodul afviser video uden publicering.
 - Original og to miniaturer fjernes, hvis databaseindsættelse fejler. Dubletter afvises.
 
 ## Udførte lokale prøver, 31. oktober 2026
@@ -17,7 +17,7 @@ PHP 8.4.24, isoleret MariaDB 11.8.6 på localhost:33307 og Chromium. Kun tilfæl
 
 | Prøve | Faktisk resultat |
 |---|---|
-| Invitationer inkl. migrering fra forrige skema og gentagen migrering | 103 PASS, 0 FAIL |
+| Invitationer inkl. migrering fra forrige skema og gentagen migrering | 105 PASS, 0 FAIL |
 | HTTP → rigtig database, fotos og direkte MP4 | 59 PASS, 0 FAIL |
 | Kontosikkerhed/Authenticator | 152 PASS, 0 FAIL |
 | Kontosletning | 62 PASS, 0 FAIL |

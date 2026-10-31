@@ -458,6 +458,7 @@ function route(string $method,string $path): never {
         $db->beginTransaction();$inv=one('SELECT * FROM invitations WHERE token=? AND expires>? FOR UPDATE',[$hash,time()]);
         if (!$inv) fail(400,'Invitationen er udløbet eller tilbagekaldt');
         $reusable=reusable_invitations_ready();
+        if(!empty($inv['phone'])&&!$reusable)fail(503,'Telefoninvitationens opgradering er ikke afsluttet');
         if(!empty($inv['accepted_user_id'])) {
             if(!$reusable)fail(503,'Invitationens opgradering er ikke afsluttet');
             $u=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$inv['accepted_user_id']]);

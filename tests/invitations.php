@@ -101,8 +101,10 @@ try{
     $extra=iv_ok(iv_request($admin,'POST','/admin/invitations',['name'=>'Existing member','email'=>'multi-member@example.test','galleries'=>$selected]),'Create an unused combined invitation for account deletion');iv_ok(iv_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>true]),'Admin can delete a member with editing grants');iv_assert(iv_count('SELECT COUNT(*) FROM gallery_editors WHERE user_id=?',[$memberId])===0&&iv_count('SELECT COUNT(*) FROM invitation_galleries WHERE token=?',[hash('sha256',iv_token($extra))])===0,'Member deletion revokes editing and all gallery assignments of its unused invitation');
     iv_ok(iv_request($admin,'DELETE','/admin/users/'.$phoneUser['id'],['confirm'=>true]),'Admin deletes the telephone-only account');
     iv_assert(iv_count('SELECT COUNT(*) FROM users WHERE phone=?',['+4520000001'])===0&&iv_request(iv_client(),'POST','/login',['phone'=>'20000001','password'=>'long-phone-password'])[0]===401,'Deletion clears the phone identity and blocks its previous password');
+    $partial=iv_ok(iv_request($admin,'POST','/admin/invitations',array_merge($phonePayload,['phone'=>'20000004'])),'Prepare pending phone invitation for incomplete migration');
     $pdo->exec("DELETE FROM settings WHERE `key`='invitation_version'");
     iv_assert(iv_request($admin,'POST','/admin/invitations',$phonePayload)[0]===503&&iv_request($admin,'GET','/admin/invitations')[0]===503,'Incomplete phone migration fails closed');
+    iv_assert(iv_request(iv_client(),'POST','/accept',['token'=>iv_token($partial),'password'=>'long-phone-password'])[0]===503&&iv_count('SELECT COUNT(*) FROM users WHERE phone=?',['+4520000004'])===0,'Incomplete migration cannot accept a pending phone invitation or create an identity-less account');
     $pdo->exec($upgrade);
     echo "\n$checks checks, $failures failures\n";
 }catch(Throwable $error){$failures++;fwrite(STDERR,$error->getMessage()."\n");if(is_file($temp.'/server.log'))fwrite(STDERR,file_get_contents($temp.'/server.log'));}
