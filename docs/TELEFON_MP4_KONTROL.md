@@ -61,3 +61,16 @@ Hele den eksisterende testsekvens står i `.github/workflows/tests.yml` og køre
 **Ikke installeret på webhotellet ved denne lokale kontrol.** Den eksisterende FTPS-konto er begrænset til offentlige filer; databasen og `/home/lexandkk/lexgalleri-private/` opdateres med ejerens cPanel-adgang efter [INSTALLER.md](../installation/telefon-mp4/INSTALLER.md). Pakken indeholder 12 offentlige filer, tre private programfiler, migrering 007 og vejledning, uden konfiguration eller medier.
 
 Før åbning mangler kontrol af webhotellets uploadgrænser, private filrettigheder og en ufølsom MP4 i de faktiske mobilbrowsere. Appen omkoder ikke codecs: en strukturelt gyldig MP4 garanterer ikke, at alle browsere kan afkode filmen. H.264/AAC anbefales.
+
+## Endelig GitHub-kontrol og pakke
+
+- Testet kodecommit: `1dec9276ccfb3ddf543ee0b8e25fc42ac5e4253f` på `feature/lexgalleri-phone-mp4-v1`.
+- [Grøn GitHub Actions-kørsel, forsøg 2](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41199635590/attempts/2), verify-job `124533496317`.
+- Faktisk MySQL-version: **8.4.13**. Alle **1.000 PHP-kontroller** og **184 Node-/browserprøver** består. Apache-routing og lftp-protokolprøver er gennemført i CI; ingen skip i den grønne kørsel.
+- [Download installationspakken](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41199635590/artifacts/13042018211) (GitHub-login med adgang til repositoryet kræves). 17 allowlistede filer + SHA256SUMS; 112.152 bytes som GitHub-artefakt. Udløber 30. november 2026.
+- GitHub-artefaktets SHA-256: `996d19c795fc257287de64f51ecdced16f7df7aa08f29112eaddf9e48e3c848e`.
+- [Samlet diff af de 21 ændrede/nye filer](https://github.com/alexhertzladiges-lab/LexGalleri/compare/4ca46ccdeda02f1a8637b7595c41ef0cd44a82d5...1dec9276ccfb3ddf543ee0b8e25fc42ac5e4253f). De lokale filers Git-blobhashes er kontrolleret mod denne GitHub-version.
+
+Første forsøg på den endelige kode fejlede i den eksisterende passwordikon-browserprøves optælling af **alle** netværkskald (12 mod forventet 11). Samme prøve bestod i den foregående fulde kørsel, lokalt, i 12 isolerede genkørsler og i den fulde grønne genkørsel. Ingen runtime- eller testændring blev foretaget for at skjule fejlen. Den tidsafhængige netværksoptælling er et kendt udestående i testharnessen; den enkelte ekstra requests årsag er ikke fastslået.
+
+Lokalt blev 0 tilbageværende tilfældige LexGalleri-testdatabaser bekræftet efter kørslerne. Opgavens egen MariaDB-proces blev stoppet, og dens datamappe fjernet. GitHub-jobbet stoppede og fjernede sin MySQL-service og sit engangsnetværk. Ingen webhotelfiler, produktionsdata eller konfiguration er ændret. Denne afsluttende rapportopdatering ændrer kun dokumentation; pakkens runtime er præcis det testede kodecommit ovenfor.
