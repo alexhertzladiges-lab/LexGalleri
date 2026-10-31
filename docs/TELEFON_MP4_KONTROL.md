@@ -74,3 +74,17 @@ Før åbning mangler kontrol af webhotellets uploadgrænser, private filrettighe
 Første forsøg på den endelige kode fejlede i den eksisterende passwordikon-browserprøves optælling af **alle** netværkskald (12 mod forventet 11). Samme prøve bestod i den foregående fulde kørsel, lokalt, i 12 isolerede genkørsler og i den fulde grønne genkørsel. Ingen runtime- eller testændring blev foretaget for at skjule fejlen. Den tidsafhængige netværksoptælling er et kendt udestående i testharnessen; den enkelte ekstra requests årsag er ikke fastslået.
 
 Lokalt blev 0 tilbageværende tilfældige LexGalleri-testdatabaser bekræftet efter kørslerne. Opgavens egen MariaDB-proces blev stoppet, og dens datamappe fjernet. GitHub-jobbet stoppede og fjernede sin MySQL-service og sit engangsnetværk. Ingen webhotelfiler, produktionsdata eller konfiguration er ændret. Denne afsluttende rapportopdatering ændrer kun dokumentation; pakkens runtime er præcis det testede kodecommit ovenfor.
+
+
+## Offentlig installation gennemført 31. oktober 2026
+
+Efter særskilt besked »installer de offentlige filer« blev de 12 offentlige filer fra det testede kodecommit `1dec9276ccfb3ddf543ee0b8e25fc42ac5e4253f` installeret via den eksisterende, begrænsede FTPS-konto.
+
+- [Grøn installationskørsel](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41203086179), job `124542623889`, installationscommit `4221cc861293f42a870d8f69ddce38e5964c7e69`.
+- Det godkendte pakkeartefakt og alle 12 offentlige filer blev kontrolleret mod den grønne testkørsel før overførsel.
+- Installationsrodens index.php blev kontrolleret før filændringer. Alle 12 filer blev genlæst via FTPS; samtlige SHA-256-kontrolsummer stemmer.
+- HTTPS-forside, installeret app.js med hashkontrol og eksisterende kontosikkerhed består.
+- Serverens status melder nu `reusable_phone_invitations=true` og `direct_mp4_upload=true`. Det viser den eksisterende private installations parathed; der er ikke oprettet en ny produktionskonto eller uploadet en prøvevideo som del af denne kørsel.
+- Der blev ikke uploadet private programfiler eller konfiguration og ikke kørt SQL-migreringer.
+- [Installationsbevis](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41203086179/artifacts/13043089144). Kontrolsummer og status gemmes også i `installation/telefon-mp4/public-installed.json`.
+- Engangsworkflowet er efterfølgende låst med `if: false`. Kun offentlig installation er udført; ingen merge til main.

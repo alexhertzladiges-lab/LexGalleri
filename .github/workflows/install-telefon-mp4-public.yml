@@ -11,11 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    if: >-
-      github.repository == 'alexhertzladiges-lab/LexGalleri' &&
-      github.ref == 'refs/heads/feature/lexgalleri-phone-mp4-v1' &&
-      github.event.before == '3db77d97bae7608a9c091f158cadff1082889cda' &&
-      github.event.head_commit.message == 'Install approved LexGalleri public files from 1dec9276'
+    # Approval consumed: run 41203086179 successfully installed and verified all 12 files.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
