@@ -8,7 +8,7 @@ I webhotellets kontrolpanel:
 
 - Vælg PHP **8.4** og aktivér `pdo_mysql`, `gd` (JPEG/PNG/WebP), `exif`, `mbstring`, `openssl` og sessioner. `zip` er valgfri til ZIP-temaer; JSON-temaer virker uden.
 - Opret en tom MySQL/MariaDB-database og separat databasebruger med alle rettigheder **kun til denne database**. Gem værtsnavn, port, fuldt databasenavn, brugernavn og adgangskode hos dig selv.
-- Anbefal: `memory_limit=256M`, `upload_max_filesize=25M`, `post_max_size=26M`, `max_execution_time=60`, `display_errors=Off`, `log_errors=On`. Fejllog skal være privat.
+- Anbefal: `memory_limit=256M`, `upload_max_filesize=100M`, `post_max_size=101M`, `max_execution_time=60`, `display_errors=Off`, `log_errors=On`. Fejllog skal være privat.
 
 Tabeller oprettes automatisk ved første admin-opsætning. Du skal ikke oprette dem manuelt. Brug MySQL 8+ eller MariaDB 10.6+.
 
@@ -139,3 +139,7 @@ Følg [den særskilte Lychee-importvejledning](LYCHEE-IMPORT.md), hvis du vil ko
 - **Upload afvises:** Kontrollér PHP-grænser; prøv et mindre billede.
 
 En grøn FTPS-kørsel bekræfter overførslen af de offentlige filer. Kontrollér derefter dit eget website; de private filer og databaseoplysninger installerer du særskilt med din egen adgang.
+
+## Telefoninvitationer og direkte MP4-upload
+
+Brug [den samlede opgraderingsvejledning](installation/telefon-mp4/INSTALLER.md) til en eksisterende installation. Migrering 007, tre private programfiler og offentlige filer skal alle installeres. Genimportér ikke det nye schema.sql i en eksisterende installation.

@@ -36,7 +36,7 @@ function new_password(array $b): string {
 }
 function stamp(): string { return gmdate('Y-m-d\TH:i:s\Z'); }
 function uid(): string { return bin2hex(random_bytes(16)); }
-function safe_user(array $u): array { return ['id'=>$u['id'],'email'=>$u['email'],'name'=>$u['name'],'admin'=>(int)$u['admin']]; }
+function safe_user(array $u): array { return ['id'=>$u['id'],'email'=>$u['email'],'phone'=>$u['phone']??null,'name'=>$u['name'],'admin'=>(int)$u['admin']]; }
 function user(bool $admin = false): array {
     $id = $_SESSION['uid'] ?? ''; $u = $id ? one('SELECT * FROM users WHERE id=?',[$id]) : null;
     if (!$u || ($_SESSION['expires'] ?? 0) < time()) fail(401,'Log ind for at fortsætte');
@@ -60,6 +60,21 @@ function gallery_permissions_ready(): bool {
     static $ready=null;if($ready!==null)return $ready;
     return $ready=(int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND ((table_name='gallery_editors' AND column_name IN ('gallery_id','user_id')) OR (table_name='invitation_galleries' AND column_name IN ('token','gallery_id','upload','edit_metadata','download','gps')))")->fetchColumn()===8;
 }
+// A partial upgrade must not issue a phone identity or a reusable invitation.
+function reusable_invitations_ready(): bool {
+    static $ready=null;if($ready!==null)return $ready;
+    $columns=(int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND ((table_name='users' AND column_name='phone') OR (table_name='invitations' AND column_name IN ('phone','accepted_user_id')))")->fetchColumn();
+    return $ready=$columns===3&&one("SELECT 1 FROM settings WHERE `key`='invitation_version' AND value='2'")!==null;
+}
+function phone(array $b): string {
+    $value=text($b,'phone',30,true);
+    if(!preg_match('/^(?:\+45|0045)?[0-9 ()-]+$/D',$value))fail(400,'Brug et dansk telefonnummer med 8 cifre, eventuelt med +45');
+    $digits=preg_replace('/[ ()-]/','',$value);
+    if(str_starts_with($digits,'+45'))$digits=substr($digits,3);
+    elseif(str_starts_with($digits,'0045'))$digits=substr($digits,4);
+    if(!preg_match('/^[2-9][0-9]{7}$/D',$digits))fail(400,'Brug et dansk telefonnummer med 8 cifre, eventuelt med +45');
+    return '+45'.$digits;
+}
 function gallery_edit_allowed(string $gallery,array $u,?array $grant): bool {
     return (bool)$u['admin'] || $grant && gallery_permissions_ready() && one('SELECT 1 FROM gallery_editors WHERE gallery_id=? AND user_id=?',[$gallery,$u['id']])!==null;
 }
@@ -75,7 +90,10 @@ function gallery_permission_flag(array $b,string $key): bool {
 }
 function create_gallery_invitation(array $b): array {
     global $db,$base;
-    $mail=email($b);$name=text($b,'name',100,true);$multi=array_key_exists('galleries',$b);
+    $hasPhone=text($b,'phone',30)!=='';
+    if($hasPhone&&text($b,'email',254)!=='')fail(400,'Vælg enten e-mail eller telefonnummer');
+    if($hasPhone&&!reusable_invitations_ready())fail(503,'Installér 007_reusable_phone_invitations.sql for telefoninvitationer');
+    $mail=$hasPhone?null:email($b);$number=$hasPhone?phone($b):null;$name=text($b,'name',100,true);$multi=array_key_exists('galleries',$b);
     if($multi&&!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at invitere til flere gallerier');
     $input=$multi?$b['galleries']:[array_intersect_key($b,array_flip(['gallery_id','upload','edit','download','gps']))];
     if(!is_array($input)||!array_is_list($input)||count($input)<1||count($input)>100)fail(400,'Vælg mellem 1 og 100 gallerier');
@@ -92,11 +110,12 @@ function create_gallery_invitation(array $b): array {
     $token=bin2hex(random_bytes(32));$hash=hash('sha256',$token);$first=$selected[0];
     $db->beginTransaction();
     try{
-        query('INSERT INTO invitations(token,email,name,gallery_id,upload,download,gps,expires) VALUES(?,?,?,?,?,?,?,?)',[$hash,$mail,$name,$first['gallery_id'],(int)$first['upload'],(int)$first['download'],(int)$first['gps'],time()+604800]);
+        if(reusable_invitations_ready())query('INSERT INTO invitations(token,email,phone,name,gallery_id,upload,download,gps,expires) VALUES(?,?,?,?,?,?,?,?,?)',[$hash,$mail,$number,$name,$first['gallery_id'],(int)$first['upload'],(int)$first['download'],(int)$first['gps'],time()+604800]);
+        else query('INSERT INTO invitations(token,email,name,gallery_id,upload,download,gps,expires) VALUES(?,?,?,?,?,?,?,?)',[$hash,$mail,$name,$first['gallery_id'],(int)$first['upload'],(int)$first['download'],(int)$first['gps'],time()+604800]);
         if(gallery_permissions_ready())foreach($selected as $choice)query('INSERT INTO invitation_galleries(token,gallery_id,upload,edit_metadata,download,gps) VALUES(?,?,?,?,?,?)',[$hash,$choice['gallery_id'],(int)$choice['upload'],(int)$choice['edit'],(int)$choice['download'],(int)$choice['gps']]);
         $db->commit();
     }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
-    return ['path'=>$base.'/?invite='.$token,'expires_days'=>7,'galleries'=>$selected];
+    return ['path'=>$base.'/?invite='.$token,'expires_days'=>7,'reusable'=>reusable_invitations_ready(),'galleries'=>$selected];
 }
 function photo(string $id, ?string $permission=null): array {
     $p=one('SELECT * FROM photos WHERE id=?',[$id]); if (!$p) fail(404,'Foto findes ikke');
@@ -127,6 +146,26 @@ function upload_file(int $max): array {
     if ($f['error']===UPLOAD_ERR_INI_SIZE || $f['error']===UPLOAD_ERR_FORM_SIZE) fail(413,'Filen er for stor');
     if ($f['error']!==UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) fail(400,'Upload mislykkedes');
     if (filesize($f['tmp_name'])>$max) fail(413,'Filen er for stor'); return $f;
+}
+function upload_video(array $f,string $gallery,array $u): never {
+    global $private;
+    // Pure container inspection/poster helpers. This does not call the importer,
+    // read its config, or open a source database.
+    if(!is_file($private.'/lychee-import.php'))fail(503,'Videomodulet mangler i den private installation');
+    require_once $private.'/lychee-import.php';
+    try{lychee_video_info($f['tmp_name']);}catch(RuntimeException){fail(400,'Filen er ikke en understøttet MP4-video eller er beskadiget');}
+    $digest=hash_file('sha256',$f['tmp_name']);
+    if(one('SELECT id FROM photos WHERE gallery_id=? AND digest=?',[$gallery,$digest]))fail(409,'Videoen findes allerede');
+    $id=uid();$paths=[image_path($id,'original'),image_path($id,'view'),image_path($id,'thumb')];
+    try {
+        lychee_video_poster($paths);
+        if(!move_uploaded_file($f['tmp_name'],$paths[0]))throw new RuntimeException('Kunne ikke gemme videoen');
+        chmod($paths[0],0600);
+        $filename=basename(str_replace('\\','/',(string)$f['name']));
+        $filename=mb_substr(preg_replace('/[\x00-\x1f\x7f]/u','',$filename)?:'video.mp4',0,200);
+        query('INSERT INTO photos(id,gallery_id,title,filename,mime,uploader,uploaded,taken,`precision`,place,lat,lon,digest) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$gallery,pathinfo($filename,PATHINFO_FILENAME),$filename,'video/mp4',$u['id'],stamp(),'','unknown','',null,null,$digest]);
+    }catch(Throwable $e){foreach($paths as $path)if(is_file($path))unlink($path);if($e instanceof PDOException&&$e->getCode()==='23000')fail(409,'Videoen findes allerede');throw $e;}
+    send(['id'=>$id]);
 }
 function image_path(string $id,string $suffix): string {
     global $private; if (!preg_match('/^[a-f0-9]{32}$/D',$id)) fail(404,'Foto findes ikke');
@@ -382,7 +421,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php')]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -407,9 +446,9 @@ function route(string $method,string $path): never {
         login_user($u);
     }
     if ($method==='POST' && $path==='/login') {
-        $b=body();$mail=email($b);throttle('login:'.($_SERVER['REMOTE_ADDR']??''),30);throttle('account:'.$mail);
-        $u=one('SELECT * FROM users WHERE email=?',[$mail]);$pw=$b['password']??'';
-        if (!is_string($pw) || !$u || !password_verify($pw,$u['password'])) fail(401,'Forkert e-mail eller adgangskode');
+        $b=body();$number=array_key_exists('phone',$b)?phone($b):null;$mail=$number===null?email($b):null;throttle('login:'.($_SERVER['REMOTE_ADDR']??''),30);throttle('account:'.($number??$mail));
+        $u=$number!==null?(reusable_invitations_ready()?one('SELECT * FROM users WHERE phone=?',[$number]):null):one('SELECT * FROM users WHERE email=?',[$mail]);$pw=$b['password']??'';
+        if (!is_string($pw) || !$u || !password_verify($pw,$u['password'])) fail(401,'Forkert e-mail, telefonnummer eller adgangskode');
         if (password_needs_rehash($u['password'],PASSWORD_DEFAULT)) {$newHash=password_hash($pw,PASSWORD_DEFAULT);query('UPDATE users SET password=? WHERE id=? AND password=?',[$newHash,$u['id'],$u['password']]);$u['password']=$newHash;}
         login_user($u);
     }
@@ -417,20 +456,33 @@ function route(string $method,string $path): never {
     if ($method==='POST' && $path==='/accept') {
         $b=body();throttle('invite:'.($_SERVER['REMOTE_ADDR']??''));$hash=hash('sha256',text($b,'token',200,true));
         $db->beginTransaction();$inv=one('SELECT * FROM invitations WHERE token=? AND expires>? FOR UPDATE',[$hash,time()]);
-        if (!$inv) fail(400,'Invitationen er udløbet eller brugt');
+        if (!$inv) fail(400,'Invitationen er udløbet eller tilbagekaldt');
+        $reusable=reusable_invitations_ready();
+        if(!empty($inv['accepted_user_id'])) {
+            if(!$reusable)fail(503,'Invitationens opgradering er ikke afsluttet');
+            $u=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$inv['accepted_user_id']]);
+            if(!$u||lg_security_member_deleted($u['id'],true))fail(400,'Invitationen er ikke længere aktiv');
+            if(!is_string($b['password']??null)||!password_verify($b['password'],$u['password']))fail(401,'Brug din eksisterende adgangskode');
+            // Reopening is authentication only: never restore revoked grants.
+            $db->commit();login_user($u);
+        }
         $assignments=[];
         if(one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='invitation_galleries'"))$assignments=rows('SELECT gallery_id,upload,edit_metadata AS `edit`,download,gps FROM invitation_galleries WHERE token=? ORDER BY gallery_id FOR UPDATE',[$hash]);
         if($assignments&&!gallery_permissions_ready())fail(503,'Invitationens rettigheder kræver 006_gallery_permissions.sql');
         if(!$assignments)$assignments=[array_merge($inv,['edit'=>0])];
-        $u=one('SELECT * FROM users WHERE email=? FOR UPDATE',[$inv['email']]);
+        $number=$inv['phone']??null;
+        $u=$number!==null?one('SELECT * FROM users WHERE phone=? FOR UPDATE',[$number]):one('SELECT * FROM users WHERE email=? FOR UPDATE',[$inv['email']]);
+        if($u&&lg_security_member_deleted($u['id'],true))fail(400,'Invitationen er ikke længere aktiv');
         if ($u) {if (!is_string($b['password']??null) || !password_verify($b['password'],$u['password'])) fail(401,'Brug din eksisterende adgangskode');}
-        else { $u=['id'=>uid(),'email'=>$inv['email'],'name'=>$inv['name'],'admin'=>0,'password'=>new_password($b)];
-            query('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)',[$u['id'],$u['email'],$u['name'],$u['password']]); }
+        else { $u=['id'=>uid(),'email'=>$inv['email'],'phone'=>$number,'name'=>$inv['name'],'admin'=>0,'password'=>new_password($b)];
+            if($reusable)query('INSERT INTO users(id,email,phone,name,password,admin) VALUES(?,?,?,?,?,0)',[$u['id'],$u['email'],$number,$u['name'],$u['password']]);
+            else query('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)',[$u['id'],$u['email'],$u['name'],$u['password']]); }
         foreach($assignments as $choice){
             query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$choice['gallery_id'],$u['id'],$choice['upload'],$choice['download'],$choice['gps']]);
             if(gallery_permissions_ready())gallery_editor_set($choice['gallery_id'],$u['id'],(bool)$choice['edit']);
         }
-        query('DELETE FROM invitations WHERE token=?',[$hash]);$db->commit();login_user($u);
+        if($reusable)query('UPDATE invitations SET accepted_user_id=? WHERE token=?',[$u['id'],$hash]);
+        else query('DELETE FROM invitations WHERE token=?',[$hash]);$db->commit();login_user($u);
     }
     lg_security_route_pre($method,$path);
     $u=user();
@@ -492,8 +544,12 @@ function route(string $method,string $path): never {
             unset($p);send(['photos'=>$ps,'permissions'=>['edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
         }
         if ($method==='POST') {
-            $f=upload_file(25*1024*1024);$tmp=$f['tmp_name'];$info=@getimagesize($tmp);
-            if (!$info || !in_array($info[2],[IMAGETYPE_JPEG,IMAGETYPE_PNG,IMAGETYPE_WEBP],true)) fail(400,'Brug JPEG, PNG eller WebP');
+            if(empty($_FILES)&&!empty($_SERVER['CONTENT_LENGTH']))fail(413,'Webhotellets uploadgrænse er for lav, eller uploaden er ufuldstændig');
+            $f=upload_file(100*1024*1024);$tmp=$f['tmp_name'];
+            if(strtolower(pathinfo((string)$f['name'],PATHINFO_EXTENSION))==='mp4')upload_video($f,$g,$u);
+            if(filesize($tmp)>25*1024*1024)fail(413,'Billeder må højst være 25 MB; MP4 må være 100 MB');
+            $info=@getimagesize($tmp);
+            if (!$info || !in_array($info[2],[IMAGETYPE_JPEG,IMAGETYPE_PNG,IMAGETYPE_WEBP],true)) fail(400,'Brug JPEG, PNG, WebP eller MP4');
             // Bound decoding memory for ordinary shared hosting.
             $pixels=$info[0]*$info[1];$limit=ini_get('memory_limit');$bytes=(int)$limit;
             if (str_ends_with(strtolower($limit),'g')) $bytes*=1073741824;elseif(str_ends_with(strtolower($limit),'m'))$bytes*=1048576;elseif(str_ends_with(strtolower($limit),'k'))$bytes*=1024;
@@ -553,6 +609,13 @@ function route(string $method,string $path): never {
         else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);
         if(!empty($b['view'])&&$edit!==null)gallery_editor_set($g,$id,$edit);
         $db->commit();send(['ok'=>true]);
+    }
+    if($method==='GET' && $path==='/admin/invitations') {
+        if(!reusable_invitations_ready())fail(503,'Invitationsoversigten kræver migrering 007');
+        send(rows('SELECT token AS id,name,email,phone,expires,accepted_user_id IS NOT NULL AS accepted FROM invitations ORDER BY expires DESC LIMIT 500'));
+    }
+    if($method==='DELETE' && preg_match('~^/admin/invitations/([a-f0-9]{64})$~D',$path,$m)) {
+        query('DELETE FROM invitations WHERE token=?',[$m[1]]);send(['ok'=>true]);
     }
     if($method==='POST' && $path==='/admin/invitations') {
         send(create_gallery_invitation(body()));
@@ -631,7 +694,8 @@ try {
         echo '<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#416c57"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="LexGalleri"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>LexGalleri · Vores fælles minder</title><link rel="manifest" href="'.$asset.'/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="'.$asset.'/static/icon.svg"><link rel="apple-touch-icon" sizes="180x180" href="'.$asset.'/static/apple-touch-icon.png"><link rel="stylesheet" href="'.$asset.'/static/style.css?v=20261028-accounts"><script src="'.$asset.'/static/qrcode.js?v=2.0.4" defer></script><script src="'.$asset.'/static/app.js?v=20261028-accounts" defer></script><script src="'.$asset.'/static/pwa.js?v=20261028-accounts" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';exit;
     }
     if(!str_starts_with($path,'/api/'))fail(404,'Ikke fundet');
-    if((int)($_SERVER['CONTENT_LENGTH']??0)>26*1024*1024)fail(413,'Upload er for stor');
+    $galleryUpload=$method==='POST'&&preg_match('~^/api/galleries/[a-f0-9]{32}/photos$~D',$path);
+    if((int)($_SERVER['CONTENT_LENGTH']??0)>($galleryUpload?101:26)*1024*1024)fail(413,'Upload er for stor');
     if(!in_array($method,['GET','HEAD','OPTIONS'],true)) {
         if(($_SERVER['HTTP_SEC_FETCH_SITE']??'')==='cross-site')fail(403,'Ugyldig forespørgsel');
         // Require an exact same-origin Origin on browser writes (scheme, host and port).

@@ -126,7 +126,7 @@ SQL);
     if(!$ready)throw new RuntimeException('Move test server did not become ready');
     lm_ok(security_test_complete_admin($owner,lm_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Move admin','email'=>'move-admin@example.test','password'=>'long-move-password']),'lm_request'),'Create move test admin');
     $ownerId=lm_request($owner,'GET','/me')[1]['id'];$pdo->exec('USE `'.$targetName.'`');
-    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'move-guest@example.test','Guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
+    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)');$q->execute([$guestId,'move-guest@example.test','Guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
     lm_ok(lm_request($guest,'POST','/login',['email'=>'move-guest@example.test','password'=>'long-guest-password']),'Move test guest login');
     $pdo->exec(file_get_contents($root.'/private/migrations/002_lychee_import.sql'));
     $status=lm_ok(lm_request($owner,'POST','/admin/lychee-import/scan',[]),'Inventory before optional move migration');$status=lm_steps($owner,$status,'preview');$jobId=$status['job']['id'];

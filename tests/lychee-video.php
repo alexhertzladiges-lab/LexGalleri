@@ -112,7 +112,7 @@ SQL);
     lv_ok(security_test_complete_admin($owner,lv_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Video admin','email'=>'video-admin@example.test','password'=>'long-video-password']),'lv_request'),'Create video test admin');
     $ownerId=lv_request($owner,'GET','/me')[1]['id'];$pdo->exec('USE `'.$targetName.'`');
     $pdo->exec(file_get_contents($root.'/private/migrations/002_lychee_import.sql'));$pdo->exec(file_get_contents($root.'/private/migrations/003_lychee_move.sql'));
-    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'video-guest@example.test','Video guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
+    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)');$q->execute([$guestId,'video-guest@example.test','Video guest',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
     lv_ok(lv_request($guest,'POST','/login',['email'=>'video-guest@example.test','password'=>'long-guest-password']),'Video guest login');
     $status=lv_ok(lv_request($owner,'POST','/admin/lychee-import/scan',[]),'Build MP4 move preview');$status=lv_steps($owner,$status,'preview');$jobId=$status['job']['id'];
     lv_assert((int)$status['job']['totals']['unsupported']===0,'MP4 originals are recognized during preview');

@@ -20,10 +20,10 @@ function remove_tree(string $path):void {foreach(scandir($path) as $p){if($p==='
 try {
     $pdo->exec('CREATE DATABASE `'.$database.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$pdo->exec('USE `'.$database.'`');
     $config=['db_host'=>$host,'db_port'=>$port,'db_name'=>$database,'db_user'=>$dbuser,'db_password'=>$pw,'base_path'=>'/LexGalleri','secure_cookies'=>false,'setup_token'=>str_repeat('test-setup-',5)];
-    file_put_contents($temp.'/config/config.php','<?php return '.var_export($config,true).';');copy($root.'/private/app.php',$temp.'/app.php');copy($root.'/private/security.php',$temp.'/security.php');copy($root.'/private/schema.sql',$temp.'/schema.sql');
+    file_put_contents($temp.'/config/config.php','<?php return '.var_export($config,true).';');copy($root.'/private/app.php',$temp.'/app.php');copy($root.'/private/security.php',$temp.'/security.php');copy($root.'/private/schema.sql',$temp.'/schema.sql');copy($root.'/private/lychee-import.php',$temp.'/lychee-import.php');
     $httpPort=(int)(getenv('TEST_HTTP_PORT')?:8765);$originBase='http://127.0.0.1:'.$httpPort;
     $env=getenv();$env['LEXGALLERI_PRIVATE']=$temp;
-    $server=proc_open([PHP_BINARY,'-d','upload_max_filesize=25M','-d','post_max_size=26M','-d','memory_limit=256M','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
+    $server=proc_open([PHP_BINARY,'-d','upload_max_filesize=101M','-d','post_max_size=102M','-d','memory_limit=256M','-S','127.0.0.1:'.$httpPort,$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Could not start PHP server');
     $owner=client();$guest=client();$stranger=client();$ready=false;
     for($i=0;$i<50;$i++){usleep(100000);try{if(request($owner,'GET','/status')[0]===200){$ready=true;break;}}catch(Throwable){}}
@@ -63,7 +63,7 @@ try {
     $r=request($owner,'POST','/admin/invitations',['email'=>'guest@example.test','name'=>'Gæst','gallery_id'=>$g]);$token=explode('=',$r[1]['path'])[1];
     assertion(str_starts_with($r[1]['path'],'/LexGalleri/?invite='),'Invitation uses subfolder');
     assertion(request($guest,'POST','/accept',['token'=>$token,'password'=>'long-guest-password'])[0]===200,'Guest accepts invitation');
-    assertion(request($guest,'POST','/accept',['token'=>$token,'password'=>'long-guest-password'])[0]===400,'Invitation only once');
+    assertion(request($guest,'POST','/accept',['token'=>$token,'password'=>'long-guest-password'])[0]===200,'Invitation can reopen with the same password');
     assertion(count(request($guest,'GET','/galleries')[1])===1,'Gallery list filtered');
     assertion(request($guest,'GET',"/galleries/$hidden/photos")[0]===403,'Other gallery hidden');
     assertion(request($guest,'GET',"/photos/$id/image")[0]===200,'Allowed thumbnail');
@@ -90,6 +90,29 @@ try {
     assertion(curl_getinfo($owner,CURLINFO_RESPONSE_CODE)===403,'Missing Origin denied');
     file_put_contents($temp.'/bad.txt','This is not an image');
     assertion(request($owner,'POST',"/galleries/$g/photos",['file'=>new CURLFile($temp.'/bad.txt','image/jpeg','fake.jpg')],true)[0]===400,'Fake image rejected');
+    $video=base64_decode(file_get_contents($root.'/tests/fixtures/tiny.mp4.b64'),true);file_put_contents($temp.'/test.mp4',$video);
+    $videoUpload=fn($file='test.mp4',$name='familie.mp4')=>['file'=>new CURLFile($temp.'/'.$file,'video/mp4',$name)];
+    assertion(request($stranger,'POST',"/galleries/$g/photos",$videoUpload(),true)[0]===401,'Anonymous callers cannot upload MP4');
+    assertion(request($guest,'POST',"/galleries/$g/photos",$videoUpload(),true)[0]===403,'Revoked gallery access denies MP4 upload');
+    assertion(request($owner,'POST',"/galleries/$g/photos",$videoUpload('bad.txt','fake.mp4'),true)[0]===400,'Filename and declared MIME cannot disguise a fake MP4');
+    $beforeFiles=count(glob($temp.'/originals/*'));$beforeRows=(int)$pdo->query('SELECT COUNT(*) FROM photos')->fetchColumn();
+    $pdo->exec("CREATE TRIGGER synthetic_video_failure BEFORE INSERT ON photos FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Synthetic upload failure'");
+    assertion(request($owner,'POST',"/galleries/$g/photos",$videoUpload(),true)[0]===500,'Database insertion failure is reported for MP4 upload');$pdo->exec('DROP TRIGGER synthetic_video_failure');
+    assertion(count(glob($temp.'/originals/*'))===$beforeFiles&&count(glob($temp.'/previews/*'))===$beforeFiles&&count(glob($temp.'/thumbnails/*'))===$beforeFiles&&(int)$pdo->query('SELECT COUNT(*) FROM photos')->fetchColumn()===$beforeRows,'Failed MP4 insertion removes original and both poster files');
+    $r=request($owner,'POST',"/galleries/$g/photos",$videoUpload(),true);assertion($r[0]===200,'Direct MP4 upload succeeds');if($r[0]!==200)throw new RuntimeException(json_encode($r));$vid=$r[1]['id'];
+    assertion(file_get_contents($temp.'/originals/'.$vid.'.bin')===$video&&getimagesize($temp.'/previews/'.$vid.'.jpg')[2]===IMAGETYPE_JPEG,'Uploaded MP4 preserves original bytes and creates a JPEG poster');
+    assertion(request($owner,'GET',"/photos/$vid/video")[1]===$video,'Uploaded video streams through the protected endpoint');
+    assertion(request($owner,'POST',"/galleries/$g/photos",$videoUpload(),true)[0]===409,'Duplicate MP4 upload is rejected');
+    request($owner,'PUT','/admin/grants',['gallery_id'=>$g,'user_id'=>$guestId,'view'=>true,'upload'=>true,'download'=>true]);
+    assertion(request($guest,'GET',"/photos/$vid/video")[0]===403,'A direct upload retains the video GPS protection');
+    request($owner,'PUT','/admin/grants',['gallery_id'=>$g,'user_id'=>$guestId,'view'=>true,'upload'=>true,'download'=>true,'gps'=>true]);
+    assertion(request($guest,'GET',"/photos/$vid/video")[1]===$video,'Download and GPS grant allow direct-upload playback');
+    // Exact 100 MiB boundary with one legal MP4 free box; no decoded large video.
+    $big=fopen($temp.'/large.mp4','wb');fwrite($big,$video);$padding=100*1024*1024-strlen($video);fwrite($big,pack('Na4',$padding,'free'));ftruncate($big,100*1024*1024);fclose($big);
+    assertion(request($guest,'POST',"/galleries/$g/photos",$videoUpload('large.mp4'),true)[0]===200,'An authorized member can upload a valid MP4 of exactly 100 MiB');
+    file_put_contents($temp.'/large.mp4','X',FILE_APPEND);
+    assertion(request($guest,'POST',"/galleries/$g/photos",$videoUpload('large.mp4'),true)[0]===413,'A video one byte over 100 MiB is rejected');
+    assertion(request($owner,'POST',"/galleries/$g/photos",$videoUpload('large.mp4','large.jpg'),true)[0]===413,'Large image disguises cannot bypass the size policy');
     $theme=['version'=>1,'name'=>'Hav','colors'=>['background'=>'#f2f6f8','surface'=>'#ffffff','text'=>'#203e50','accent'=>'#336b87'],'font'=>'sans','radius'=>14,'density'=>'comfortable'];
     file_put_contents($temp.'/theme.json',json_encode($theme));
     $tid=request($owner,'POST','/admin/themes',['file'=>new CURLFile($temp.'/theme.json','application/json','theme.json')],true)[1]['id'];

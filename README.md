@@ -10,7 +10,7 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 
 ## Funktioner
 
-- Administrator, gæstekonti og personlige engangsinvitationer, som udløber efter 7 dage.
+- Administrator, gæstekonti og personlige invitationer via e-mail eller dansk telefonnummer, som udløber efter 7 dage.
 - **Min profil** med navn og e-mail. Admin kan se og redigere egne og medlemmers profiler samt sætte en ny adgangskode. Eksisterende adgangskoder vises aldrig.
 - Obligatorisk Authenticator-login for administratorer med TOTP og engangskoder til gendannelse. Se [ACCOUNTS.md](ACCOUNTS.md) for opsætning, profiler og opdatering.
 - Separat se-, upload-, originaldownload- og GPS-adgang pr. bruger og galleri.
@@ -26,7 +26,7 @@ Har du **Lychee 6.6.12**, kan admin importere fra database og lokale billed- og 
 - Første admin oprettes med en privat opsætningsnøgle. Installationen opretter selv databasens tabeller.
 - Sessionsfiler, billeder og konfiguration ligger uden for `public_html`.
 - Import fra Lychee 6.6.12 med prøvevisning og valg mellem kopiering og flytning af originaler. Flytning på samme filsystem genbruger originalens indhold mellem albummer.
-- MP4 fra Lychee afspilles med videokontroller på mobil og pc. Afspilning kræver både download- og GPS-adgang, fordi den bruger den uændrede original; admin har adgang.
+- Direkte MP4-upload på op til 100 MiB pr. fil samt MP4 fra Lychee afspilles med videokontroller på mobil og pc. Afspilning kræver både download- og GPS-adgang, fordi den bruger den uændrede original; admin har adgang.
 - Adgangskoder hashes med PHP `password_hash`; databaseforespørgsler bruger PDO-parametre. Loginforsøg begrænses i databasen på tværs af PHP-processer.
 
 Hvis gallerisvaret mangler videoflaget eller melder det som falsk, men gæsten har både download- og GPS-adgang, kontrollerer appen adgangen direkte ved videoens beskyttede endpoint med en HEAD-forespørgsel. Afspilleren åbnes kun efter et svar med status 200 og typen `video/mp4`. Der hentes ingen videobytes ved kontrollen. Serverafvisning, udløbet login, utilgængelig video og forbindelsesfejl vises særskilt; kontrollen giver ingen nye rettigheder.
@@ -94,3 +94,7 @@ Billedbehandling sker under upload og er begrænset af webhotellets PHP-hukommel
 Lychee-importen accepterer MP4 på højst 2 GiB på 64-bit PHP. Den behandler store filer i begrænsede datastykker og bevarer originalen uden genkodning; der kræves ingen ffmpeg. Videoer får et neutralt videomotiv. Afspilning afhænger af browserens understøttelse af filens kodek; originaldownload kan bruges, hvis den ikke kan afspilles. Gæster med kun se-adgang ser videomotiv og titel.
 
 Den gamle Python-version findes i Git-historikken, men bruges ikke til denne installation. Der er ingen automatisk migrering af data fra Python-prototypen. Repositoryet har fortsat ingen open source-licens.
+
+## Telefoninvitationer, genbesøg og MP4-upload
+
+Se [den samlede opgraderingsvejledning](installation/telefon-mp4/INSTALLER.md) og [teststatus](docs/TELEFON_MP4_KONTROL.md). Links kan åbnes igen med samme kontos adgangskode indtil tilbagekaldelse eller udløb efter 7 dage. Genbesøg genskaber aldrig fjernet adgang. Den offentlige FTPS-installation alene opgraderer ikke private filer eller databasen.

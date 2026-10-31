@@ -180,7 +180,7 @@ PHP;
     li_ok(security_test_complete_admin($owner,li_request($owner,'POST','/setup',['token'=>$config['setup_token'],'name'=>'Import admin','email'=>'import-admin@example.test','password'=>'long-import-password']),'li_request'),'Admin setup');
     $ownerId=li_request($owner,'GET','/me')[1]['id'];
     $pdo->exec('USE `'.$targetName.'`');
-    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users VALUES(?,?,?,?,0)');$q->execute([$guestId,'guest@example.test','Gæst',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
+    $guestId=bin2hex(random_bytes(16));$q=$pdo->prepare('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,0)');$q->execute([$guestId,'guest@example.test','Gæst',password_hash('long-guest-password',PASSWORD_DEFAULT)]);
     li_ok(li_request($guest,'POST','/login',['email'=>'guest@example.test','password'=>'long-guest-password']),'Guest login');
     li_assert(li_request($anonymous,'GET','/admin/lychee-import')[0]===401,'Anonymous cannot inspect importer');
     li_assert(li_request($guest,'GET','/admin/lychee-import')[0]===403,'Guest cannot inspect source metadata');

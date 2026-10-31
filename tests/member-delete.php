@@ -50,13 +50,13 @@ try{
     um_assert(um_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>true],'https://evil.example')[0]===403,'Cross-origin member deletion is denied');
     um_assert(um_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>false])[0]===400,'An explicit confirmation is required');
     um_assert(um_request($admin,'DELETE','/admin/users/'.$adminId,['confirm'=>true])[0]===409,'The active administrator is protected from deletion');
-    $anotherAdmin=str_repeat('a',32);um_query('INSERT INTO users VALUES(?,?,?,?,1)',[$anotherAdmin,'protected-admin@example.test','Protected admin',password_hash('long-protected-password',PASSWORD_DEFAULT)]);
+    $anotherAdmin=str_repeat('a',32);um_query('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,1)',[$anotherAdmin,'protected-admin@example.test','Protected admin',password_hash('long-protected-password',PASSWORD_DEFAULT)]);
     um_assert(um_request($admin,'DELETE','/admin/users/'.$anotherAdmin,['confirm'=>true])[0]===409,'Other administrator accounts are protected too');
     um_assert(um_request($admin,'DELETE','/admin/users/'.str_repeat('f',32),['confirm'=>true])[0]===404,'Unknown accounts are not acknowledged as deleted');
     $pdo->exec("CREATE TRIGGER synthetic_member_failure BEFORE UPDATE ON users FOR EACH ROW BEGIN IF OLD.id='$memberId' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Synthetic member deletion failure'; END IF; END");
     um_assert(um_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>true])[0]===500,'A database failure is not acknowledged as success');
     um_assert(um_count('SELECT COUNT(*) FROM grants WHERE user_id=?',[$memberId])===2&&um_count('SELECT COUNT(*) FROM favorites WHERE user_id=?',[$memberId])===1,'Failure rolls back membership and favorites changes');
-    um_assert(um_count('SELECT COUNT(*) FROM invitations WHERE email=?',['original-member@example.test'])===1&&um_count('SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?',[$memberId])===1,'Failure preserves invitations and recovery data');
+    um_assert(um_count('SELECT COUNT(*) FROM invitations WHERE email=?',['original-member@example.test'])===2&&um_count('SELECT COUNT(*) FROM user_recovery_codes WHERE user_id=?',[$memberId])===1,'Failure preserves invitations and recovery data');
     um_assert(um_count('SELECT session_version FROM user_security WHERE user_id=?',[$memberId])===$version&&um_request($member,'GET','/me')[0]===200,'Failure preserves the existing session and security epoch');
     um_assert(um_count('SELECT COUNT(*) FROM settings WHERE `key`=?',['deleted_user_'.$memberId])===0,'Failure leaves no deletion marker');$pdo->exec('DROP TRIGGER synthetic_member_failure');
     $deleted=um_ok(um_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>true]),'Admin confirms member deletion');um_assert($deleted===['ok'=>true,'id'=>$memberId],'Successful acknowledgment identifies only the selected account');

@@ -214,19 +214,28 @@ function lg_security_profile(array $u): array {
 }
 function lg_security_update_profile(array $actor,string $id,array $b): never {
     global $db;
-    foreach(array_keys($b) as $key)if(!in_array($key,['name','email','password','current_password','mfa_code'],true))fail(400,'Ugyldigt profilfelt');
-    if(!array_key_exists('name',$b)&&!array_key_exists('email',$b)&&!array_key_exists('password',$b))fail(400,'Angiv de oplysninger, der skal ændres');
-    $name=array_key_exists('name',$b)?text($b,'name',100,true):null;$mail=array_key_exists('email',$b)?email($b):null;$password=array_key_exists('password',$b)?new_password($b):null;
+    foreach(array_keys($b) as $key)if(!in_array($key,['name','email','phone','password','current_password','mfa_code'],true))fail(400,'Ugyldigt profilfelt');
+    if(!array_key_exists('name',$b)&&!array_key_exists('email',$b)&&!array_key_exists('phone',$b)&&!array_key_exists('password',$b))fail(400,'Angiv de oplysninger, der skal ændres');
+    $name=array_key_exists('name',$b)?text($b,'name',100,true):null;$mail=array_key_exists('email',$b)&&text($b,'email',254)!==''?email($b):null;$password=array_key_exists('password',$b)?new_password($b):null;
     lg_security_reauth_throttle($actor['id']);
     $db->beginTransaction();[$freshActor,$actorState]=lg_security_reauthenticate($actor,$b);
     $target=one('SELECT * FROM users WHERE id=? FOR UPDATE',[$id]);if(!$target || lg_security_member_deleted($id,true))fail(404,'Medlemmet findes ikke');
-    $targetState=lg_security_state($id,true);$newMail=$mail??$target['email'];
+    $targetState=lg_security_state($id,true);$newMail=array_key_exists('email',$b)?$mail:$target['email'];
+    $number=$target['phone']??null;
+    if(array_key_exists('phone',$b)){
+        if(!reusable_invitations_ready())fail(503,'Telefonprofiler kræver migrering 007');
+        $number=text($b,'phone',30)!==''?phone($b):null;
+    }
+    if(($target['admin']&&!$newMail)||(!$newMail&&!$number))fail(400,'Angiv en e-mail eller et telefonnummer. Admin skal have e-mail');
+    if($number&&one('SELECT id FROM users WHERE phone=? AND id<>?',[$number,$id]))fail(409,'Telefonnummeret bruges allerede');
     if(one('SELECT id FROM users WHERE email=? AND id<>?',[$newMail,$id]))fail(409,'E-mailadressen bruges allerede');
-    try{query('UPDATE users SET name=?,email=?,password=? WHERE id=?',[$name??$target['name'],$newMail,$password??$target['password'],$id]);}
-    catch(PDOException $e){if($e->getCode()==='23000')fail(409,'E-mailadressen bruges allerede');throw $e;}
+    try{if(reusable_invitations_ready())query('UPDATE users SET name=?,email=?,phone=?,password=? WHERE id=?',[$name??$target['name'],$newMail,$number,$password??$target['password'],$id]);
+        else query('UPDATE users SET name=?,email=?,password=? WHERE id=?',[$name??$target['name'],$newMail,$password??$target['password'],$id]);}
+    catch(PDOException $e){if($e->getCode()==='23000')fail(409,'Kontaktoplysningerne bruges allerede');throw $e;}
+    if($number!==($target['phone']??null))query('DELETE FROM invitations WHERE phone=?',[$target['phone']??null]);
     if($newMail!==$target['email'])query('DELETE FROM invitations WHERE email=?',[$target['email']]);
     query('UPDATE user_security SET session_version=session_version+1,updated=? WHERE user_id=?',[stamp(),$id]);$db->commit();
-    $target['name']=$name??$target['name'];$target['email']=$newMail;
+    $target['name']=$name??$target['name'];$target['email']=$newMail;$target['phone']=$number;
     $self=$id===$actor['id'];if($self)lg_security_forget_session();
     send(['user'=>safe_user($target),'reauthentication_required'=>$self]);
 }
@@ -247,7 +256,8 @@ function lg_security_delete_member(array $actor,string $id,array $b): never {
         if($id===$fresh['id'] || $target['admin'])fail(409,'Administratorkonti kan ikke slettes her');
         if(lg_security_member_deleted($id,true)){$db->commit();send(['ok'=>true,'id'=>$id]);}
         $now=stamp();lg_security_state($id,true);
-        query('DELETE FROM invitations WHERE email=?',[$target['email']]);
+        if(reusable_invitations_ready()){query('DELETE FROM invitations WHERE accepted_user_id=? OR email=? OR phone=?',[$id,$target['email'],$target['phone']??null]);query('UPDATE users SET phone=NULL WHERE id=?',[$id]);}
+        else query('DELETE FROM invitations WHERE email=?',[$target['email']]);
         query('DELETE FROM grants WHERE user_id=?',[$id]);
         query('DELETE FROM favorites WHERE user_id=?',[$id]);
         query('DELETE FROM user_recovery_codes WHERE user_id=?',[$id]);

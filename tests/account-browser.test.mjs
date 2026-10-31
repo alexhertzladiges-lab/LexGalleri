@@ -94,6 +94,7 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       assert(await run("document.querySelector('#content').textContent.includes('Aktiveret') && document.querySelector('#content').textContent.includes('browser-admin@example.test')"));
       assert.equal(await run("document.querySelector('#mfa-key')===null && document.querySelector('.recovery-codes')===null"),true);
     });
+    let phoneLink;
     const changedEmail='browser-member-updated@example.test',changedPassword='browser-member-new-password';
     await t.test('admin edits a member name, email and password through real step-up verification',async()=>{
       await run("document.querySelector('[data-view=people]').click()");await wait(`!!document.querySelector('[data-profile="${site.member_id}"]')`,'family member list');
@@ -103,6 +104,17 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       await wait("!document.querySelector('#modal').open && document.querySelector('.profile-summary')?.textContent.includes('browser-member-updated@example.test')",'saved member profile');
       assert(await run("document.querySelector('.account-profile').textContent.includes('Browser Member Updated')"));
       assert.equal(await run("document.querySelector('#account-edit')===null"),true,'private proof fields are removed after saving');
+    });
+    await t.test('admin creates a telephone invitation with real form validation and can inspect its status',async()=>{
+      await run("document.querySelector('[data-view=people]').click()");await wait("!!document.querySelector('#invite')",'invite action');
+      await run("document.querySelector('#invite').click()");await wait("!!document.querySelector('#invite-contact')",'phone selector');
+      await run("const selector=document.querySelector('#invite-contact');selector.value='phone';selector.dispatchEvent(new Event('change'));const inviteView=document.querySelector('[data-invite-right=view]');inviteView.checked=true;inviteView.dispatchEvent(new Event('change'));const inviteRow=inviteView.closest('fieldset');inviteRow.querySelector('[data-invite-right=upload]').checked=true;");
+      assert(await run("document.querySelector('#invite-email').disabled && !document.querySelector('#invite-email').required && document.querySelector('#invite-phone').required"),'hidden email cannot block a phone invitation');
+      await submit('#invite-form',{name:'Phone Browser Guest',phone:'+45 20 00 00 03'});await wait("!!document.querySelector('#invite-link')",'telephone invitation acknowledgment');
+      phoneLink=await run("document.querySelector('#invite-link').value");assert(phoneLink.startsWith(site.origin+'/LexGalleri/?invite='));
+      assert(await run("document.querySelector('#modal').textContent.includes('åbnes igen')"));
+      await run("document.querySelector('#close-modal').click();document.querySelector('#invitation-list').click()");await wait("!!document.querySelector('[data-revoke-invite]')",'invitation status listing');
+      assert(await run("document.querySelector('#modal').textContent.includes('+4520000003')"));await run("document.querySelector('#close-modal').click()");
     });
     await t.test('returning admin login requires its second factor and accepts a saved recovery code',async()=>{
       await run("document.querySelector('#logout').click()");await wait("!!document.querySelector('#auth')",'logged out');
@@ -119,6 +131,19 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       assert(await run("document.querySelector('.profile-summary').textContent.includes('browser-member-updated@example.test')"));
       assert.equal(await run("document.querySelector('#mfa-replace')===null && document.querySelector('#mfa-recovery-renew')===null"),true);
       assert.equal(await run(`fetch('/LexGalleri/api/admin/users/${site.member_id}').then(r=>r.status)`),403,'member cannot access admin profile API');
+    });
+    await t.test('telephone invitation creates one account, reopens and supports ordinary phone login',async()=>{
+      await run("document.querySelector('#logout').click()");await wait("!!document.querySelector('#auth')",'guest logout');
+      await call('Page.navigate',{url:phoneLink});await wait("document.querySelector('#app').textContent.includes('Du er inviteret.')",'telephone acceptance');
+      await submit('#auth',{password:'browser-phone-long-password'});await wait("!!document.querySelector('[data-gallery]')",'telephone gallery access');
+      await run("document.querySelector('[data-gallery]').click()");await wait("!!document.querySelector('#files')",'member media upload');
+      assert(await run("document.querySelector('#files').accept.includes('video/mp4') && document.querySelector('#content').textContent.includes('100 MB')"));
+      await run("document.querySelector('#logout').click()");await wait("!!document.querySelector('#auth')",'phone logout');
+      await call('Page.navigate',{url:phoneLink});await wait("document.querySelector('#app').textContent.includes('Du er inviteret.')",'reopen invitation');
+      await submit('#auth',{password:'browser-phone-long-password'});await wait("!!document.querySelector('[data-view=profile]')",'reused invitation authenticated');
+      await run("document.querySelector('#logout').click()");await wait("!!document.querySelector('#auth')",'phone normal login');
+      await submit('#auth',{email:'20000003',password:'browser-phone-long-password'});await wait("!!document.querySelector('[data-view=profile]')",'phone login authenticated');
+      await run("document.querySelector('[data-view=profile]').click()");await wait("document.querySelector('.profile-summary')?.textContent.includes('+4520000003')",'telephone profile');
     });
     codes=[];
   }finally{try{if(browser)await browser.close();}finally{await site.close();}}

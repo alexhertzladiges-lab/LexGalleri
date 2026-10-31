@@ -168,3 +168,9 @@ Har du mistet telefonen, kan du logge ind med adgangskoden og en ubrugt reservek
 - **Du har mistet telefonen:** Brug en ubrugt reservekode sammen med adgangskoden til adminlogin, og følg afsnittet om ny telefon. Reservekoder vises ikke i profilens almindelige oplysninger.
 - **Den private nøgle kan ikke oprettes:** Kontrollér PHP's adgang til `config/` og OpenSSL på webhotellet. Bevar en eksisterende `mfa.key`; udskift den ikke med en vilkårlig ny fil.
 - **En profilrettelse afvises:** Kontrollér din nuværende adgangskode, en ubrugt Authenticator-kode som admin og om e-mailadressen allerede bruges af en anden konto.
+
+## Invitation via telefonnummer og genbesøg
+
+Efter [migrering 007 og programopdateringen](installation/telefon-mp4/INSTALLER.md) vælger admin e-mail eller dansk telefonnummer i invitationsdialogen. Kun det valgte felt er påkrævet. Telefonkontoen kan bruge sit telefonnummer og adgangskode ved almindeligt login; e-mail er valgfri. Admin beholder e-maillogin og Authenticator.
+
+Linket er personligt og deles privat af admin. Det bekræfter ikke ejerskab af et telefonnummer, og der sendes ingen automatisk SMS. Første accept binder linket til kontoen og anvender de valgte rettigheder én gang. Genbesøg kræver kontoadgangskoden og ændrer ingen rettigheder. Linket udløber efter syv dage. **Invitationslinks** viser status og mulighed for tilbagekaldelse; eksisterende kontoadgang administreres separat.
