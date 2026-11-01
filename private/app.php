@@ -121,6 +121,79 @@ function photo(string $id, ?string $permission=null): array {
     $p=one('SELECT * FROM photos WHERE id=?',[$id]); if (!$p) fail(404,'Foto findes ikke');
     access($p['gallery_id'],$permission); return $p;
 }
+function storage_limit(): int {
+    $saved=one("SELECT value FROM settings WHERE `key`='storage_limit_bytes'");
+    if(!$saved)return 25000000000;
+    $raw=$saved['value'];if(!is_string($raw)||!preg_match('/^[1-9][0-9]{0,14}$/D',$raw)||(int)$raw>100000000000000)fail(503,'Pladsgrænsen er ugyldig. Kontrollér indstillingen');
+    return (int)$raw;
+}
+function storage_set_limit(array $b): array {
+    user(true);
+    if(array_keys($b)!==['limit_gb'])fail(400,'Angiv kun pladsgrænsen i GB');
+    $raw=$b['limit_gb'];if(!is_int($raw)&&!is_string($raw))fail(400,'Angiv GB som et tal, fx 25 eller 30,5');
+    $raw=str_replace(',','.',trim((string)$raw));
+    if(!preg_match('/^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,3})?$/D',$raw))fail(400,'Angiv GB som et tal, fx 25 eller 30,5');
+    $parts=explode('.',$raw);$bytes=(int)$parts[0]*1000000000+(int)str_pad($parts[1]??'',3,'0')*1000000;
+    if($bytes<1000000||$bytes>100000000000000)fail(400,'Grænsen skal være mellem 0,001 og 100.000 GB');
+    query("INSERT INTO settings(`key`,value) VALUES('storage_limit_bytes',?) ON DUPLICATE KEY UPDATE value=VALUES(value)",[(string)$bytes]);
+    return ['ok'=>true,'limit_bytes'=>$bytes];
+}
+function storage_scan(): array {
+    global $private;
+    $galleries=[];foreach(rows('SELECT id,name FROM galleries ORDER BY name') as $g)$galleries[$g['id']]=['id'=>$g['id'],'name'=>$g['name'],'bytes'=>0,'media_count'=>0];
+    $photos=[];$statement=query('SELECT id,gallery_id FROM photos');
+    while($p=$statement->fetch()){if(isset($galleries[$p['gallery_id']])){$photos[$p['id']]=$p['gallery_id'];$galleries[$p['gallery_id']]['media_count']++;}}
+    $inodes=[];$paths=0;$skipped=0;$changed=0;$visited=0;
+    // Fixed media roots only. Never open config, sessions or another website.
+    $walk=function(string $directory,int $depth=0)use(&$walk,&$inodes,&$paths,&$skipped,&$changed,&$visited,$photos):void{
+        if($depth>8)fail(503,'Mediepladsen indeholder for mange mappeniveauer til én opgørelse');
+        if(is_link($directory)){$skipped++;return;}
+        if(!is_dir($directory))return;
+        if(!is_readable($directory))fail(503,'En mediemappe kan ikke opgøres. Kontrollér læserettighederne');
+        try{$entries=new DirectoryIterator($directory);}catch(UnexpectedValueException){fail(503,'En mediemappe kan ikke opgøres');}
+        foreach($entries as $entry){
+            if($entry->isDot())continue;
+            if(++$visited>200000||memory_get_usage(true)>160*1024*1024)fail(503,'Mediearkivet er for stort til én samlet opgørelse på denne server');
+            $path=$entry->getPathname();clearstatcache(true,$path);$stat=@lstat($path);
+            if(!$stat){$changed++;continue;}
+            $type=$stat['mode']&0170000;
+            if($type===0040000){$walk($path,$depth+1);continue;}
+            if($type!==0100000){$skipped++;continue;}
+            $size=$stat['size'];if(!is_int($size)||$size<0)fail(503,'En filstørrelse kunne ikke opgøres');
+            $paths++;$key=(string)$stat['dev'].':'.(string)$stat['ino'];
+            if(!isset($inodes[$key]))$inodes[$key]=['size'=>$size,'galleries'=>[]];
+            elseif($inodes[$key]['size']!==$size){$changed++;$inodes[$key]['size']=max($inodes[$key]['size'],$size);}
+            $name=$entry->getFilename();$photo=null;
+            if(preg_match('/^([a-f0-9]{32})\.(?:bin|jpg)$/D',$name,$m))$photo=$m[1];
+            elseif(in_array($name,['original.bin','view.jpg','thumb.jpg','receipt.json'],true)&&preg_match('/^[a-f0-9]{32}$/D',basename($directory)))$photo=basename($directory);
+            if($photo!==null&&isset($photos[$photo]))$inodes[$key]['galleries'][$photos[$photo]]=true;
+        }
+    };
+    foreach(['originals','previews','thumbnails','.deletions'] as $name)$walk($private.'/'.$name);
+    $total=0;$shared=0;$other=0;
+    foreach($inodes as $file){
+        if($total>PHP_INT_MAX-$file['size'])fail(503,'Mediepladsen overstiger serverens talgrænse');
+        $total+=$file['size'];if(count($file['galleries'])>1)$shared+=$file['size'];
+        if(!$file['galleries'])$other+=$file['size'];
+        foreach($file['galleries'] as $id=>$present)$galleries[$id]['bytes']+=$file['size'];
+    }
+    return ['version'=>1,'scanned_at'=>time(),'total_bytes'=>$total,'shared_bytes'=>$shared,'other_bytes'=>$other,'stored_files'=>count($inodes),'file_paths'=>$paths,'complete'=>$skipped===0&&$changed===0,'skipped_entries'=>$skipped,'changes_during_scan'=>$changed,'galleries'=>array_values($galleries)];
+}
+function storage_overview(bool $refresh=false): array {
+    global $config;
+    user(true);$limit=storage_limit();
+    if(!$refresh){
+        $saved=one("SELECT value FROM settings WHERE `key`='storage_snapshot_v1'");$snapshot=$saved?json_decode($saved['value'],true):null;
+        if(is_array($snapshot)&&($snapshot['version']??null)===1&&is_int($snapshot['scanned_at']??null)&&$snapshot['scanned_at']<=time()&&$snapshot['scanned_at']>time()-60&&is_int($snapshot['total_bytes']??null)&&is_array($snapshot['galleries']??null))return array_merge($snapshot,['limit_bytes'=>$limit,'cached'=>true]);
+    }
+    $lock='lexgalleri-storage-'.substr(hash('sha256',$config['db_name']),0,32);
+    if((int)query('SELECT GET_LOCK(?,0)',[$lock])->fetchColumn()!==1)fail(409,'En pladsopgørelse er allerede i gang. Prøv igen om lidt');
+    try{
+        $snapshot=storage_scan();
+        query("INSERT INTO settings(`key`,value) VALUES('storage_snapshot_v1',?) ON DUPLICATE KEY UPDATE value=VALUES(value)",[json_encode($snapshot,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR)]);
+        return array_merge($snapshot,['limit_bytes'=>$limit,'cached'=>false]);
+    }finally{query('SELECT RELEASE_LOCK(?)',[$lock]);}
+}
 function default_theme(): array {
     return ['version'=>1,'name'=>'Nordisk','colors'=>['background'=>'#f7f6f2','surface'=>'#ffffff','text'=>'#263b34','accent'=>'#416c57'],'font'=>'sans','radius'=>16,'density'=>'comfortable'];
 }
@@ -456,7 +529,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -635,6 +708,9 @@ function route(string $method,string $path): never {
     }
     if($method==='GET' && $path==='/theme') {$t=one('SELECT value FROM settings WHERE `key`=\'theme\'');send($t?json_decode($t['value'],true):default_theme());}
     if(str_starts_with($path,'/admin/'))user(true);
+    if($method==='GET'&&$path==='/admin/storage')send(storage_overview());
+    if($method==='POST'&&$path==='/admin/storage/refresh'){if(body()!==[])fail(400,'Pladsopgørelsen har ingen parametre');send(storage_overview(true));}
+    if($method==='PUT'&&$path==='/admin/storage/limit')send(storage_set_limit(body()));
     if($method==='GET' && $path==='/admin/users')send(['users'=>array_map('safe_user',rows("SELECT u.* FROM users u WHERE NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))")),'grants'=>rows(gallery_permissions_ready()?'SELECT a.*,EXISTS(SELECT 1 FROM gallery_editors e WHERE e.gallery_id=a.gallery_id AND e.user_id=a.user_id) AS `edit` FROM grants a':'SELECT a.*,0 AS `edit` FROM grants a')]);
     if($method==='PUT' && $path==='/admin/grants') {
         $b=body();$g=text($b,'gallery_id',32,true);$id=text($b,'user_id',32,true);

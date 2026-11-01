@@ -43,6 +43,7 @@ jobs:
           php tests/run.php
           php tests/account-security.php
           php tests/invitations.php
+          php tests/storage-overview.php
           php tests/member-delete.php
           php tests/media-delete.php
           php tests/media-delete-requests.php
@@ -93,6 +94,15 @@ jobs:
         with:
           name: lexgalleri-video-thumbnails-${{ github.sha }}
           path: dist/lexgalleri-video-thumbnails/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Build SQL-free media-space update
+        run: python3 scripts/package-telefon-mp4.py --storage-overview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-storage-overview-${{ github.sha }}
+          path: dist/lexgalleri-storage-overview/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

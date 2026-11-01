@@ -137,3 +137,19 @@ test('verified MFA administrators and password-authenticated members still enter
   const verified=fixture();verified.ctx.reply=owner;await verified.run('authResult(reply,false)');assert.equal(verified.ctx.starts,1);assert.equal(verified.run('me.id'),owner.id);
   const guest=fixture();guest.ctx.reply=member;await guest.run('authResult(reply,true)');assert.equal(guest.ctx.starts,1);assert.equal(guest.run('me.id'),member.id);
 });
+
+
+test('space overview escapes gallery names, distinguishes partial results and keeps over-budget values',()=>{
+  const f=fixture();f.ctx.space={total_bytes:31000000000,limit_bytes:25000000000,scanned_at:1793534400,complete:true,shared_bytes:12,other_bytes:4,galleries:[{id:'a'.repeat(32),name:'<script>unsafe</script>',bytes:1000000000}]};
+  assert.equal(f.run('storagePayloadValid(space)'),true);let html=f.run('storageSummaryMarkup(space)');
+  assert(html.includes('&lt;script&gt;unsafe&lt;/script&gt;')&&!html.includes('<script>unsafe'));
+  assert(html.includes('124 %')&&html.includes('6 GB over grænsen')&&html.includes('value="100"'));
+  f.run('space.complete=false');html=f.run('storageSummaryMarkup(space)');assert(html.includes('Foreløbigt')&&html.includes('Delvis opgørelse')&&!html.includes('6 GB over grænsen'));
+  f.run('space.limit_bytes=0');assert.equal(f.run('storagePayloadValid(space)'),false);
+});
+test('a delayed space response cannot overwrite navigation and members never get the mount',async()=>{
+  const f=fixture();let finish;f.run("view='admin';serverCapabilities={storage_overview:true}");f.element('#storage-panel').innerHTML='Existing page';
+  f.api(()=>new Promise(resolve=>finish=resolve));const pending=f.run("loadStorageSummary('admin')");
+  f.run("view='profile';navigationGeneration++");finish({total_bytes:0,limit_bytes:25000000000,scanned_at:1793534400,complete:true,galleries:[]});await pending;
+  assert.equal(f.element('#storage-panel').innerHTML,'Existing page');f.run('me={...member}');assert.equal(f.run('storageMountMarkup()'),'');
+});

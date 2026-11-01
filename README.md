@@ -102,3 +102,7 @@ Se [den samlede opgraderingsvejledning](installation/telefon-mp4/INSTALLER.md) o
 ### Stillbilleder som videominiaturer
 
 Nye MP4-uploads kan få en rigtig miniature fra videoen, udtrukket lokalt i browseren og gemt som metadatafri JPEG. Admin og redaktører med video-adgang kan også danne en miniature for en eksisterende video under **Info**. Ingen FFmpeg eller ny SQL kræves. Hvis browseren ikke kan afkode videoen, bevares standardikonet. Se [kontrolrapporten](docs/VIDEO_THUMBNAILS_KONTROL.md).
+
+### Medieplads og adminvalgt grænse
+
+Admin kan se samlet filstørrelse og fordeling pr. galleri under Overblik eller Drift og sikkerhed og ændre den samlede visningsramme (25 GB som startværdi). Hardlinks tælles kun én gang i totalen. Det er et overblik over mediefiler, ikke en ændring af webhotellets kvote eller uploadrettigheder. Se [installationsvejledningen](installation/storage-overview/INSTALLER.md) og [kontrolrapporten](docs/STORAGE_OVERVIEW_KONTROL.md). Ingen ny SQL kræves.

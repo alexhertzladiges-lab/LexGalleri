@@ -5,10 +5,12 @@ import shutil
 import sys
 
 root = Path(__file__).resolve().parents[1]
-if sys.argv[1:] not in ([], ['--video-thumbnails']):
+if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview']):
     raise SystemExit('Unknown package option')
 thumbnails = sys.argv[1:] == ['--video-thumbnails']
-out = root / 'dist' / ('lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
+storage = sys.argv[1:] == ['--storage-overview']
+thin = thumbnails or storage
+out = root / 'dist' / ('lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
 if out.exists():
     shutil.rmtree(out)
 files = {str(p.relative_to(root)): str(p.relative_to(root))
@@ -19,11 +21,11 @@ expected = {'.htaccess', 'index.php', 'manifest.webmanifest', 'service-worker.js
             'static/icon.svg', 'static/icon-192.png', 'static/icon-512.png',
             'static/apple-touch-icon.png'}
 assert set(k.removeprefix('public/') for k in files) == expected
-for name in (('app.php',) if thumbnails else ('app.php', 'security.php', 'lychee-import.php')):
+for name in (('app.php',) if thin else ('app.php', 'security.php', 'lychee-import.php')):
     files['private/' + name] = 'private/' + name
-if not thumbnails:
+if not thin:
     files['sql/007_reusable_phone_invitations.sql'] = 'private/migrations/007_reusable_phone_invitations.sql'
-files['INSTALLER.md'] = ('installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
+files['INSTALLER.md'] = ('installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
 sums = []
 for target, source in sorted(files.items()):
     src, dst = root / source, out / target

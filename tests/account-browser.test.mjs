@@ -173,6 +173,24 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       await wait("document.querySelector('#video-thumbnail-status')?.textContent.includes('er gemt')",'persisted replacement frame');
       assert.equal(await run("document.querySelector('#video-thumbnail').disabled"),false);
     });
+    await t.test('admin sees total/gallery media usage and changes the stored capacity on mobile and desktop',async()=>{
+      await run("document.querySelector('#close-modal').click();document.querySelector('[data-view=admin]').click()");
+      await wait("!!document.querySelector('#storage-limit-edit')",'admin media space');
+      assert(await run("document.querySelector('#storage-panel').textContent.includes('25 GB')"));
+      await run("document.querySelector('#storage-detail').open=true");
+      assert(await run("document.querySelectorAll('.storage-gallery').length>=1 && document.querySelector('.storage-gallery').textContent.includes('%')"));
+      for(const width of [320,390,1280]){
+        await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<500});
+        const fits=await run("(()=>{const panel=document.querySelector('#storage-panel');return panel.scrollWidth<=panel.clientWidth+1&&[...panel.querySelectorAll('button')].every(b=>b.getBoundingClientRect().height>=44)})()");assert(fits,'space overview fits and its controls remain tappable at '+width+'px');
+      }
+      await run("document.querySelector('#storage-limit-edit').click()");await wait("!!document.querySelector('#storage-limit-form')",'capacity dialog');
+      await submit('#storage-limit-form',{limit_gb:'30.5'});await wait("!document.querySelector('#modal').open && document.querySelector('#storage-panel')?.textContent.includes('30,5 GB')",'saved capacity');
+      assert.equal(await run("api('/admin/storage').then(d=>d.limit_bytes)"),30500000000);
+      await run("document.querySelector('#admin-area').value='admin-security';document.querySelector('#admin-area').dispatchEvent(new Event('change'))");await wait("document.querySelector('#storage-panel')?.textContent.includes('30,5 GB')",'same capacity under system overview');
+      await run("document.querySelector('[data-view=galleries]').click()");await wait("!!document.querySelector('[data-gallery]')",'return to gallery');
+      await run("document.querySelector('[data-gallery]').click()");await wait("!!document.querySelector('[data-photo]')",'return to video card');
+      await run("document.querySelector('[data-photo]').click()");await wait("!!document.querySelector('#video-thumbnail')",'restore video actions');await run("document.querySelector('#photo-info-toggle').click()");
+    });
     await t.test('logging out during frame extraction cannot submit a delayed thumbnail',async()=>{
       await run("globalThis.__posterPosts=0;globalThis.__posterApi=api;api=async(path,...args)=>{if(path.endsWith('/thumbnail'))globalThis.__posterPosts++;return globalThis.__posterApi(path,...args)};captureVideoThumbnail=()=>new Promise(resolve=>globalThis.__finishPoster=resolve);document.querySelector('#video-thumbnail').click()");
       await wait("typeof globalThis.__finishPoster==='function'",'pending thumbnail extraction');
