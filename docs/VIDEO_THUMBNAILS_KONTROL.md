@@ -59,3 +59,19 @@ Et CI-forsøg på den afsluttende kode fejlede i tastaturtestens optælling af a
 - Lokalt blev 0 tilbageværende engangsdatabaser bekræftet; opgavens MariaDB-proces er stoppet og dens datamappe fjernet. CI fjernede sin engangs-MySQL-container og sit netværk.
 
 Den afsluttende rapportopdatering ændrer kun dokumentation. Pakken indeholder præcis den testede runtime ovenfor. Prøve på de konkrete mobilbrowsere og webhotellets PHP-grænser udføres først ved installation; et ukendt codec kan fortsat give standardikonet som beskrevet.
+
+
+## Offentlig installation gennemført
+
+Efter ejerens besked »app overført, installér resten for mig« blev de 12 offentlige filer installeret den 1. november 2026.
+
+- [Grøn installationskørsel](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41291870334), job `124804602017`, installationscommit `39efbaf78e50ee42e295326bc19ee25e42addb75`.
+- Kildekode låst til den grønne testversion `1d3eba1b28d3cd9b7a1bb09ca47942ff622f3762`, pakkeartefakt `13077028088` og dennes faste SHA-256.
+- Før filændringer blev ejerens private app.php kontrolleret via normal HTTPS-status: kontosikkerhed klar, `video_thumbnails=true` og CSP med lokal blob-video understøttet.
+- FTPS-kontoens offentlige rod blev kontrolleret mod godkendt index.php. Alle 12 offentlige filer blev efterfølgende genlæst via FTPS og stemmer på SHA-256.
+- HTTPS-forside, den installerede app.js med SHA-256 og status for kontosikkerhed og videominiaturer består.
+- [Installationsbevis](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41291870334/artifacts/13077463518), SHA-256 `4b0f26f2347f107582138adff99d58e0b2c9d7b667f0756550579d3e5e350d43`. Kontrolsummer er også gemt i `installation/video-thumbnails/public-installed.json`.
+- Denne installation uploadede ingen private programfiler eller konfiguration og kørte ingen SQL-migreringer. Der blev ikke tilgået eller ændret familiens videoer for at danne en prøve-miniature.
+- Engangsworkflowet er efter afslutning lukket med `if: false`. Ingen merge til main.
+
+Genindlæs appen. Nye MP4-uploads danner automatisk et stillbillede, når browseren kan afkode formatet. Eksisterende videoer opdateres enkeltvis via **Info → Lav miniaturebillede fra video**. En prøve med ejerens konkrete video og mobilbrowser udføres af ejeren; den isolerede browser-/databasetest og installationens læsekontroller er dokumenteret ovenfor.

@@ -11,11 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    if: >-
-      github.repository == 'alexhertzladiges-lab/LexGalleri' &&
-      github.ref == 'refs/heads/feature/lexgalleri-video-thumbnails-v1' &&
-      github.event.before == '01390904a35d3ce96b1c491aeaa683e21009eb17' &&
-      github.event.head_commit.message == 'Install approved LexGalleri video thumbnail public files'
+    # Approval consumed: successful public installation run 41291870334.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
