@@ -11,9 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Owner uploaded private app.php and authorized remaining public installation.
-    if: >-
-      ${{ github.event.before == '56e03241446bc233609295c10be96a61e243d245' && github.event.head_commit.message == 'deploy: install approved storage overview public files' }}
+    # Approval consumed: successful public installation run 41348699671.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:

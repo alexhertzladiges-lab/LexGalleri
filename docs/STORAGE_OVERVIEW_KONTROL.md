@@ -56,4 +56,17 @@ Installationsvejledning: `installation/storage-overview/INSTALLER.md`. Ingen æn
 - [Download pladsopdateringen](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41347531117/artifacts/13100111841): `lexgalleri-storage-overview-e301b275e854a6b15e8e86cbd2f7887d2784e112`, 91.662 bytes. Artefakt-ID `13100111841`, SHA-256 `c55cf94815a8dee5176118f2629b40040977969a220b3e483040f371e67f4ad8`. GitHub-download kræver adgang til repositoryet og udløber 1. december 2026.
 - Lokale engangsdatabaser og testdatabaseserver er ryddet op/stoppet. Ingen produktionsforbindelser, rigtige beskeder, mail eller ændringer på webhotellet.
 
-Status: **klar til installation, ikke installeret**. Ingen SQL, konfigurationsændring eller aktivering af det pauserede design-/nyheds-/aktivitetsarbejde. Første admins virkelige pladsopgørelse og sammenhold med webhotellets tal kan først kontrolleres efter installation; tallene har bevidst forskellig afgrænsning som beskrevet ovenfor.
+Status efter installation nedenfor: **installeret og teknisk efterkontrol bestået**. Ingen SQL, konfigurationsændring eller aktivering af det pauserede design-/nyheds-/aktivitetsarbejde. Første admins virkelige pladsopgørelse og sammenhold med webhotellets tal kan først kontrolleres efter installation; tallene har bevidst forskellig afgrænsning som beskrevet ovenfor.
+
+
+## Installation på lexan.dk, 1. november 2026
+
+Ejeren oplyste, at den private app.php var uploadet, og bad om at fortsætte installationen. En HTTPS-kontrol før offentlig filoverførsel bekræftede setup=false, account_security_ready=true og storage_overview=true. Den uploadede private backend er dermed aktiv med den forventede funktion.
+
+- [Installationskørsel 41348699671](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41348699671): **SUCCESS**, job `124973979135`, installationscommit `fe7a1b7b7f4304b8cf3a1c173641406567bbe1dd`.
+- Præcis den godkendte programversion `e301b275e854a6b15e8e86cbd2f7887d2784e112` blev installeret. Den oprindelige grønne testkørsel, artefaktmetadata, ZIP-kontrolsum og alle 12 offentlige pakkefiler blev kontrolleret før overførsel. 15 FTPS-planprøver bestod igen.
+- Den begrænsede LexGalleri-FTPS-konto blev brugt med krævet TLS, certifikat- og værtskontrol. Den eksisterende offentlige index.php identificerede installationsroden inden ændringer. Kun de 12 tilladte offentlige filer blev overført, derefter genlæst og verificeret med SHA-256: **12 PASS**.
+- Efterkontrol kl. 20:49 UTC: offentlig indgang, JavaScript- og CSS-kontrolsummer, kontosikkerhed og storage_overview=true: **PASS**.
+- [Installationsbevis](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41348699671/artifacts/13099939447), artefakt `13099939447`, SHA-256 `58d30d7e0c1fa9898bd55cd72bc6596d0858b474320a1ce098ef8c78a21044ea`. Desuden `installation/storage-overview/public-installed.json`.
+- Ingen private filer, konfiguration, SQL eller medier blev ændret af den automatiske installation. Den anonyme efterkontrol læste ingen medlems- eller galleridata. Admins første faktiske pladsopgørelse og grænseændring på webhotellet kræver adminlogin og er ikke udført automatisk.
+- Engangsworkflowet er lukket med if=false efter den vellykkede kørsel. Ingen merge; pauseret design-/nyheds-/aktivitetsarbejde er fortsat ikke installeret.
