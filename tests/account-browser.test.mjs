@@ -145,6 +145,41 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       await submit('#auth',{email:'20000003',password:'browser-phone-long-password'});await wait("!!document.querySelector('[data-view=profile]')",'phone login authenticated');
       await run("document.querySelector('[data-view=profile]').click()");await wait("document.querySelector('.profile-summary')?.textContent.includes('+4520000003')",'telephone profile');
     });
+    await t.test('browser MP4 upload captures and stores a real frame without GPS or download rights',async()=>{
+      await run("document.querySelector('[data-view=galleries]').click()");await wait("!!document.querySelector('[data-gallery]')",'phone gallery');
+      await run("document.querySelector('[data-gallery]').click()");await wait("!!document.querySelector('#files')",'video upload input');
+      const doc=await call('DOM.getDocument');const input=await call('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#files'});
+      await call('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[site.video_path]});
+      await wait("document.querySelectorAll('[data-photo]').length===1 && !document.querySelector('#upload').disabled",'MP4 uploaded with automatic still');
+      const pixel=await run("(async()=>{const img=document.querySelector('[data-photo] img');await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=1;canvas.getContext('2d').drawImage(img,0,0,1,1);return Array.from(canvas.getContext('2d').getImageData(0,0,1,1).data)})()");
+      assert(pixel[0]<10&&pixel[1]<10&&pixel[2]<10,'the synthetic black video frame replaces the colored neutral poster');
+      assert.equal(await run("fetch('/LexGalleri/api/photos/'+document.querySelector('[data-photo]').dataset.photo+'/video').then(r=>r.status)"),403,'frame upload does not grant original playback rights');
+    });
+    await t.test('an unreadable browser codec falls back to the existing neutral poster',async()=>{
+      await run("(async()=>{const fallbackGallery=await api('/galleries','POST',{name:'Fallback video test'});await refreshGalleryView('galleries');await openGallery(fallbackGallery.id);globalThis.__captureFrame=captureVideoThumbnail;captureVideoThumbnail=async()=>{throw Error('Synthetic unsupported codec')};})()");
+      const doc=await call('DOM.getDocument'),input=await call('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#files'});
+      await call('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[site.video_path]});
+      await wait("document.querySelectorAll('[data-photo]').length===1 && !document.querySelector('#upload').disabled",'fallback upload succeeds');
+      const pixel=await run("(async()=>{captureVideoThumbnail=globalThis.__captureFrame;const img=document.querySelector('[data-photo] img');await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=1;canvas.getContext('2d').drawImage(img,0,0,1,1);return Array.from(canvas.getContext('2d').getImageData(0,0,1,1).data)})()");
+      assert(pixel[0]>20&&pixel[1]>20,'neutral placeholder remains when extraction is unavailable');
+    });
+    await t.test('admin can regenerate a stored MP4 thumbnail through the actual info button',async()=>{
+      await run("document.querySelector('#logout').click()");await wait("!!document.querySelector('#auth')",'admin login');
+      await submit('#auth',{email:site.admin_email,password:site.admin_password});await wait("!!document.querySelector('#mfa-form')",'admin factor');
+      await submit('#mfa-form',{code:codes.shift()});await wait("!!document.querySelector('[data-gallery]')",'admin galleries');
+      await run("document.querySelector('[data-gallery]').click()");await wait("!!document.querySelector('[data-photo]')",'admin video card');
+      await run("document.querySelector('[data-photo]').click()");await wait("!!document.querySelector('#video-thumbnail')",'video thumbnail action');
+      await run("document.querySelector('#photo-info-toggle').click();document.querySelector('#video-thumbnail').click()");
+      await wait("document.querySelector('#video-thumbnail-status')?.textContent.includes('er gemt')",'persisted replacement frame');
+      assert.equal(await run("document.querySelector('#video-thumbnail').disabled"),false);
+    });
+    await t.test('logging out during frame extraction cannot submit a delayed thumbnail',async()=>{
+      await run("globalThis.__posterPosts=0;globalThis.__posterApi=api;api=async(path,...args)=>{if(path.endsWith('/thumbnail'))globalThis.__posterPosts++;return globalThis.__posterApi(path,...args)};captureVideoThumbnail=()=>new Promise(resolve=>globalThis.__finishPoster=resolve);document.querySelector('#video-thumbnail').click()");
+      await wait("typeof globalThis.__finishPoster==='function'",'pending thumbnail extraction');
+      await run("accountSignOut()");await wait("!!document.querySelector('#auth')",'logout during generation');
+      await run("globalThis.__finishPoster(new Blob(['synthetic'],{type:'image/jpeg'}))");
+      assert.equal(await run("globalThis.__posterPosts"),0,'a stale account action cannot upload or restore the closed dialog');
+    });
     codes=[];
   }finally{try{if(browser)await browser.close();}finally{await site.close();}}
 });

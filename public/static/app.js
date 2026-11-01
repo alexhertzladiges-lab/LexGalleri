@@ -176,6 +176,50 @@ async function openGallery(id){
   navigationGeneration++;photoViewerGeneration++;view='galleries';current=gallery;
   try{await render();}catch(error){$('#content').innerHTML='<p class="error" role="alert">'+esc(error.message)+'</p>';}
 }
+// Decode only a local upload or the existing permission-checked video stream.
+// No playback, audio, external service or persistent browser cache is involved.
+async function captureVideoThumbnail(source){
+  const video=document.createElement('video'),local=source instanceof Blob,url=local?URL.createObjectURL(source):source;
+  video.muted=true;video.playsInline=true;video.preload='auto';
+  let cancel;
+  try{
+    await new Promise((resolve,reject)=>{
+      let timer=setTimeout(()=>reject(Error('Videoen kunne ikke læses i denne browser')),10000);
+      const done=(error)=>{clearTimeout(timer);timer=null;video.onloadeddata=video.onseeked=video.onerror=null;error?reject(error):resolve();};
+      cancel=()=>{if(timer!==null)done(Error('Miniaturen blev afbrudt'));};
+      video.onerror=()=>done(Error('Videoformatet understøttes ikke af denne browser'));
+      video.onloadeddata=()=>{
+        video.onloadeddata=null;
+        if(!video.videoWidth||!video.videoHeight){done(Error('Videoen mangler et læsbart billede'));return;}
+        const target=Number.isFinite(video.duration)&&video.duration>0?Math.min(1,video.duration/2):0;
+        if(target===0){done();return;}
+        video.onseeked=()=>done();video.currentTime=target;
+      };
+      video.src=url;video.load();
+    });
+    const ratio=Math.min(1,960/Math.max(video.videoWidth,video.videoHeight));
+    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(video.videoWidth*ratio));canvas.height=Math.max(1,Math.round(video.videoHeight*ratio));
+    const context=canvas.getContext('2d');if(!context)throw Error('Browseren kan ikke lave et miniaturebillede');
+    context.drawImage(video,0,0,canvas.width,canvas.height);
+    const image=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.85));
+    if(!image||image.size>1024*1024)throw Error('Miniaturebilledet kunne ikke klargøres');return image;
+  }finally{cancel?.();video.pause();video.removeAttribute('src');video.load();if(local)URL.revokeObjectURL(url);}
+}
+async function makeVideoThumbnail(photo,rights){
+  if(serverCapabilities.video_thumbnails!==true||!rights.video||!(me?.admin||rights.edit))return;
+  const generation=photoViewerGeneration,account=accountGeneration,button=$('#video-thumbnail'),status=$('#video-thumbnail-status');
+  const active=()=>generation===photoViewerGeneration&&account===accountGeneration&&!!me&&M.open;
+  button.disabled=true;status.textContent='Laver miniaturebillede…';
+  try{
+    const image=await captureVideoThumbnail(photoPath(photo)+'/video');if(!active())return;
+    const form=new FormData();form.append('file',image,'thumbnail.jpg');
+    await api('/photos/'+encodeURIComponent(photo.id)+'/thumbnail','POST',form);if(!active())return;
+    const card=document.querySelector('[data-photo="'+photo.id+'"] img');if(card)card.src=photoPath(photo)+'/image?size=thumb&v='+Date.now();
+    const player=$('#photo-video');if(player)player.poster=photoPath(photo)+'/image?size=view&v='+Date.now();
+    status.textContent='Miniaturebilledet er gemt.';
+  }catch(error){if(active())status.textContent=error.message+' Prøv igen. Videoens original ændres ikke.';}
+  finally{if(active())button.disabled=false;}
+}
 async function galleryView(){
   cancelGalleryDeleteConfirmation();galleryDeleteState=null;
   const requestGallery=current,generation=navigationGeneration,account=accountGeneration,requestView=view,content=$('#content');
@@ -203,6 +247,11 @@ async function galleryView(){
         if(files[i].size>limit){errors.push(files[i].name+': Filen må højst være '+(isVideo?100:25)+' MB');continue;}
         status.textContent=`Uploader ${i+1} af ${files.length}: ${files[i].name}`;
         const form=new FormData();form.append('file',files[i]);
+        if(isVideo&&serverCapabilities.video_thumbnails===true){
+          try{form.append('thumbnail',await captureVideoThumbnail(files[i]),'thumbnail.jpg');}
+          catch{errors.push(files[i].name+': Browseren kunne ikke lave miniature; videoen uploades med standardikon.');}
+        }
+        if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
         try{await api('/galleries/'+requestGallery.id+'/photos','POST',form);}catch(error){errors.push(files[i].name+': '+error.message);}
       }
       if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
@@ -480,7 +529,7 @@ function bindPhotoDelete(photo){
   };
 }
 function photoDetails(p,rights){
-  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div>${photoDeleteMarkup(p)}<h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${me.admin||rights.edit===true?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}</div>`;
+  return `<div class="details" id="photo-info" hidden><div class="eyebrow">${p.mime==='video/mp4'?'Historien bag videoen':'Historien bag billedet'}</div>${photoDeleteMarkup(p)}<h2>${esc(p.title)}</h2><dl><dt>Optaget</dt><dd>${esc(date(p))}</dd><dt>Sted</dt><dd>${esc(p.place||'Ikke angivet')}</dd>${p.lat!==null?`<dt>GPS</dt><dd>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</dd>`:''}<dt>Uploadet af</dt><dd>${esc(p.uploader_name)}</dd><dt>Uploadtidspunkt</dt><dd>${esc(new Date(p.uploaded).toLocaleString('da-DK'))}</dd></dl>${lycheePhotoProvenance(p)}<button id="favorite" class="secondary" type="button">${p.favorite?'♥ Fjern favorit':'♡ Gem som favorit'}</button>${rights.download&&rights.gps?`<p><a href="${photoPath(p)}/image?size=original" download>↓ Hent original med metadata</a></p>`:''}${p.mime==='video/mp4'&&serverCapabilities.video_thumbnails===true&&rights.video&&(me.admin||rights.edit===true)?'<p><button class="secondary" id="video-thumbnail" type="button">Lav miniaturebillede fra video</button></p><p id="video-thumbnail-status" role="status" aria-live="polite"></p>':''}${me.admin||rights.edit===true?'<p><button class="secondary" id="edit-photo" type="button">Redigér oplysninger</button></p>':''}</div>`;
 }
 async function showPhoto(id){
   const generation=++photoViewerGeneration,account=accountGeneration,requestView=view,requestGallery=current,p=photos.find(p=>p.id===id);if(!p)return;
@@ -493,6 +542,7 @@ async function showPhoto(id){
   if(generation!==photoViewerGeneration||account!==accountGeneration||view!==requestView||current!==requestGallery)return;
   modal('Billedvisning',`<div class="viewer"><div class="photo-stage">${photoMedia(p,rights)}<button class="photo-nav photo-prev" id="prev" type="button" aria-label="Forrige billede" title="Forrige billede"><span aria-hidden="true">‹</span></button><button class="photo-nav photo-next" id="next" type="button" aria-label="Næste billede" title="Næste billede"><span aria-hidden="true">›</span></button></div>${photoDetails(p,rights)}</div>`,true);
   bindPhotoVideo(p,rights);
+  const thumbnailButton=$('#video-thumbnail');if(thumbnailButton)thumbnailButton.onclick=()=>makeVideoThumbnail(p,rights);
   const infoButton=$('#photo-info-toggle'),infoPanel=$('#photo-info');let infoOpen=false;infoPanel.hidden=true;
   infoButton.onclick=()=>{infoOpen=!infoOpen;infoPanel.hidden=!infoOpen;infoButton.setAttribute?.('aria-expanded',String(infoOpen));M.classList?.toggle('photo-info-open',infoOpen)};
   const favoriteButton=$('#favorite');

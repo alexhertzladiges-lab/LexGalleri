@@ -140,12 +140,44 @@ function validate_date(string $taken,string $precision): void {
     $d=DateTimeImmutable::createFromFormat('!'.$format,$taken,new DateTimeZone('UTC'));
     if (!$d || $d->format($format)!==$taken || (int)$d->format('Y')<1) fail(400,'Ugyldig dato');
 }
-function upload_file(int $max): array {
-    $f=$_FILES['file']??null;
+function upload_file(int $max,string $field='file'): array {
+    $f=$_FILES[$field]??null;
     if (!$f || !is_array($f) || !is_int($f['error']??null) || !is_string($f['tmp_name']??null)) fail(400,'Vælg en fil');
     if ($f['error']===UPLOAD_ERR_INI_SIZE || $f['error']===UPLOAD_ERR_FORM_SIZE) fail(413,'Filen er for stor');
     if ($f['error']!==UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) fail(400,'Upload mislykkedes');
     if (filesize($f['tmp_name'])>$max) fail(413,'Filen er for stor'); return $f;
+}
+function video_thumbnail_image(array $file): GdImage {
+    $info=@getimagesize($file['tmp_name']);
+    if(!$info||$info[2]!==IMAGETYPE_JPEG)fail(400,'Miniaturen skal være et JPEG-billede');
+    if($info[0]>1920||$info[1]>1920||$info[0]*$info[1]>2073600)fail(413,'Miniaturebilledet er for stort');
+    $image=@imagecreatefromjpeg($file['tmp_name']);if(!$image)fail(400,'Miniaturebilledet kunne ikke læses');return $image;
+}
+function save_video_thumbnail(string $id,GdImage $image): void {
+    $staged=[];
+    try{
+        foreach(['view'=>1800,'thumb'=>600] as $size=>$max){
+            $target=image_path($id,$size);
+            if(is_link(dirname($target))||is_link($target)||file_exists($target)&&!is_file($target))fail(409,'Miniaturens placering kræver kontrol');
+            $tmp=tempnam(dirname($target),'.video-thumb-');if($tmp===false)throw new RuntimeException('Miniaturen kunne ikke klargøres');
+            if(dirname($tmp)!==dirname($target)){@unlink($tmp);throw new RuntimeException('Miniaturen kræver skriverettighed i den private billedmappe');}
+            $staged[$target]=$tmp;resize_image($image,$max,$tmp,85);
+        }
+        // Each replacement is atomic. Both are valid metadata-free JPEGs even
+        // if an interrupted request replaces only one; retry finishes the pair.
+        foreach($staged as $target=>$tmp)if(!@rename($tmp,$target))fail(503,'Miniaturen kunne ikke færdiggøres. Prøv igen');
+    }finally{foreach($staged as $tmp)if(is_file($tmp))@unlink($tmp);}
+}
+function replace_video_thumbnail(string $id): never {
+    $lock='lexgalleri-delete-'.$id;
+    if((int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn()!==1)fail(409,'Videoen behandles allerede. Prøv igen');
+    try{
+        $p=photo($id,'edit');access($p['gallery_id'],'download');access($p['gallery_id'],'gps');
+        if($p['mime']!=='video/mp4')fail(400,'Kun MP4-videoer kan få en videominiature');
+        $image=video_thumbnail_image(upload_file(1024*1024));
+        save_video_thumbnail($id,$image);
+    }finally{query('SELECT RELEASE_LOCK(?)',[$lock]);}
+    send(['ok'=>true]);
 }
 function upload_video(array $f,string $gallery,array $u): never {
     global $private;
@@ -156,9 +188,10 @@ function upload_video(array $f,string $gallery,array $u): never {
     try{lychee_video_info($f['tmp_name']);}catch(RuntimeException){fail(400,'Filen er ikke en understøttet MP4-video eller er beskadiget');}
     $digest=hash_file('sha256',$f['tmp_name']);
     if(one('SELECT id FROM photos WHERE gallery_id=? AND digest=?',[$gallery,$digest]))fail(409,'Videoen findes allerede');
+    $thumbnail=isset($_FILES['thumbnail'])?video_thumbnail_image(upload_file(1024*1024,'thumbnail')):null;
     $id=uid();$paths=[image_path($id,'original'),image_path($id,'view'),image_path($id,'thumb')];
     try {
-        lychee_video_poster($paths);
+        if($thumbnail)save_video_thumbnail($id,$thumbnail);else lychee_video_poster($paths);
         if(!move_uploaded_file($f['tmp_name'],$paths[0]))throw new RuntimeException('Kunne ikke gemme videoen');
         chmod($paths[0],0600);
         $filename=basename(str_replace('\\','/',(string)$f['name']));
@@ -421,7 +454,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php')]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -573,6 +606,7 @@ function route(string $method,string $path): never {
             send(['id'=>$id]);
         }
     }
+    if($method==='POST'&&preg_match('~^/photos/([a-f0-9]{32})/thumbnail$~D',$path,$m))replace_video_thumbnail($m[1]);
     if (in_array($method,['GET','HEAD'],true) && preg_match('~^/photos/([a-f0-9]{32})/video$~D',$path,$m)) {
         $p=photo($m[1],'download');access($p['gallery_id'],'gps');stream_video($p,$method==='HEAD');
     }
@@ -686,7 +720,7 @@ try {
         if(!is_dir($private.'/'.$folder) && !mkdir($private.'/'.$folder,0700,true))throw new RuntimeException('Privat mappe kan ikke oprettes');
     }
     header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');header('X-Frame-Options: DENY');header('Cache-Control: no-store');
-    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    header("Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     $uri=parse_url($_SERVER['REQUEST_URI'],PHP_URL_PATH);$method=$_SERVER['REQUEST_METHOD'];
     if(!is_string($uri) || ($uri!==$base && !str_starts_with($uri,$base.'/')))fail(404,'Ikke fundet');
     $path=substr($uri,strlen($base));
@@ -696,7 +730,7 @@ try {
     }
     if(!str_starts_with($path,'/api/'))fail(404,'Ikke fundet');
     $galleryUpload=$method==='POST'&&preg_match('~^/api/galleries/[a-f0-9]{32}/photos$~D',$path);
-    if((int)($_SERVER['CONTENT_LENGTH']??0)>($galleryUpload?101:26)*1024*1024)fail(413,'Upload er for stor');
+    if((int)($_SERVER['CONTENT_LENGTH']??0)>($galleryUpload?102:26)*1024*1024)fail(413,'Upload er for stor');
     if(!in_array($method,['GET','HEAD','OPTIONS'],true)) {
         if(($_SERVER['HTTP_SEC_FETCH_SITE']??'')==='cross-site')fail(403,'Ugyldig forespørgsel');
         // Require an exact same-origin Origin on browser writes (scheme, host and port).

@@ -426,7 +426,7 @@ test('real Chromium: photo overlay retains loaded grid and the installable app k
       site.disconnect();
       const failures=await run("Promise.all(["+JSON.stringify(base+'/api/galleries')+","+JSON.stringify(path)+"].map(path=>fetch(path).then(()=>false,()=>true)))");assert.deepEqual(failures,[true,true],'failed API/media requests must not become an offline HTML response');
       await call('Page.navigate',{url:site.origin+base+'/?invite=PRIVATE_TEST_TOKEN'});
-      await wait("document.body.textContent.includes('Ingen forbindelse.')",'generic offline navigation');
+      await wait("document.body?.textContent?.includes('Ingen forbindelse.')",'generic offline navigation');
       const offline=await run("({text:document.body.textContent,retry:document.querySelector('a').getAttribute('href')})");
       assert(!offline.text.includes('PRIVATE_TEST_TOKEN'));assert(!offline.text.includes('Familie 01'));assert.equal(offline.retry,base+'/');
       assert.deepEqual(await run('caches.keys()'),[]);

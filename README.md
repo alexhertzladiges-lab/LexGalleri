@@ -98,3 +98,7 @@ Den gamle Python-version findes i Git-historikken, men bruges ikke til denne ins
 ## Telefoninvitationer, genbesøg og MP4-upload
 
 Se [den samlede opgraderingsvejledning](installation/telefon-mp4/INSTALLER.md) og [teststatus](docs/TELEFON_MP4_KONTROL.md). Links kan åbnes igen med samme kontos adgangskode indtil tilbagekaldelse eller udløb efter 7 dage. Genbesøg genskaber aldrig fjernet adgang. Den offentlige FTPS-installation alene opgraderer ikke private filer eller databasen.
+
+### Stillbilleder som videominiaturer
+
+Nye MP4-uploads kan få en rigtig miniature fra videoen, udtrukket lokalt i browseren og gemt som metadatafri JPEG. Admin og redaktører med video-adgang kan også danne en miniature for en eksisterende video under **Info**. Ingen FFmpeg eller ny SQL kræves. Hvis browseren ikke kan afkode videoen, bevares standardikonet. Se [kontrolrapporten](docs/VIDEO_THUMBNAILS_KONTROL.md).

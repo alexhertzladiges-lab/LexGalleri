@@ -87,3 +87,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+      - name: Build video thumbnail update without SQL
+        run: python3 scripts/package-telefon-mp4.py --video-thumbnails
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-video-thumbnails-${{ github.sha }}
+          path: dist/lexgalleri-video-thumbnails/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
