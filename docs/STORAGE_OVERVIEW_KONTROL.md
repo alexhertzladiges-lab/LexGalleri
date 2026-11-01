@@ -45,4 +45,15 @@ python3 scripts/package-telefon-mp4.py --storage-overview
 
 CI genbruger den eksisterende MySQL 8.4-opsætning og fulde regression. Pakkescriptet genbruges med en ny option; der bygges ikke et nyt testsystem. Pakken har kun 12 offentlige filer, én privat app.php, vejledning og checksums. Ingen SQL, konfiguration, medlemmer, sessionsfiler eller medier.
 
-Installationsvejledning: `installation/storage-overview/INSTALLER.md`. Endelige GitHub-resultater og pakkelink tilføjes efter CI. Ingen ændringer er udført på webhotellet. Ny privat app.php og offentlig kode skal installeres fra samme testede version; konkret webhotelopgørelse valideres ved admins første besøg.
+Installationsvejledning: `installation/storage-overview/INSTALLER.md`. Ingen ændringer er udført på webhotellet. Ny privat app.php og offentlig kode skal installeres fra samme testede version; konkret webhotelopgørelse valideres ved admins første besøg.
+
+## Afsluttende GitHub-kontrol, 1. november 2026
+
+- Testet programversion: `e301b275e854a6b15e8e86cbd2f7887d2784e112`, branch `feature/lexgalleri-storage-overview-v1`.
+- [GitHub Actions 41347531117](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41347531117): **SUCCESS**. Job `124970462530`, samtlige trin bestået, inklusive oprydning af containere.
+- Jobloggen dokumenterer **1.063 PHP-kontroller, 0 fejl** og **191 Node-/browserprøver bestået**. De 46 nye pladsprøver og browserprøven af grænseændring indgår her. MySQL 8.4 i CI; MariaDB 11.8.6 lokalt.
+- Alle 11 ændrede kildefilers Git-blob-hashes er kontrolleret mod den testede GitHub-version uden afvigelser. Den efterfølgende rapportopdatering ændrer ingen programkode.
+- [Download pladsopdateringen](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41347531117/artifacts/13100111841): `lexgalleri-storage-overview-e301b275e854a6b15e8e86cbd2f7887d2784e112`, 91.662 bytes. Artefakt-ID `13100111841`, SHA-256 `c55cf94815a8dee5176118f2629b40040977969a220b3e483040f371e67f4ad8`. GitHub-download kræver adgang til repositoryet og udløber 1. december 2026.
+- Lokale engangsdatabaser og testdatabaseserver er ryddet op/stoppet. Ingen produktionsforbindelser, rigtige beskeder, mail eller ændringer på webhotellet.
+
+Status: **klar til installation, ikke installeret**. Ingen SQL, konfigurationsændring eller aktivering af det pauserede design-/nyheds-/aktivitetsarbejde. Første admins virkelige pladsopgørelse og sammenhold med webhotellets tal kan først kontrolleres efter installation; tallene har bevidst forskellig afgrænsning som beskrevet ovenfor.
