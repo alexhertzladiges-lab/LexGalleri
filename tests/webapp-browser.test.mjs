@@ -746,9 +746,12 @@ test('real Chromium: password eyes cover login, setup, registration and account 
     browser=await chrome();const {evaluate:run,wait,call}=browser;
     await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','initial page');
     const check=async(expected,root)=>{
-      const before=site.requests.length;
+      // Observe the control action itself; favicon/manifest/service-worker
+      // requests can otherwise arrive after initial gallery rendering.
+      await run('globalThis.__controlFetches=0;globalThis.__controlSubmits=0;globalThis.__originalControlFetch=fetch;fetch=(...args)=>{globalThis.__controlFetches++;return globalThis.__originalControlFetch(...args)};globalThis.__controlSubmit=()=>globalThis.__controlSubmits++;document.querySelector('+JSON.stringify(root)+').addEventListener("submit",globalThis.__controlSubmit,true)');
       const result=await run('(()=>{const root=document.querySelector('+JSON.stringify(root)+'),fields=[...root.querySelectorAll(".password-field input")];if(fields.length!=='+expected+')throw Error("unexpected password field count: "+fields.length);const secret="Syntetisk kode & < > 12345";for(const input of fields){const button=input.parentElement.querySelector(".password-toggle"),label=document.querySelector(\'label[for="\'+input.id+\'"]\');if(input.type!=="password"||!label||button.type!=="button"||button.getAttribute("aria-controls")!==input.id||button.getAttribute("aria-pressed")!=="false")throw Error("password eye defaults or labels invalid");input.value=secret;input.focus();input.setSelectionRange(3,7);button.click();if(input.type!=="text"||input.value!==secret||input.selectionStart!==3||input.selectionEnd!==7||button.getAttribute("aria-pressed")!=="true"||!button.getAttribute("aria-label").startsWith("Skjul "))throw Error("reveal changed value, caret or accessible state");if(new FormData(input.form).get(input.name)!==secret)throw Error("form value changed when revealed");if(fields.some(other=>other!==input&&other.type!=="password"))throw Error("eye changed another field");button.click();if(input.type!=="password"||button.getAttribute("aria-pressed")!=="false"||input.value!==secret)throw Error("hide failed");}addPasswordToggles(root);return root.querySelectorAll(".password-toggle").length;})()');
-      assert.equal(result,expected);assert.equal(site.requests.length,before,'password eyes must never submit a form or make a network request');
+      assert.equal(result,expected);assert.equal(await run('globalThis.__controlFetches'),0,'password eyes must not make a JavaScript network request');assert.equal(await run('globalThis.__controlSubmits'),0,'password eyes must not submit their form');
+      await run('fetch=globalThis.__originalControlFetch;document.querySelector('+JSON.stringify(root)+').removeEventListener("submit",globalThis.__controlSubmit,true)');
     };
     for(const mobile of [false,true]){
       await call('Emulation.setDeviceMetricsOverride',{width:mobile?390:1280,height:mobile?844:900,deviceScaleFactor:1,mobile});
@@ -1311,14 +1314,14 @@ test('real Chromium: Authenticator opens a numeric keyboard and recovery codes r
       await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("#mfa-form input[name=code]")','authenticator input');
       assert.equal(await run('document.querySelector("#mfa-form input[name=code]").inputMode'),'numeric');
       assert.equal(await run('document.querySelector("#mfa-form input[name=code]").getAttribute("enterkeyhint")'),'done');
-      const before=site.requests.length;
       if(mode==='login'){
+        await run('globalThis.__keyboardFetches=0;globalThis.__keyboardSubmits=0;globalThis.__keyboardFetch=fetch;fetch=(...args)=>{globalThis.__keyboardFetches++;return globalThis.__keyboardFetch(...args)};document.querySelector("#mfa-form").addEventListener("submit",()=>globalThis.__keyboardSubmits++,true)');
         await run('document.querySelector("#mfa-form input[name=code]").value="001234";document.querySelector(".authenticator-mode-switch").click()');
         assert(await run('document.querySelector("#mfa-form input[name=code]").inputMode==="text"&&document.querySelector("#mfa-form input[name=code]").value==="001234"'));
         await run('document.querySelector("#mfa-form input[name=code]").value="DEMO-RECOVERY-CODE"');
         assert(await run('new FormData(document.querySelector("#mfa-form")).get("code")==="DEMO-RECOVERY-CODE"&&document.querySelector("#mfa-form input[name=code]").maxLength===64'));
         await run('document.querySelector(".authenticator-mode-switch").click()');assert.equal(await run('document.querySelector("#mfa-form input[name=code]").inputMode'),'numeric');
-        assert.equal(site.requests.length,before,'keyboard switch never submits a code');
+        assert.equal(await run('globalThis.__keyboardFetches'),0,'keyboard switch never sends a JavaScript request');assert.equal(await run('globalThis.__keyboardSubmits'),0,'keyboard switch never submits a code');await run('fetch=globalThis.__keyboardFetch');
       }else{
         assert(await run('!document.querySelector(".authenticator-mode-switch")&&document.querySelector("#mfa-form input[name=code]").maxLength===6'));
       }

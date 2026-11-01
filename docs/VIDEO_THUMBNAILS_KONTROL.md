@@ -42,3 +42,7 @@ python3 scripts/package-telefon-mp4.py --video-thumbnails
 ```
 
 Hele CI-sekvensen står i `.github/workflows/tests.yml`. På det rigtige webhotel mangler den nye private app.php, offentlig app.js og kontrol af PHP-uploadgrænser samt en prøve på de konkrete mobilbrowsere. Installationsvejledning: `installation/video-thumbnails/INSTALLER.md`. Udvikling/test aktiverer eller installerer ikke noget på webhotellet.
+
+## Stabilisering af eksisterende browserkontroller
+
+Et CI-forsøg på den afsluttende kode fejlede i tastaturtestens optælling af alle HTTP-kald (11 mod 10). Den samme type ustabile optælling var tidligere set i passwordikon-testen. Begge kontroller observerer nu JavaScript-fetch og form-submit direkte under kontroltrykket, så browserens sene favicon-/manifest-/service-worker-trafik ikke blandes ind i målingen. Assertions om ingen formularafsendelse og ingen JavaScript-netværkskald bevares. Produktets login- eller tastaturkode er ikke ændret. Den samlede test genkøres efter denne præcisering.
