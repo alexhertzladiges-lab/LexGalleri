@@ -115,6 +115,8 @@ try {
     assertion(request($owner,'POST',"/photos/$vid/thumbnail",['file'=>new CURLFile($temp.'/bad.txt','image/jpeg','fake.jpg')],true)[0]===400&&hash_file('sha256',$temp.'/thumbnails/'.$vid.'.jpg')===$posterBefore,'Malformed thumbnail cannot overwrite the old image');
     $pdo->query("SELECT GET_LOCK('lexgalleri-delete-$vid',0)");
     assertion(request($owner,'POST',"/photos/$vid/thumbnail",$posterUpload,true)[0]===409,'Concurrent video deletion blocks thumbnail replacement');$pdo->query("SELECT RELEASE_LOCK('lexgalleri-delete-$vid')");
+    mkdir($temp.'/.deletions/'.$vid,0700,true);
+    assertion(request($owner,'POST',"/photos/$vid/thumbnail",$posterUpload,true)[0]===409,'An unfinished deletion receipt prevents recreating staged preview files');rmdir($temp.'/.deletions/'.$vid);rmdir($temp.'/.deletions');
     assertion(request($owner,'POST',"/photos/$vid/thumbnail",$posterUpload,true)[0]===200,'Admin can generate a real still thumbnail for an existing video');
     assertion(hash_file('sha256',$temp.'/thumbnails/'.$vid.'.jpg')!==$posterBefore&&file_get_contents($temp.'/originals/'.$vid.'.bin')===$video,'Thumbnail replacement preserves the original MP4 bytes');
     $posterExif=@exif_read_data($temp.'/thumbnails/'.$vid.'.jpg');assertion(!isset($posterExif['GPSLatitude'])&&!isset($posterExif['DateTimeOriginal']),'Server re-encoding strips poster metadata');

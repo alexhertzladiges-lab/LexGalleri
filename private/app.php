@@ -169,9 +169,11 @@ function save_video_thumbnail(string $id,GdImage $image): void {
     }finally{foreach($staged as $tmp)if(is_file($tmp))@unlink($tmp);}
 }
 function replace_video_thumbnail(string $id): never {
+    global $private;
     $lock='lexgalleri-delete-'.$id;
     if((int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn()!==1)fail(409,'Videoen behandles allerede. Prøv igen');
     try{
+        if(is_link($private.'/.deletions')||file_exists($private.'/.deletions/'.$id)||is_link($private.'/.deletions/'.$id))fail(409,'Videoens sletning skal afsluttes før miniaturen kan ændres');
         $p=photo($id,'edit');access($p['gallery_id'],'download');access($p['gallery_id'],'gps');
         if($p['mime']!=='video/mp4')fail(400,'Kun MP4-videoer kan få en videominiature');
         $image=video_thumbnail_image(upload_file(1024*1024));

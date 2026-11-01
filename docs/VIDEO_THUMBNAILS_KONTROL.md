@@ -13,7 +13,7 @@ Kun `private/app.php` og `public/static/app.js` ændrer runtime. Ingen ændring 
 - Eksisterende session-, origin- og galleriadgang bruges på alle requests. Efterfølgende miniatureændring kræver redigering, download og GPS; admin har disse rettigheder som før. Upload af en ny MP4 kræver fortsat uploadrettighed.
 - JPEG valideres som faktisk JPEG, højst 1 MiB, begrænsede dimensioner/pixels og genkodes, så EXIF/GPS fjernes. PHP behandler ikke videoens codec.
 - Videooriginal, database, medlemsrettigheder og importkvitteringer ændres ikke af miniatureudskiftningen.
-- Ændringer bruger samme MySQL-lås som mediesletning. Symlinks og ugyldige mål afvises. Midlertidige JPEG-filer ryddes i finally, og hver JPEG-udskiftning er atomisk. Et afbrudt par kan færdiggøres ved genkørsel; ingen garanti om fælles atomisk udskiftning af begge JPEG-versioner.
+- Ændringer bruger samme MySQL-lås som mediesletning. En afbrudt sletning med en eksisterende slettekvitteringsmappe blokerer også miniatureændringer, så filer under oprydning ikke genskabes. Symlinks og ugyldige mål afvises. Midlertidige JPEG-filer ryddes i finally, og hver JPEG-udskiftning er atomisk. Et afbrudt par kan færdiggøres ved genkørsel; ingen garanti om fælles atomisk udskiftning af begge JPEG-versioner.
 - Browseren stopper det midlertidige videoelement og frigiver blob-URL. Et sent udtræk efter logout/navigation kan ikke starte en miniature-upload eller genåbne dialogen.
 - Gamle videoer udtrækkes kun efter brugerens valg. Ingen baggrundsscanning af private originaler og ingen ekstern billedtjeneste.
 - `media-src 'self' blob:` tillader afkodning af den lokale upload. Oprindelige videostreams bruger fortsat samme adgangskontrol. Intet nyt offentligt medieendpoint.
@@ -22,7 +22,7 @@ Kun `private/app.php` og `public/static/app.js` ændrer runtime. Ingen ændring 
 
 PHP 8.4.24, MariaDB 11.8.6 på localhost og rigtig Chromium. Tilfældige engangsdatabaser, syntetiske konti og den eksisterende sorte H.264 MP4-fixture. Ingen produktionscredentials, familiemedier, SMS eller e-mails.
 
-- **75 PASS / 0 FAIL** i `tests/run.php`, herunder 16 nye kontroller: virkelig JPEG ved upload og efterfølgende ændring, bevaret original, metadatafjernelse, gæste-/origin-afvisning, særskilt redigerings-/GPS-adgang, lås mod sletning, ugyldig miniature, symlinkbeskyttelse og oprydning.
+- **76 PASS / 0 FAIL** i `tests/run.php`, herunder 17 nye kontroller: virkelig JPEG ved upload og efterfølgende ændring, bevaret original, metadatafjernelse, gæste-/origin-afvisning, særskilt redigerings-/GPS-adgang, lås mod sletning, ugyldig miniature, symlinkbeskyttelse og oprydning.
 - **11 browsertests PASS / 0 FAIL**, inklusive virkeligt MP4 → canvas → JPEG → multipart → PHP → database, sort pixelkontrol mod den oprindelige neutrale miniature, regenerering fra info-knappen, codec-fallback og logout under udtræk.
 - Eksisterende Node-prøver: 97 PASS / 0 FAIL i account-ui, lychee-ui, webapp og ftps-plan.
 - PHP- og JavaScript-syntaks: PASS.
