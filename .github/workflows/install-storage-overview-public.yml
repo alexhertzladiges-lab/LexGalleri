@@ -1,0 +1,121 @@
+name: Install approved LexGalleri storage overview
+on:
+  push:
+    branches: [feature/lexgalleri-storage-overview-v1]
+    paths: [.github/workflows/install-storage-overview-public.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: lexgalleri-production
+  cancel-in-progress: false
+jobs:
+  install:
+    # Owner uploaded private app.php and authorized remaining public installation.
+    if: >-
+      ${{ github.event.before == '56e03241446bc233609295c10be96a61e243d245' && github.event.head_commit.message == 'deploy: install approved storage overview public files' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      APPROVED_SOURCE: e301b275e854a6b15e8e86cbd2f7887d2784e112
+      APPROVED_RUN: '41347531117'
+      APPROVED_ARTIFACT: '13100111841'
+      APPROVED_DIGEST: c55cf94815a8dee5176118f2629b40040977969a220b3e483040f371e67f4ad8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e301b275e854a6b15e8e86cbd2f7887d2784e112
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify green source and exact tested artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$APPROVED_RUN" > "$RUNNER_TEMP/approved-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$APPROVED_ARTIFACT" > "$RUNNER_TEMP/approved-artifact.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$APPROVED_ARTIFACT/zip" > "$RUNNER_TEMP/approved-package.zip"
+          python3 - <<'PY'
+          import hashlib, json, os, zipfile
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          run = json.loads((root/'approved-run.json').read_text())
+          artifact = json.loads((root/'approved-artifact.json').read_text())
+          assert run['head_sha'] == os.environ['APPROVED_SOURCE']
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['path'] == '.github/workflows/tests.yml'
+          assert artifact['workflow_run']['id'] == int(os.environ['APPROVED_RUN'])
+          assert artifact['workflow_run']['head_sha'] == os.environ['APPROVED_SOURCE']
+          assert artifact['expired'] is False
+          digest = 'sha256:' + os.environ['APPROVED_DIGEST']
+          assert artifact['digest'] == digest
+          assert 'sha256:' + hashlib.sha256((root/'approved-package.zip').read_bytes()).hexdigest() == digest
+          expected = {str(p).replace('public/', '', 1) for p in Path('public').rglob('*') if p.is_file()}
+          assert len(expected) == 12
+          with zipfile.ZipFile(root/'approved-package.zip') as archive:
+              for name in expected:
+                  assert archive.read('public/' + name) == (Path('public')/name).read_bytes(), name
+          print('PASS: approved green source; artifact SHA-256; all 12 public files match tested package')
+          PY
+          node --test tests/ftps-plan.test.mjs
+          bash -n scripts/deploy-ftps.sh
+      - name: Confirm uploaded private app is ready before public changes
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          request = urllib.request.Request('https://lexan.dk/lexgalleri/api/status', headers={'Cache-Control':'no-cache','User-Agent':'LexGalleri-install-verification'})
+          with urllib.request.urlopen(request, timeout=30) as reply:
+              assert reply.status == 200
+              assert reply.url.startswith('https://lexan.dk/lexgalleri/')
+              assert "media-src 'self' blob:" in reply.headers.get('Content-Security-Policy','')
+              status = json.loads(reply.read())
+          assert status.get('setup') is False
+          assert status.get('account_security_ready') is True
+          assert status.get('capabilities',{}).get('storage_overview') is True, 'Den private app.php er ikke klar til pladsoversigten'
+          print('PASS: uploaded private app supports storage overview; existing media CSP intact')
+          PY
+      - name: Install FTPS client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Install and read back only the 12 approved public files
+        env:
+          FTPS_HOST: ${{ vars.FTPS_HOST }}
+          FTPS_USERNAME: ${{ vars.FTPS_USERNAME }}
+          FTPS_PORT: ${{ vars.FTPS_PORT }}
+          FTPS_PASSWORD: ${{ secrets.FTPS_PASSWORD }}
+        run: bash scripts/deploy-ftps.sh
+      - name: Verify public HTTP responses and installed JavaScript
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, urllib.request
+          from pathlib import Path
+          base = 'https://lexan.dk/lexgalleri/'
+          def get(path):
+              request = urllib.request.Request(base + path, headers={'Cache-Control':'no-cache', 'User-Agent':'LexGalleri-install-verification'})
+              with urllib.request.urlopen(request, timeout=30) as reply:
+                  assert reply.status == 200
+                  assert reply.url.startswith(base)
+                  return reply.read()
+          html = get('')
+          assert b'LexGalleri' in html and b'/static/app.js' in html
+          expected = hashlib.sha256(Path('public/static/app.js').read_bytes()).hexdigest()
+          actual = hashlib.sha256(get('static/app.js?verify=' + os.environ['APPROVED_SOURCE'])).hexdigest()
+          assert actual == expected
+          assert hashlib.sha256(get('static/style.css?verify=' + os.environ['APPROVED_SOURCE'])).hexdigest() == hashlib.sha256(Path('public/static/style.css').read_bytes()).hexdigest()
+          status = json.loads(get('api/status'))
+          assert status.get('setup') is False
+          assert status.get('account_security_ready') is True
+          assert status.get('account_security_version') == 1
+          assert status.get('capabilities',{}).get('storage_overview') is True
+          evidence = {'source_commit':os.environ['APPROVED_SOURCE'], 'approved_artifact':os.environ['APPROVED_ARTIFACT'], 'approved_artifact_sha256':os.environ['APPROVED_DIGEST'], 'installed_public_files':12, 'ftps_sha256_readback':'PASS', 'http_entry':'PASS', 'http_app_js_sha256':'PASS', 'http_style_css_sha256':'PASS', 'http_account_security':'PASS', 'capabilities':status.get('capabilities',{}), 'private_files_changed':False, 'sql_migrations_run':False, 'workflow_run':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']}
+          evidence['public_sha256'] = {str(p.relative_to('public')):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('public').rglob('*') if p.is_file()}
+          target = Path(os.environ['RUNNER_TEMP'])/'public-installation-evidence.json'
+          target.write_text(json.dumps(evidence, indent=2)+'\n')
+          print('PASS: public entry, installed JavaScript/CSS SHA-256, account security and storage capability')
+          print('Capabilities:', json.dumps(evidence['capabilities'], sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-storage-overview-installation-evidence
+          path: ${{ runner.temp }}/public-installation-evidence.json
+          if-no-files-found: error
+          retention-days: 30
