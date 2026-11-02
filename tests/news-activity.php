@@ -13,6 +13,15 @@ function iv_request(CurlHandle $c,string $method,string $path,?array $body=null,
 function iv_ok(array $r,string $message):array{iv_assert($r[0]===200,$message);if($r[0]!==200||!is_array($r[1]))throw new RuntimeException($message.': '.json_encode($r));return $r[1];}
 function iv_query(string $sql,array $args=[]):PDOStatement{global $pdo;$s=$pdo->prepare($sql);$s->execute($args);return $s;}
 function iv_count(string $sql,array $args=[]):int{return(int)iv_query($sql,$args)->fetchColumn();}
+function iv_upgrade(string $sql):array{
+    global $pdo;$truncations=[];
+    // Check each statement immediately: a later statement clears SQL warnings.
+    foreach(explode(';',$sql) as $statement){
+        if(trim($statement)==='')continue;$pdo->exec($statement);
+        foreach($pdo->query('SHOW WARNINGS')->fetchAll() as $warning)if(in_array((int)$warning['Code'],[1265,1406],true))$truncations[]=$warning;
+    }
+    return $truncations;
+}
 function iv_token(array $reply):string{parse_str((string)parse_url($reply['path'],PHP_URL_QUERY),$q);return$q['invite'];}
 function iv_remove(string $path):void{foreach(scandir($path) as $name){if($name==='.'||$name==='..')continue;$child=$path.'/'.$name;if(is_dir($child)&&!is_link($child))iv_remove($child);else unlink($child);}rmdir($path);}
 function iv_seed(string $id,string $gallery,string $uploader):void{global $privateRoot;iv_query('INSERT INTO photos(id,gallery_id,title,filename,mime,uploader,uploaded,taken,`precision`,place,lat,lon,digest) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',[$id,$gallery,'Original title','synthetic.jpg','image/jpeg',$uploader,'2026-01-01T00:00:00Z','','unknown','Original place',55.67,12.56,hash('sha256',$id)]);foreach(['originals/'.$id.'.bin','previews/'.$id.'.jpg','thumbnails/'.$id.'.jpg'] as $path)file_put_contents($privateRoot.'/'.$path,'Synthetic image bytes '.$id);}
@@ -70,8 +79,15 @@ try{
     iv_ok(iv_request($admin,'GET','/admin/activity'),'Apply bounded retention cleanup');iv_assert(iv_count('SELECT COUNT(*) FROM activity_events WHERE event_key=?',[$oldKey])===0,'Activity older than 30 days is removed');
     iv_ok(iv_request($admin,'DELETE','/admin/users/'.$memberId,['confirm'=>true]),'Delete an account with news and activity data');
     iv_assert(iv_count('SELECT COUNT(*) FROM activity_events WHERE user_id=?',[$memberId])===0&&iv_count('SELECT COUNT(*) FROM media_seen WHERE user_id=?',[$memberId])===0&&iv_count('SELECT COUNT(*) FROM activity_users WHERE user_id=?',[$memberId])===0,'Account deletion clears activity history and notification receipts');
-    $upgrade=file_get_contents($root.'/private/migrations/008_gallery_news_activity.sql');$pdo->exec($upgrade);$theme=iv_ok(iv_request($admin,'GET','/theme'),'Read approved warm palette');iv_assert($theme['colors']['accent']==='#a54f3d','Upgrade applies the approved brick-red palette');
-    $theme['name']='Keep my later theme';$theme['colors']['accent']='#304c72';iv_query("UPDATE settings SET value=? WHERE `key`='theme'",[json_encode($theme)]);$pdo->exec($upgrade);iv_assert(iv_ok(iv_request($admin,'GET','/theme'),'Read preserved theme')['colors']['accent']==='#304c72','Re-running the migration preserves subsequent admin theme choices');
+    $upgrade=file_get_contents($root.'/private/migrations/008_gallery_news_activity.sql');
+    iv_assert(iv_upgrade($upgrade)===[],'Palette migration has no data-truncation warning');
+    preg_match("/INSERT IGNORE INTO themes\\(id,document\\) VALUES\\('([a-f0-9]+)'/",$upgrade,$palette);
+    $paletteId=$palette[1]??'';iv_assert(strlen($paletteId)===32&&iv_count('SELECT COUNT(*) FROM themes WHERE id=?',[$paletteId])===1,'Full palette identifier fits CHAR(32) and identifies exactly one stored theme');
+    $theme=iv_ok(iv_request($admin,'GET','/theme'),'Read approved warm palette');iv_assert($theme['colors']['accent']==='#a54f3d','Upgrade applies the approved brick-red palette');
+    $theme['name']='Keep my later theme';$theme['colors']['accent']='#304c72';iv_query("UPDATE settings SET value=? WHERE `key`='theme'",[json_encode($theme)]);
+    iv_assert(iv_upgrade($upgrade)===[],'Re-running migration with the existing truncated legacy identifier has no data truncation');
+    iv_assert(iv_count('SELECT COUNT(*) FROM themes')===1,'Re-running migration reuses the existing theme without creating a duplicate');
+    iv_assert(iv_ok(iv_request($admin,'GET','/theme'),'Read preserved theme')['colors']['accent']==='#304c72','Re-running the migration preserves subsequent admin theme choices');
     $pdo->exec('RENAME TABLE activity_events TO synthetic_saved_activity');$status=iv_ok(iv_request($anonymous,'GET','/status'),'Check incomplete activity migration');
     iv_assert(!$status['capabilities']['gallery_news']&&!$status['capabilities']['member_activity'],'Incomplete schema disables activity and new-media capabilities');
     iv_assert(iv_request($admin,'GET','/admin/activity')[0]===503&&iv_request($admin,'GET','/news')[0]===503,'Incomplete schema never becomes a false empty successful activity or notification list');

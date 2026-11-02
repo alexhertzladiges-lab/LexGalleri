@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS activity_events (
 -- later theme choice made by the administrator.
 SET @lg_palette_first = (SELECT COUNT(*)=0 FROM settings WHERE `key`='compact_style_v1');
 SET @lg_palette_json = '{"version":1,"name":"Varmt fotoalbum","colors":{"background":"#f8f4ed","surface":"#fffcf8","text":"#253d33","accent":"#a54f3d"},"font":"sans","radius":14,"density":"compact"}';
-INSERT IGNORE INTO themes(id,document) VALUES('6c657867616c6c657269636f6d70616374',@lg_palette_json);
+-- CHAR(32): reuse the exact key stored by earlier imports that truncated the
+-- original 34-character literal. No existing row needs changing or deleting.
+INSERT IGNORE INTO themes(id,document) VALUES('6c657867616c6c657269636f6d706163',@lg_palette_json);
 INSERT INTO settings(`key`,value) SELECT 'theme',@lg_palette_json WHERE @lg_palette_first
  ON DUPLICATE KEY UPDATE value=IF(@lg_palette_first,VALUES(value),value);
 INSERT IGNORE INTO settings(`key`,value) VALUES('compact_style_v1','1');

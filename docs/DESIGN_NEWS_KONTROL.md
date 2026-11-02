@@ -52,3 +52,13 @@ Den særskilte kompatibilitetsprøve verificerer den offentlige designopdatering
 - Engangsworkflowet er lukket med if=false efter succes. Ingen merge, ingen private programfiler, SQL, konfiguration eller medier blev ændret af den automatiske installation. Ingen produktionslogin, medlemsdata, mail eller SMS indgik i efterkontrollen.
 
 **Status:** det kompakte offentlige design er installeret og kontrolleret. Den nuværende server annoncerer endnu ikke gallery_news/member_activity/compact_gallery. Påmindelser og aktivitetsoversigt er testet og pakket, men **ikke aktiveret på webhotellet**. Der mangler ejerens upload af både app.php og security.php til den private mappe, rettighed 0600, og import af SQL 008 i den eksisterende LexGalleri-database. Den begrænsede offentlige FTPS-konto kan ikke udføre dette; der er ikke etableret nogen offentlig installationsgenvej. Se pakkens INSTALLER.md for de konkrete cPanel-trin og efterkontrol. Den fulde private aktivering kan ikke verificeres, før de trin er udført.
+
+## Rettelse efter rapporteret SQL-advarsel #1265, 2. november 2026
+
+Ejeren rapporterede `Data truncated for column 'id'` ved indsættelse af designpakken. Rodårsagen var en 34-tegns hexkonstant til themes.id CHAR(32). INSERT IGNORE omsatte fejlen til en advarsel og indsatte rækken med de første 32 tegn. De tidligere tests kontrollerede resultatet og gentagen kørsel, men ikke advarsler efter hvert SQL-statement; efterfølgende statements rydder disse advarsler.
+
+Konstanten er rettet til `6c657867616c6c657269636f6d706163`, præcis samme nøgle som allerede gemt ved den tidligere afkortning. Ingen eksisterende række skal ændres eller slettes. Ingen ændring af datamodel, PHP-programmer eller offentlige filer er nødvendig.
+
+Regressionen kontrollerer nu SHOW WARNINGS umiddelbart efter hvert migrationsstatement for truncation/for lange værdier, hele konstantens længde og eksakte opslag, samt gentagen import uden ekstra designrække og med bevaret senere farvevalg. Testen fejlede på den oprindelige SQL med **59 kontroller, 3 fejl**, og består med rettelsen: **59 kontroller, 0 fejl** på den isolerede lokale MariaDB 11.8.6. Den afsluttende GitHub-kørsel og korrigerede pakke dokumenteres nedenfor.
+
+Den rapporterede advarsel gælder designpakkens identifikator, ikke medlemmer eller mediefiler. Hvis hele importen ellers afsluttede uden fejl, kræver denne advarsel ingen reparation af den eksisterende database. En genkørsel med rettet SQL genbruger samme designnøgle og bevarer et senere designvalg. Produktionsdatabasen er ikke tilgået; fuld privat aktivering er ikke genverificeret efter ejerens import.

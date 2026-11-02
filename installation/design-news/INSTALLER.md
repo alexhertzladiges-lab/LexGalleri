@@ -28,3 +28,7 @@ Den eksisterende FTPS-konto har kun adgang til de offentlige filer. Den kan ikke
 - Kontrollér også **Administration → Medieplads**, søgning, mobilmenu, billedvisning og MP4. En større pladsgrænse ændrer stadig ikke webhotellets abonnement eller blokerer uploads.
 
 Ingen mail eller SMS udsendes af denne opdatering. Der kræves ingen nye credentials.
+
+## Hvis en tidligere import viste advarsel #1265 for themes.id
+
+Den første udgave havde et design-id på 34 tegn til et CHAR(32)-felt. Denne udgave bruger de samme første 32 tegn, som databasen allerede gemte. Hvis importen ellers afsluttede uden fejl, er der ikke behov for at ændre eller slette rækken eller genimportere databasen. Advarslen vedrører kun designpakkens id. En eventuel genkørsel af denne rettede SQL 008 bevarer den eksisterende nøgle og senere designvalg. Brug ikke den oprindelige SQL-fil igen.
