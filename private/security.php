@@ -37,6 +37,8 @@ function lg_security_validate_session(array $u): void {
 function lg_security_complete(array $u,int $version,bool $mfa,array $extra=[]): never {
     session_regenerate_id(true);
     $_SESSION=['uid'=>$u['id'],'expires'=>time()+604800,'security_version'=>$version,'mfa_authenticated'=>$mfa];
+    // Optional activity must never weaken MFA or prevent an otherwise valid login.
+    try{if(function_exists('activity_login'))activity_login($u);}catch(Throwable $e){error_log('LexGalleri activity recording unavailable');}
     send(array_merge(safe_user($u),$extra));
 }
 function lg_security_begin_pending(array $u,array $state,string $mode='login'): never {
@@ -258,6 +260,7 @@ function lg_security_delete_member(array $actor,string $id,array $b): never {
         $now=stamp();lg_security_state($id,true);
         if(reusable_invitations_ready()){query('DELETE FROM invitations WHERE accepted_user_id=? OR email=? OR phone=?',[$id,$target['email'],$target['phone']??null]);query('UPDATE users SET phone=NULL WHERE id=?',[$id]);}
         else query('DELETE FROM invitations WHERE email=?',[$target['email']]);
+        if(function_exists('activity_member_delete'))activity_member_delete($id);
         query('DELETE FROM grants WHERE user_id=?',[$id]);
         query('DELETE FROM favorites WHERE user_id=?',[$id]);
         query('DELETE FROM user_recovery_codes WHERE user_id=?',[$id]);

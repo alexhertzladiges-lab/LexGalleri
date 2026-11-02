@@ -916,10 +916,11 @@ test('real Chromium: deletion starts directly from the gallery front page and ad
     await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("#gallery-delete-overview")','front-page delete entry');
     for(const mobile of [false,true]){
       await call('Emulation.setDeviceMetricsOverride',{width:mobile?390:1280,height:mobile?844:900,deviceScaleFactor:1,mobile});
+      await run('document.querySelector(".gallery-more").open=true');
       const entry=await run('(()=>{const b=document.querySelector("#gallery-delete-overview"),r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{text:b.textContent,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&(hit===b||b.contains(hit)),disabled:b.disabled};})()');
       assert.equal(entry.text,'Slet billeder');assert.equal(entry.disabled,false);assert(entry.visible,'front-page deletion must be visible on '+(mobile?'mobile':'desktop'));
     }
-    assert(await run('document.querySelector("[data-gallery] .card-body").textContent.includes("Fuld adgang · Admin")&&!document.querySelector("#gallery-grid").textContent.includes("Begrænset adgang")'));
+    assert(await run('document.querySelector(".account-popover").textContent.includes("Administrator")&&!document.querySelector("#gallery-grid").textContent.includes("Begrænset adgang")'));
     assert(await run('!!document.querySelector("[data-view=deletions]")'),'the current admin code must expose Sletteønsker');
     const before=site.requests.filter(path=>path.endsWith('/photos')).length;
     await run('window.__overview=document.querySelector("#gallery-grid");document.querySelector("#gallery-delete-overview").click()');await wait('!!document.querySelector("#gallery-delete-choose")','choose deletion gallery');
@@ -934,7 +935,7 @@ test('real Chromium: deletion starts directly from the gallery front page and ad
   try{
     memberBrowser=await chrome();const {evaluate:run,wait,call}=memberBrowser;
     await call('Page.navigate',{url:memberSite.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','member front page');
-    assert(await run('document.querySelector("[data-gallery] .card-body").textContent.includes("Delt med dig")&&!document.querySelector("#gallery-grid").textContent.includes("Fuld adgang")'));
+    assert(await run('document.querySelector(".account-popover").textContent.includes("Medlem")&&!document.querySelector("#gallery-grid").textContent.includes("Fuld adgang")'));
     assert(await run('!document.querySelector("#gallery-delete-overview")&&!document.querySelector("[data-view=deletions]")'));
   }finally{if(memberBrowser)await memberBrowser.close();await memberSite.close();}
 });
@@ -1255,7 +1256,7 @@ test('real Chromium: administrators delete design packages with confirmation and
     await t.test('deleting the active package applies the standard theme and keeps the protected standard card',async()=>{
       await run(trigger(site.activeThemeId)+'.click();'+submit(site.activeThemeId)+'.click()');await waitForDeletes(3);site.releaseThemeDelete();
       await wait('!'+card(site.activeThemeId),'removed active package');assert.equal(await radius(),'16px');
-      assert.equal(await run('getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()'),'#416c57');
+      assert.equal(await run('getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()'),'#a54f3d');
       assert(await run('__defaultPackage.isConnected&&'+card('default')+'===__defaultPackage&&!'+trigger('default')));
       assert.equal(await run('document.querySelectorAll("[data-theme-card]").length'),1);
       assert.equal(await run('document.querySelector("#theme-delete-feedback").textContent'),'Pakken er slettet. Standarddesignet er nu aktivt.');
@@ -1335,5 +1336,31 @@ test('real Chromium: Authenticator opens a numeric keyboard and recovery codes r
     assert.equal(await run('document.querySelector("input[name=mfa_code]").inputMode'),'numeric');
     await run('document.querySelector(".authenticator-mode-switch").click()');assert.equal(await run('document.querySelector("input[name=mfa_code]").inputMode'),'text');
     assert(await run('!!document.querySelector("input[name=current_password]")'),'keyboard choice preserves required administrator proof');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: compact public design works before the optional private news upgrade',{
+  skip:binary?false:'Chromium required',timeout:60000,
+},async()=>{
+  const site=await fixture({galleryCreate:true,adminDirectory:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("#gallery-grid [data-gallery]")','compatible gallery overview');
+    for(const width of [320,390,768,1280]){
+      await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<500});
+      const layout=await run(`(()=>{const first=document.querySelector('[data-gallery]'),title=document.querySelector('.gallery-heading h1'),action=document.querySelector('#new-gallery'),r=action.getBoundingClientRect();return{overflow:document.documentElement.scrollWidth>innerWidth,first:first.getBoundingClientRect().top,columns:getComputedStyle(document.querySelector('#gallery-grid')).gridTemplateColumns.split(' ').length,headingAligned:Math.abs(title.getBoundingClientRect().top-r.top)<40,zeroVisible:[...document.querySelectorAll('.new-badge')].some(b=>b.getClientRects().length),account:document.querySelector('.account-menu>summary').getBoundingClientRect().width,accent:getComputedStyle(action).backgroundColor}})()`);
+      assert(!layout.overflow,'no horizontal overflow at '+width);assert(!layout.zeroVisible,'zero new items stays hidden');assert(layout.account>=44,'account menu retains a full touch target');assert.equal(layout.accent,'rgb(165, 79, 61)');
+      if(width<500){assert.equal(layout.columns,2);assert(layout.first<300&&layout.headingAligned,'albums and primary action appear without the former whitespace');}
+      if(width===390)await screenshot(call,'compact-albums-mobile.png');if(width===1280)await screenshot(call,'compact-albums-desktop.png');
+    }
+    assert(!site.requests.some(p=>p.includes('/news')||p.includes('/admin/activity')),'unsupported features make no requests');
+    await call('Emulation.setDeviceMetricsOverride',{width:390,height:900,deviceScaleFactor:1,mobile:true});
+    await run('document.querySelector("#more-menu").click()');await wait('document.querySelector("#modal").open&&!!document.querySelector("#more-admin")','mobile administration entry');
+    assert(await run('document.querySelector("#more-admin").getBoundingClientRect().height>=44'));
+    await run('document.querySelector("#more-admin").click()');await wait('!!document.querySelector("#admin-area")','admin overview from mobile menu');
+    assert(await run('document.querySelector("#admin-area").getClientRects().length>0'),'admin sections remain available without the former sidebar');
+    await run('document.querySelector("[data-view=galleries]").click()');await wait('!!document.querySelector("#search-gallery")','return from mobile administration');
+    await run('document.querySelector("#search-gallery").value="no synthetic match";document.querySelector("#search-gallery").dispatchEvent(new Event("input"))');
+    assert.equal(await run('document.querySelectorAll("[data-gallery]").length'),0);
   }finally{if(browser)await browser.close();await site.close();}
 });

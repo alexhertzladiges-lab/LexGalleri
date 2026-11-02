@@ -194,8 +194,77 @@ function storage_overview(bool $refresh=false): array {
         return array_merge($snapshot,['limit_bytes'=>$limit,'cached'=>false]);
     }finally{query('SELECT RELEASE_LOCK(?)',[$lock]);}
 }
+function activity_ready(): bool {
+    static $ready=null;if($ready!==null)return $ready;
+    return $ready=(int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND ((table_name='activity_users' AND column_name IN ('user_id','initialized_at')) OR (table_name='media_seen' AND column_name IN ('user_id','photo_id','seen_at')) OR (table_name='activity_events' AND column_name IN ('id','user_id','kind','gallery_id','occurred_at','event_key')))")->fetchColumn()===11;
+}
+function activity_require(): void {if(!activity_ready())fail(503,'Nye billeder og aktivitet kræver migrering 008_gallery_news_activity.sql');}
+function activity_initialize(array $u): void {
+    global $db;
+    if(one('SELECT 1 FROM activity_users WHERE user_id=?',[$u['id']]))return;
+    $db->beginTransaction();
+    try{
+        // Serialize the first baseline across tabs without time/ID watermarks.
+        query('SELECT id FROM users WHERE id=? FOR UPDATE',[$u['id']]);
+        if(!one('SELECT 1 FROM activity_users WHERE user_id=?',[$u['id']])){
+            query('INSERT INTO activity_users(user_id,initialized_at) VALUES(?,UTC_TIMESTAMP(6))',[$u['id']]);
+            query('INSERT IGNORE INTO media_seen(user_id,photo_id,seen_at) SELECT ?,p.id,UTC_TIMESTAMP(6) FROM photos p WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=p.gallery_id AND a.user_id=?)',[$u['id'],(int)$u['admin'],$u['id']]);
+        }
+        $db->commit();
+    }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+}
+function activity_prune(): void {
+    // Bounded, indexed cleanup; no hosting cron or external service required.
+    query('DELETE FROM activity_events WHERE occurred_at<DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 30 DAY) LIMIT 1000');
+}
+function activity_login(array $u): void {
+    if(!activity_ready())return;
+    activity_initialize($u);
+    query("INSERT INTO activity_events(user_id,kind,gallery_id,occurred_at,event_key) VALUES(?,'login',NULL,UTC_TIMESTAMP(6),?) ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)",[$u['id'],hash('sha256','login:'.session_id())]);
+    activity_prune();
+}
+function activity_galleries(array $u): array {
+    $ready=activity_ready();if($ready)activity_initialize($u);
+    $news=$ready?',(SELECT COUNT(*) FROM photos np WHERE np.gallery_id=g.id AND np.uploader<>? AND NOT EXISTS(SELECT 1 FROM media_seen ms WHERE ms.user_id=? AND ms.photo_id=np.id)) new_count':'';
+    $args=$ready?[$u['id'],$u['id'],(int)$u['admin'],$u['id']]:[(int)$u['admin'],$u['id']];
+    return rows('SELECT g.*,(SELECT COUNT(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover'.$news.' FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',$args);
+}
+function activity_visit(string $g,array $u,array $b): array {
+    global $db;
+    activity_require();access($g);activity_initialize($u);
+    if(array_diff(array_keys($b),['photo_ids']))fail(400,'Ugyldigt besøgsfelt');
+    $ids=$b['photo_ids']??[];
+    if(!is_array($ids)||!array_is_list($ids)||count($ids)>500)fail(400,'Højst 500 viste billeder ad gangen');
+    foreach($ids as $id)if(!is_string($id)||!preg_match('/^[a-f0-9]{32}$/D',$id))fail(400,'Ugyldigt billede');
+    $ids=array_values(array_unique($ids));
+    $db->beginTransaction();
+    try{
+        if($ids){
+            $marks=implode(',',array_fill(0,count($ids),'?'));
+            $found=rows('SELECT id FROM photos WHERE gallery_id=? AND id IN ('.$marks.') FOR UPDATE',array_merge([$g],$ids));
+            if(count($found)!==count($ids))fail(409,'Galleriindholdet er ændret. Hent galleriet igen');
+            foreach($ids as $id)query('INSERT IGNORE INTO media_seen(user_id,photo_id,seen_at) VALUES(?,?,UTC_TIMESTAMP(6))',[$u['id'],$id]);
+        }
+        $key=hash('sha256','gallery:'.$u['id'].':'.$g.':'.intdiv(time(),300));
+        query("INSERT INTO activity_events(user_id,kind,gallery_id,occurred_at,event_key) VALUES(?,'gallery',?,UTC_TIMESTAMP(6),?) ON DUPLICATE KEY UPDATE occurred_at=VALUES(occurred_at)",[$u['id'],$g,$key]);
+        $db->commit();
+    }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+    activity_prune();return ['ok'=>true];
+}
+function activity_admin(): array {
+    user(true);activity_require();activity_prune();
+    $requested=$_GET['user_id']??'';if(!is_string($requested)||$requested!==''&&!preg_match('/^[a-f0-9]{32}$/D',$requested))fail(400,'Ugyldigt medlem');
+    $people=rows("SELECT u.id,u.name,MAX(CASE WHEN e.kind='login' THEN e.occurred_at END) last_login,MAX(CASE WHEN e.kind='gallery' THEN e.occurred_at END) last_gallery FROM users u LEFT JOIN activity_events e ON e.user_id=u.id AND e.occurred_at>=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 30 DAY) WHERE NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) GROUP BY u.id,u.name ORDER BY u.name LIMIT 500");
+    $events=rows("SELECT e.id,e.kind,e.occurred_at,u.name,g.name gallery_name FROM activity_events e JOIN users u ON u.id=e.user_id LEFT JOIN galleries g ON g.id=e.gallery_id WHERE e.occurred_at>=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 30 DAY) AND (?='' OR e.user_id=?) AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) ORDER BY e.id DESC LIMIT 100",[$requested,$requested]);
+    $uploads=rows('SELECT p.id,p.title,p.mime,p.uploaded,g.name gallery_name,u.name uploader_name FROM photos p JOIN galleries g ON g.id=p.gallery_id JOIN users u ON u.id=p.uploader ORDER BY p.uploaded DESC,p.id DESC LIMIT 30');
+    return ['people'=>$people,'events'=>$events,'uploads'=>$uploads,'retention_days'=>30];
+}
+function activity_member_delete(string $id): void {
+    if(!activity_ready())return;
+    foreach(['activity_events','media_seen','activity_users'] as $table)query('DELETE FROM '.$table.' WHERE user_id=?',[$id]);
+}
 function default_theme(): array {
-    return ['version'=>1,'name'=>'Nordisk','colors'=>['background'=>'#f7f6f2','surface'=>'#ffffff','text'=>'#263b34','accent'=>'#416c57'],'font'=>'sans','radius'=>16,'density'=>'comfortable'];
+    return ['version'=>1,'name'=>'Nordisk','colors'=>['background'=>'#f8f4ed','surface'=>'#fffcf8','text'=>'#253d33','accent'=>'#a54f3d'],'font'=>'sans','radius'=>16,'density'=>'comfortable'];
 }
 function validate_theme(mixed $t): array {
     if (!is_array($t) || ($t['version']??null)!==1) fail(400,'Designpakken skal have version 1');
@@ -529,7 +598,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -619,7 +688,15 @@ function route(string $method,string $path): never {
     if (in_array($method,['POST','DELETE'],true) && preg_match('~^/photos/([a-f0-9]{32})/deletion-request$~D',$path,$m)) {
         send(['ok'=>true,'request'=>$method==='POST'?media_delete_request_create($m[1],$u):media_delete_request_cancel($m[1],$u)]);
     }
-    if ($method==='GET' && $path==='/galleries') send(rows('SELECT g.*,(SELECT count(*) FROM photos p WHERE p.gallery_id=g.id) count,(SELECT id FROM photos p WHERE p.gallery_id=g.id ORDER BY uploaded DESC LIMIT 1) cover FROM galleries g WHERE ?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=g.id AND a.user_id=?) ORDER BY created DESC',[(int)$u['admin'],$u['id']]));
+    if ($method==='GET' && $path==='/galleries') send(activity_galleries($u));
+    if($method==='GET'&&$path==='/news'){
+        activity_require();$list=activity_galleries($u);$g=$_GET['gallery_id']??'';
+        if(!is_string($g)||$g!==''&&!preg_match('/^[a-f0-9]{32}$/D',$g))fail(400,'Ugyldigt galleri');
+        $ids=[];if($g!==''){access($g);$ids=array_column(rows('SELECT p.id FROM photos p WHERE p.gallery_id=? AND p.uploader<>? AND NOT EXISTS(SELECT 1 FROM media_seen ms WHERE ms.user_id=? AND ms.photo_id=p.id) ORDER BY p.uploaded DESC,p.id DESC LIMIT 500',[$g,$u['id'],$u['id']]),'id');}
+        send(['galleries'=>$list,'photo_ids'=>$ids]);
+    }
+    if($method==='GET'&&$path==='/admin/activity')send(activity_admin());
+    if($method==='POST'&&preg_match('~^/galleries/([a-f0-9]{32})/visit$~D',$path,$m))send(activity_visit($m[1],$u,body()));
     if($method==='PATCH'&&preg_match('~^/galleries/([a-f0-9]{32})$~D',$path,$m)){
         access($m[1],'edit');$b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);
         query('UPDATE galleries SET name=?,description=? WHERE id=?',[$name,$description,$m[1]]);send(['ok'=>true]);
@@ -636,6 +713,9 @@ function route(string $method,string $path): never {
     if (preg_match('~^/galleries/([a-f0-9]{32})/photos$~D',$path,$m)) {
         $g=$m[1];[$u,$a]=access($g,$method==='POST'?'upload':null);
         if ($method==='GET') {
+            if(activity_ready())activity_initialize($u);
+            $news=activity_ready()?rows('SELECT p.id FROM photos p WHERE p.gallery_id=? AND p.uploader<>? AND NOT EXISTS(SELECT 1 FROM media_seen ms WHERE ms.user_id=? AND ms.photo_id=p.id)',[$g,$u['id'],$u['id']]):[];
+            $newIds=array_fill_keys(array_column($news,'id'),true);
             $provenance=$u['admin']&&one('SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=\'lychee_import_items\'')?',(SELECT source_metadata FROM lychee_import_items i WHERE i.target_photo_id=p.id AND i.status=\'imported\' ORDER BY i.id LIMIT 1) _import_metadata':'';
             $ps=rows('SELECT p.*,u.name uploader_name,EXISTS(SELECT 1 FROM favorites f WHERE f.photo_id=p.id AND f.user_id=?) favorite'.$provenance.' FROM photos p JOIN users u ON p.uploader=u.id WHERE gallery_id=? ORDER BY COALESCE(NULLIF(taken,\'\'),uploaded) DESC',[$u['id'],$g]);
             $requests=[];
@@ -643,7 +723,7 @@ function route(string $method,string $path): never {
                 if($u['admin']||$request['requester_id']===$u['id'])$requests[$request['photo_id']]=['id'=>$request['id'],'status'=>$request['status'],'created'=>$request['created']];
             }
             foreach($ps as &$p) {
-                $p['deletion_request']=$requests[$p['id']]??null;
+                $p['deletion_request']=$requests[$p['id']]??null;$p['is_new']=isset($newIds[$p['id']]);
                 if(!empty($p['_import_metadata'])){
                     $source=json_decode($p['_import_metadata'],true);
                     if(is_array($source))$p['import_source']=['version'=>'6.6.12','owner_name'=>(string)($source['_owner_username']??''),'description'=>(string)($source['description']??''),'tags'=>(string)($source['tags']??''),'created_at'=>(string)($source['created_at']??''),'taken_at'=>(string)($source['taken_at']??''),'taken_at_orig_tz'=>(string)($source['taken_at_orig_tz']??''),'source_photo_id'=>(string)($source['id']??'')];

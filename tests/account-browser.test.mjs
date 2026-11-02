@@ -201,3 +201,48 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
     codes=[];
   }finally{try{if(browser)await browser.close();}finally{await site.close();}}
 });
+
+test('compact gallery: new-media reminder, snapshot acknowledgement and admin login/gallery activity',{
+  skip:process.env.LEXGALLERI_TEST!=='1'?'Isolated test database required':binary?false:'Chromium required',timeout:120000,
+},async()=>{
+  const site=await fixture();let ownerBrowser,memberBrowser;
+  try{
+    ownerBrowser=await chrome();memberBrowser=await chrome();
+    const owner=ownerBrowser,member=memberBrowser;
+    await member.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+    await member.call('Page.navigate',{url:site.origin+'/LexGalleri/'});await member.wait("!!document.querySelector('#auth')",'member login');
+    assert(await member.evaluate("document.querySelector('#app').textContent.includes('30 dage')"),'activity notice is visible before login');
+    await member.submit('#auth',{email:site.member_email,password:site.member_password});await member.wait("!!document.querySelector('[data-gallery]')",'member gallery overview');
+    for(const width of [320,390]){
+      await member.call('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});
+      const geometry=await member.evaluate("({overflow:document.documentElement.scrollWidth>innerWidth,first:document.querySelector('[data-gallery]').getBoundingClientRect().top,columns:getComputedStyle(document.querySelector('#gallery-grid')).gridTemplateColumns.split(' ').length,nav:[...document.querySelectorAll('.primary-nav>button')].filter(b=>getComputedStyle(b).display!=='none').length,color:getComputedStyle(document.querySelector('#new-gallery')).backgroundColor})");
+      assert(!geometry.overflow&&geometry.first<300&&geometry.columns===2&&geometry.nav===4,'compact mobile layout exposes the albums with four bottom actions');assert.equal(geometry.color,'rgb(165, 79, 61)');
+    }
+    assert(await member.evaluate("!document.querySelector('#gallery-news')"),'first use does not mark an existing archive as new');
+    await owner.call('Page.navigate',{url:site.origin+'/LexGalleri/'});await owner.wait("!!document.querySelector('#auth')",'owner login');
+    await owner.submit('#auth',{email:site.admin_email,password:site.admin_password});await owner.wait("!!document.querySelector('#mfa-key')",'owner enrollment');
+    const secret=await owner.evaluate("document.querySelector('#mfa-key').value");await owner.submit('#mfa-form',{code:totp(secret)});await owner.wait("!!document.querySelector('#recovery-saved')",'owner recovery codes');
+    await owner.evaluate("document.querySelector('#recovery-saved').checked=true;document.querySelector('#recovery-saved').dispatchEvent(new Event('change'));document.querySelector('#recovery-continue').click()");await owner.wait("!!document.querySelector('[data-gallery]')",'owner gallery');
+    await owner.evaluate("document.querySelector('[data-gallery]').click()");await owner.wait("!!document.querySelector('#files')",'owner upload input');
+    const put=async path=>{const doc=await owner.call('DOM.getDocument'),input=await owner.call('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#files'});await owner.call('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[path]});};
+    await put(site.video_path);await owner.wait("document.querySelectorAll('[data-photo]').length===1&&!document.querySelector('#upload').disabled",'new MP4 upload');
+    await member.evaluate('refreshGalleryNews()');await member.wait("!!document.querySelector('#gallery-news')",'new media banner');
+    assert(await member.evaluate("document.querySelector('#gallery-news').textContent.includes('1 nye')&&document.querySelector('[data-gallery] .new-badge').textContent.includes('1 nye')"),'new content appears on the banner and album');
+    await member.evaluate("document.querySelector('#gallery-news').click()");await member.wait("!!document.querySelector('.photo-new')",'new marker on the displayed snapshot');
+    await member.wait("api('/news').then(n=>n.galleries[0].new_count===0)",'snapshot acknowledgement');
+    await put(site.still_path);await owner.wait("document.querySelectorAll('[data-photo]').length===2&&!document.querySelector('#upload').disabled",'second media upload');
+    await member.evaluate('refreshGalleryNews()');await member.wait("!!document.querySelector('#gallery-load-new')",'arrival during gallery visit');
+    await member.evaluate("document.querySelector('#gallery-load-new').click()");await member.wait("document.querySelectorAll('[data-photo]').length===2",'explicit refresh displays new arrival');
+    await member.wait("api('/news').then(n=>n.galleries[0].new_count===0)",'updated snapshot acknowledgement');
+    await member.evaluate("window.dispatchEvent(new Event('focus'))");assert(await member.evaluate("!!document.querySelector('#photo-grid')&&!document.querySelector('#auth')"),'returning focus does not log the user out');
+    await owner.evaluate("document.querySelector('[data-view=admin]').click()");await owner.wait("!!document.querySelector('#admin-area')",'administration');
+    await owner.evaluate("document.querySelector('#admin-area').value='activity';document.querySelector('#admin-area').dispatchEvent(new Event('change'))");await owner.wait("!!document.querySelector('#activity-member')",'activity dashboard');
+    await owner.evaluate(`document.querySelector('#activity-member').value=${JSON.stringify(site.member_id)};document.querySelector('#activity-member').dispatchEvent(new Event('change'))`);await owner.wait("document.querySelector('.activity-list')?.textContent.includes('Browser Member')",'filtered member events');
+    const events=await owner.evaluate(`api('/admin/activity?user_id=${site.member_id}').then(d=>d.events)`);
+    assert(events.some(e=>e.kind==='login')&&events.some(e=>e.kind==='gallery')&&events.every(e=>['login','gallery'].includes(e.kind)),'admin sees only the agreed login and gallery events');
+    assert(await owner.evaluate("document.querySelector('#content').textContent.includes('Seneste nye billeder og videoer')"));
+    await owner.evaluate(`api('/admin/grants','PUT',{gallery_id:${JSON.stringify(site.gallery_id)},user_id:${JSON.stringify(site.member_id)},view:false})`);
+    await member.evaluate('refreshGalleryNews()');await member.wait("!!document.querySelector('#gallery-grid')&&!document.querySelector('[data-gallery]')",'revoked gallery removed without ending member login');
+    assert(await member.evaluate("!document.querySelector('[data-photo]')&&!document.querySelector('#auth')"));
+  }finally{try{if(ownerBrowser)await ownerBrowser.close();if(memberBrowser)await memberBrowser.close();}finally{await site.close();}}
+});

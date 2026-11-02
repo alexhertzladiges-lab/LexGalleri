@@ -153,3 +153,10 @@ test('a delayed space response cannot overwrite navigation and members never get
   f.run("view='profile';navigationGeneration++");finish({total_bytes:0,limit_bytes:25000000000,scanned_at:1793534400,complete:true,galleries:[]});await pending;
   assert.equal(f.element('#storage-panel').innerHTML,'Existing page');f.run('me={...member}');assert.equal(f.run('storageMountMarkup()'),'');
 });
+test('public-first compact design refreshes only the untouched original palette',()=>{
+  const f=fixture(),colors={};f.ctx.document.documentElement.style.setProperty=(key,value)=>{colors[key]=value;};
+  f.ctx.theme={version:1,name:'Nordisk',colors:{background:'#f7f6f2',surface:'#ffffff',text:'#263b34',accent:'#416c57'},radius:16,density:'comfortable',font:'sans'};
+  f.run('applyTheme(theme)');assert.equal(colors['--accent'],'#a54f3d');assert.equal(colors['--background'],'#f8f4ed');assert.equal(f.ctx.theme.colors.accent,'#416c57','the display upgrade does not mutate server theme data');
+  f.run("theme.colors.accent='#304c72';applyTheme(theme)");assert.equal(colors['--accent'],'#304c72');assert.equal(colors['--background'],'#f7f6f2');
+  f.run("theme.colors.accent='#416c57';theme.name='Min egen pakke';applyTheme(theme)");assert.equal(colors['--accent'],'#416c57');
+});

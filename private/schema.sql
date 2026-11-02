@@ -87,3 +87,24 @@ CREATE TABLE IF NOT EXISTS invitation_galleries (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO settings(`key`,value) VALUES('invitation_version','2');
+
+-- LexGalleri: new-media receipts and 30-day login/gallery activity.
+-- Re-runnable. No existing photo, account or password is changed.
+CREATE TABLE IF NOT EXISTS activity_users (
+ user_id CHAR(32) PRIMARY KEY, initialized_at DATETIME(6) NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS media_seen (
+ user_id CHAR(32) NOT NULL, photo_id CHAR(32) NOT NULL, seen_at DATETIME(6) NOT NULL,
+ PRIMARY KEY(user_id,photo_id),
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+ FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS activity_events (
+ id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+ user_id CHAR(32) NOT NULL, kind VARCHAR(16) NOT NULL, gallery_id CHAR(32) NULL,
+ occurred_at DATETIME(6) NOT NULL, event_key CHAR(64) NOT NULL UNIQUE,
+ KEY activity_time(occurred_at), KEY activity_user(user_id,occurred_at),
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+ FOREIGN KEY(gallery_id) REFERENCES galleries(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

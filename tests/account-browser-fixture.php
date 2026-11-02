@@ -33,7 +33,8 @@ try {
     for($i=0;$i<80;$i++){$status=@file_get_contents($origin.'/LexGalleri/api/status',false,$context);if(is_string($status)&&str_contains($status,'"setup":false')){$ready=true;break;}usleep(100000);}
     if(!$ready)throw new RuntimeException('Disposable PHP browser server did not become ready');
     $videoPath=$temp.'/browser-video.mp4';file_put_contents($videoPath,base64_decode(file_get_contents($root.'/tests/fixtures/tiny.mp4.b64'),true));
-    echo json_encode(['video_path'=>$videoPath,'origin'=>$origin,'admin_email'=>$adminEmail,'admin_password'=>$adminPassword,'member_email'=>$memberEmail,'member_password'=>$memberPassword,'member_id'=>$memberId,'gallery_id'=>$galleryId],JSON_THROW_ON_ERROR)."\n";flush();
+    $stillPath=$temp.'/browser-still.jpg';$im=imagecreatetruecolor(120,80);imagefill($im,0,0,imagecolorallocate($im,77,135,172));imagejpeg($im,$stillPath);unset($im);
+    echo json_encode(['still_path'=>$stillPath,'video_path'=>$videoPath,'origin'=>$origin,'admin_email'=>$adminEmail,'admin_password'=>$adminPassword,'member_email'=>$memberEmail,'member_password'=>$memberPassword,'member_id'=>$memberId,'gallery_id'=>$galleryId],JSON_THROW_ON_ERROR)."\n";flush();
     // Parent sends a line (or EOF) after closing Chromium, including on failure.
     fgets(STDIN);
 }catch(Throwable $error){$exit=1;fwrite(STDERR,'Account browser fixture: '.$error->getMessage()."\n");}
