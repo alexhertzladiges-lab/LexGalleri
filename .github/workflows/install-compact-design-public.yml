@@ -11,9 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Owner authorized testing and installation of the compact design.
-    if: >-
-      ${{ github.event.before == '722f4031475489dfe05cf0ab06adfa856106dcc0' && github.event.head_commit.message == 'deploy: install approved compact gallery design' }}
+    # Approval consumed: successful public installation run 41448013087.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
