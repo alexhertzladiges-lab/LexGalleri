@@ -9,7 +9,7 @@ Overfør filerne fra public/ til den eksisterende offentlige LexGalleri-mappe, i
 ## Brug
 
 - Åbn et galleri og vælg **Del via Signal**. På en telefon med understøttet delingsmenu vælges Signal og derefter en modtager/samtale. Webappen kan ikke tvinge et bestemt program frem i systemets menu.
-- På pc og telefoner uden delingsmenu vises et link og **Kopiér link**. Indsæt det i Signal. Hvis clipboard ikke understøttes, kan linket markeres og kopieres manuelt.
+- **Kopiér link** findes også direkte i galleriet, hvis Signal ikke vises i systemets menu. På pc og telefoner uden delingsmenu vises et link og **Kopiér link**. Indsæt det i Signal. Hvis clipboard ikke understøttes, kan linket markeres og kopieres manuelt.
 - Admin får samme delingsvalg ved et nyoprettet personligt invitationslink. Invitationens eksisterende udløb, modtager og valgte rettigheder bevares. Det personlige link bør kun sendes til den pågældende gæst.
 - En annulleret delingsmenu kopierer ikke noget og åbner ikke en ny dialog. Ingen SMS, e-mail, bot eller serverbesked sendes automatisk. Ingen Signal-konto eller API-nøgle konfigureres i LexGalleri.
 
