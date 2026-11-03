@@ -119,9 +119,9 @@ function gallery_share_members(string $gallery,array $b): array {
         if(!one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$gallery]))fail(404,'Galleriet findes ikke');
         $people=rows("SELECT u.* FROM users u WHERE u.id IN (".implode(',',array_fill(0,count($locks),'?')).") AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) ORDER BY u.id FOR UPDATE",$locks);
         $people=array_column($people,null,'id');$fresh=$people[$actor['id']]??null;
-        if(!$fresh)fail(401,'Log ind igen');lg_security_validate_session($fresh);
+        if(!$fresh||lg_security_member_deleted($actor['id'],true))fail(401,'Log ind igen');lg_security_validate_session($fresh);
         if(!gallery_member_share_allowed($gallery,$fresh))fail(403,'Din adgang til at dele galleriet er ændret');
-        foreach($ids as $id)if($id===$fresh['id']||!isset($people[$id])||$people[$id]['admin'])fail(409,'Valget indeholder et medlem, som ikke længere kan tilføjes. Opdatér listen');
+        foreach($ids as $id)if($id===$fresh['id']||!isset($people[$id])||$people[$id]['admin']||lg_security_member_deleted($id,true))fail(409,'Valget indeholder et medlem, som ikke længere kan tilføjes. Opdatér listen');
         $added=0;
         foreach($ids as $id){
             if(one('SELECT 1 FROM grants WHERE gallery_id=? AND user_id=?',[$gallery,$id]))continue;
@@ -141,11 +141,11 @@ function gallery_assign_owner(string $gallery,array $b): array {
     try{
         if(!one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$gallery]))fail(404,'Galleriet findes ikke');
         $people=rows("SELECT u.* FROM users u WHERE u.id IN (".implode(',',array_fill(0,count($ids),'?')).") AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) ORDER BY u.id FOR UPDATE",$ids);$people=array_column($people,null,'id');
-        $fresh=$people[$actor['id']]??null;if(!$fresh)fail(401,'Log ind igen');lg_security_validate_session($fresh);if(!$fresh['admin'])fail(403,'Kun administrator');
+        $fresh=$people[$actor['id']]??null;if(!$fresh||lg_security_member_deleted($actor['id'],true))fail(401,'Log ind igen');lg_security_validate_session($fresh);if(!$fresh['admin'])fail(403,'Kun administrator');
         if(gallery_owner_id($gallery)!==$b['expected_owner_id'])fail(409,'Ejeren er ændret. Opdatér listen før du prøver igen');
         $id=$b['user_id'];
         if($id!==null){
-            if(!isset($people[$id]))fail(409,'Medlemmet findes ikke længere');
+            if(!isset($people[$id])||lg_security_member_deleted($id,true))fail(409,'Medlemmet findes ikke længere');
             query('INSERT INTO settings(`key`,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',['gallery_owner_'.$gallery,$id]);
             if(!$people[$id]['admin']){
                 query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1) ON DUPLICATE KEY UPDATE upload=1,download=1,gps=1',[$gallery,$id]);
