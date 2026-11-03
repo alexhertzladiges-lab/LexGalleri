@@ -116,3 +116,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+      - name: Build public-only Signal sharing update
+        run: python3 scripts/package-telefon-mp4.py --signal-sharing
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-signal-sharing-${{ github.sha }}
+          path: dist/lexgalleri-signal-sharing/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

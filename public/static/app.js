@@ -9,6 +9,43 @@ let navigationGeneration=0,serverCapabilities={};
 let galleryDeleteState=null;
 let passwordControlSequence=0;
 let galleryNewsTimer=null,galleryNewsBusy=false;
+let requestedGalleryId=galleryIdFromHash(location.hash);
+function galleryIdFromHash(hash){return /^#gallery=([a-f0-9]{32})$/.exec(hash||'')?.[1]||null;}
+function galleryShareUrl(id){
+  if(!/^[a-f0-9]{32}$/.test(id))throw Error('Gallerilinket kunne ikke bekræftes');
+  const url=new URL(BASE+'/',location.origin);url.hash='gallery='+id;return url.href;
+}
+async function consumeGalleryLink(){
+  const id=requestedGalleryId;if(!id||!me)return;
+  requestedGalleryId=null;history.replaceState({},'',BASE+'/');
+  if(!galleries.some(g=>g.id===id)){toast('Galleriet kunne ikke åbnes. Bed administratoren kontrollere din adgang.');return;}
+  await openGallery(id);
+}
+function shareLinkDialog(payload,invitation){
+  modal(invitation?'Del invitation':'Del galleri',`<div class="dialog-content"><p>Del linket i Signal ved at indsætte det i en samtale. På telefoner med en delingsmenu kan du vælge Signal dér.</p><p>${invitation?'Dette er et personligt invitationslink. Send det kun til den gæst, invitationen er oprettet til.':'Linket giver ikke adgang i sig selv. Modtageren skal logge ind og have adgang til galleriet.'}</p><label>Link<input id="shared-link" readonly value="${esc(payload.url)}"></label><button id="copy-shared-link" type="button">Kopiér link</button><p id="shared-link-status" role="status"></p></div>`);
+  privateAccountDialog=invitation;
+  const account=accountGeneration,generation=photoViewerGeneration,field=$('#shared-link');
+  const active=()=>me&&account===accountGeneration&&generation===photoViewerGeneration&&M.open&&$('#shared-link')===field;
+  $('#copy-shared-link').onclick=async()=>{
+    if(!active())return;
+    try{await navigator.clipboard.writeText(payload.url);if(active())$('#shared-link-status').textContent='Linket er kopieret. Indsæt det i Signal.';}
+    catch{if(active()){field.focus();field.select();$('#shared-link-status').textContent='Markér og kopiér linket, og indsæt det i Signal.';}}
+  };
+}
+async function shareLink(payload,{invitation=false,active=()=>true}={}){
+  if(!me||invitation&&!me.admin||!active())return;
+  const account=accountGeneration;
+  const valid=()=>me&&account===accountGeneration&&(!invitation||me.admin)&&active();
+  if(typeof navigator.share==='function'&&globalThis.isSecureContext===true){
+    try{await navigator.share(payload);return;}
+    catch(error){if(error?.name==='AbortError'||!valid())return;}
+  }
+  if(valid())shareLinkDialog(payload,invitation);
+}
+function shareGallery(gallery){
+  if(!gallery||!me||current?.id!==gallery.id)return;
+  return shareLink({title:gallery.name,text:'Se galleriet i LexGalleri. Du skal logge ind og have adgang.',url:galleryShareUrl(gallery.id)},{active:()=>current?.id===gallery.id&&view==='galleries'});
+}
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,method='GET',body){const opt={method};if(body instanceof FormData)opt.body=body;else if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body)}const r=await fetch(BASE+'/api'+path,opt);let b;try{b=await r.json()}catch{throw Error('Serveren kunne ikke svare')}if(!r.ok){const error=Error(b.detail||'Der opstod en fejl');error.status=r.status;throw error}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',4500)}
@@ -120,7 +157,7 @@ function recoveryCodesView(codes,continueWith){
 }
 function auth(setup=false,invite=null,prefill=''){clearAccountWorkspace();me=null;A.innerHTML=`<div class="login"><div class="brand">◈ Lex<span>Galleri</span></div><div class="eyebrow">Kun for jer</div><h1>${setup?'Et hjem til jeres minder.':invite?'Du er inviteret.':'Velkommen hjem.'}</h1><p class="muted">${setup?'Opret familiens administrator for at komme i gang.':invite?'Første gang vælger du en adgangskode på mindst 12 tegn. Har du allerede accepteret, bruger du den samme adgangskode. Linket bekræfter ikke ejerskabet af et telefonnummer; del det privat.':'Log ind og find tilbage til de øjeblikke, I deler.'}</p><form id="auth">${setup?'<label>Opsætningsnøgle<input name="token" type="password" required></label><label>Dit navn<input name="name" autocomplete="name" required></label>':''}${invite?'':`<label>${setup?'E-mail':'E-mail eller dansk telefonnummer'}<input name="email" type="${setup?'email':'text'}" autocomplete="username" value="${esc(prefill)}" required></label>`}<label>Adgangskode<input name="password" type="password" autocomplete="${setup||invite?'new-password':'current-password'}" minlength="${setup?12:1}" required></label><div class="error" role="alert"></div><button type="submit">${setup?'Opret familiearkiv':invite?'Acceptér invitation':'Log ind'} →</button></form><p class="muted" style="font-size:12px;margin-top:26px">Private billeder. Fælles minder.</p>${activityNotice()}</div>`;addPasswordToggles(A);formHandler('#auth',async b=>{if(invite)b.token=invite;else if(!setup&&!b.email.includes('@')){b.phone=b.email;delete b.email;}const result=await api(setup?'/setup':invite?'/accept':'/login','POST',b);await authResult(result,true)})}
 async function init(){try{const s=await api('/status');serverCapabilities=s.capabilities&&typeof s.capabilities==='object'?s.capabilities:{};if(s.account_security_version!==1||(!s.setup&&s.account_security_ready!==true))return accountMaintenance();const token=new URLSearchParams(location.search).get('invite');if(token)return auth(false,token);if(s.setup)return auth(true);try{me=await api('/me')}catch(error){if(error.status&&error.status!==401)throw error;let pending;try{pending=await api('/mfa/status')}catch(problem){if(problem.status&&![401,404].includes(problem.status))throw problem;return auth()}return mfaGate(pending)}await start()}catch(e){A.innerHTML='<div class="login"><h1>Kunne ikke starte</h1><p>'+esc(e.message)+'</p></div>'}}
-async function start(){const generation=++navigationGeneration,account=accountGeneration;const theme=await api('/theme');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;const list=await api('/galleries');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;applyTheme(theme);galleries=list;shell();await render();startGalleryNewsPolling()}
+async function start(){const generation=++navigationGeneration,account=accountGeneration;const theme=await api('/theme');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;const list=await api('/galleries');if(generation!==navigationGeneration||account!==accountGeneration||!me)return;applyTheme(theme);galleries=list;shell();await render();await consumeGalleryLink();startGalleryNewsPolling()}
 function shell(){
   A.innerHTML=`<div class="shell compact-shell"><aside><div class="brand">◈ Lex<span>Galleri</span></div><nav class="primary-nav" aria-label="Hovedmenu"><button data-view="galleries"><span aria-hidden="true">▧</span><span>Gallerier</span></button><button data-view="timeline"><span aria-hidden="true">◷</span><span>Tidslinje</span></button><button data-view="favorites"><span aria-hidden="true">♡</span><span>Favoritter</span></button><button class="desktop-nav-only" data-view="profile">Min profil</button>${me.admin?'<button class="desktop-nav-only" data-view="admin" aria-controls="admin-subnav" aria-expanded="false">Administration</button>':''}<button id="more-menu" class="mobile-nav-only"><span aria-hidden="true">☰</span><span>Mere</span></button></nav><details class="account-menu" id="account-menu"><summary class="avatar" aria-label="Din konto">${esc((me.name||'?')[0])}</summary><div class="account-popover"><strong>${esc(me.name)}</strong><p>${me.admin?'Administrator':'Medlem'}</p><button class="secondary" id="account-profile" type="button">Min profil</button><button id="logout" type="button">Log ud</button><button id="mobile-logout" type="button">Log ud</button>${activityNotice()}</div></details>${me.admin?`<div class="admin-subnav" id="admin-subnav" hidden>${adminAreas.filter(([key])=>key!=='admin').map(([key,label])=>`<button type="button" data-view="${key}">${label}</button>`).join('')}</div>`:''}</aside><main><div id="content"></div></main></div>`;
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigateView(b.dataset.view));
@@ -313,8 +350,9 @@ async function galleryView(){
   }
   if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
   photos=result.photos;permissions=result.permissions;
-  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${galleryEditButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button>${galleryEditButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
   $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
+  $('#share-gallery').onclick=()=>shareGallery(requestGallery);
   recordGalleryVisit(requestGallery,photos,()=>galleryRequestActive(generation,account,requestView,requestGallery));
   bindGalleryDelete(requestGallery);if($('#edit-gallery'))$('#edit-gallery').onclick=()=>editGallery(requestGallery);
   const filter=()=>{if(galleryDeleteState?.active){galleryDeleteState.selected.clear();$('#gallery-delete-feedback').textContent='Markeringerne er nulstillet, fordi søgningen eller sorteringen blev ændret.';}const q=$('#search-photo').value.toLowerCase(),key=$('#sort').value;drawPhotos(photos.filter(photo=>[photo.title,photo.place,photo.uploader_name].join(' ').toLowerCase().includes(q)).sort((a,b)=>(b[key]||'').localeCompare(a[key]||'')));};
@@ -841,8 +879,9 @@ function inviteForm(){
       const reply=await api('/admin/invitations','POST',payload);if(typeof reply?.path!=='string'||!reply.path.startsWith(BASE+'/?invite='))throw Error('Serveren kunne ikke bekræfte invitationslinket.');
       if(!active())return;
       const assigned=Array.isArray(reply.galleries)?reply.galleries:[{name:galleries.find(g=>g.id===payload.gallery_id)?.name,...payload}];
-      modal('Invitationen er klar',`<div class="dialog-content"><p>Send dette personlige link privat til gæsten. ${reply.reusable?'Det kan åbnes igen med gæstens adgangskode, indtil det udløber efter 7 dage eller tilbagekaldes.':'Det kan bruges én gang og udløber efter 7 dage.'} Ingen SMS eller e-mail er sendt automatisk.</p><h3>Adgang fra starten</h3><ul class="invite-summary">${assigned.map(choice=>`<li><strong>${esc(choice.name)}</strong><span>Se galleri${rights.filter(([key])=>choice[key]).map(([,label])=>' · '+esc(label)).join('')}</span></li>`).join('')}</ul><label>Personligt invitationslink<input id="invite-link" readonly value="${esc(location.origin+reply.path)}"></label><button id="copy-link">Kopiér link</button></div>`);privateAccountDialog=true;
+      modal('Invitationen er klar',`<div class="dialog-content"><p>Send dette personlige link privat til gæsten. ${reply.reusable?'Det kan åbnes igen med gæstens adgangskode, indtil det udløber efter 7 dage eller tilbagekaldes.':'Det kan bruges én gang og udløber efter 7 dage.'} Ingen SMS eller e-mail er sendt automatisk.</p><h3>Adgang fra starten</h3><ul class="invite-summary">${assigned.map(choice=>`<li><strong>${esc(choice.name)}</strong><span>Se galleri${rights.filter(([key])=>choice[key]).map(([,label])=>' · '+esc(label)).join('')}</span></li>`).join('')}</ul><label>Personligt invitationslink<input id="invite-link" readonly value="${esc(location.origin+reply.path)}"></label><div class="share-actions"><button id="copy-link">Kopiér link</button><button class="secondary" id="share-invitation" type="button">Del via Signal</button></div></div>`);privateAccountDialog=true;
       $('#copy-link').onclick=async()=>{try{await navigator.clipboard.writeText($('#invite-link').value);toast('Link kopieret')}catch{$('#invite-link').select();}};
+      const inviteLink=$('#invite-link').value;$('#share-invitation').onclick=()=>shareLink({title:'Invitation til LexGalleri',text:'Din personlige invitation til LexGalleri. Gem linket privat.',url:inviteLink},{invitation:true,active:()=>M.open&&$('#invite-link')?.value===inviteLink});
     }catch(error){if(active())$('.error',form).textContent=error.message;}
     finally{pending=false;controls.forEach(([element,disabled])=>element.disabled=disabled);}
   };
@@ -1165,6 +1204,7 @@ function requestDialogClose(){
 }
 
 if(typeof window!=='undefined')window.addEventListener('focus',()=>refreshGalleryNews());
+if(typeof window!=='undefined')window.addEventListener('hashchange',()=>{const id=galleryIdFromHash(location.hash);if(!id)return;requestedGalleryId=id;if(me)consumeGalleryLink().catch(()=>toast('Galleriet kunne ikke åbnes. Prøv igen.'));});
 if(typeof document!=='undefined')document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState!=='hidden')refreshGalleryNews()});
 if(typeof window!=='undefined')window.addEventListener('beforeunload',event=>{if(grantDialog?.dirty()){event.preventDefault();event.returnValue='';}});
 M.addEventListener('keydown',photoViewerKeydown);

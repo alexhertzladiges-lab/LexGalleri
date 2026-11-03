@@ -1364,3 +1364,25 @@ test('real Chromium: compact public design works before the optional private new
     assert.equal(await run('document.querySelectorAll("[data-gallery]").length'),0);
   }finally{if(browser)await browser.close();await site.close();}
 });
+
+test('real Chromium: Signal chooser cancellation, fallback and gallery links on mobile and desktop',{
+  skip:binary?false:'Chromium required',timeout:60000,
+},async()=>{
+  const site=await fixture({member:true,galleryCreate:true});let browser;
+  try{
+    browser=await chrome();const {call,evaluate:run,wait}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/#gallery='+site.galleryId});await wait('!!document.querySelector("#share-gallery")','shared gallery automatically opened');
+    for(const width of [320,390,1280]){
+      await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<500});
+      assert(await run('(()=>{const r=document.querySelector("#share-gallery").getBoundingClientRect();return r.height>=44&&r.left>=0&&r.right<=innerWidth&&document.documentElement.scrollWidth<=innerWidth})()'),'share control remains usable at '+width);
+    }
+    await run('Object.defineProperty(navigator,"share",{configurable:true,writable:true,value:async data=>{globalThis.__shared={...data}}});document.querySelector("#share-gallery").click()');await wait('!!globalThis.__shared','native payload');
+    assert.equal(await run('globalThis.__shared.url'),site.origin+base+'/#gallery='+site.galleryId);assert(await run('!document.querySelector("#modal").open'));
+    await run('navigator.share=async()=>{throw {name:"AbortError"}};document.querySelector("#share-gallery").click()');assert(await run('!document.querySelector("#modal").open'));
+    await run('navigator.share=async()=>{throw {name:"NotAllowedError"}};document.querySelector("#share-gallery").click()');await wait('!!document.querySelector("#shared-link")&&document.querySelector("#modal").open','blocked chooser has an explicit fallback');
+    assert(await run('document.querySelector("#modal").textContent.includes("giver ikke adgang")'));
+    await run('document.querySelector("#close-modal").click();location.hash="#gallery="+"0".repeat(32)');await wait('document.querySelector("#toast").textContent.includes("adgang")','unavailable target explains access');
+    assert(!site.requests.some(p=>p.includes('/galleries/'+'0'.repeat(32)+'/photos')),'unavailable gallery metadata is not requested');
+    assert(!site.requests.some(p=>/signal\.(org|me)|textsecure/.test(p)),'no Signal server or bot is contacted');
+  }finally{if(browser)await browser.close();await site.close();}
+});

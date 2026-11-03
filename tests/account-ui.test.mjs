@@ -160,3 +160,34 @@ test('public-first compact design refreshes only the untouched original palette'
   f.run("theme.colors.accent='#304c72';applyTheme(theme)");assert.equal(colors['--accent'],'#304c72');assert.equal(colors['--background'],'#f7f6f2');
   f.run("theme.colors.accent='#416c57';theme.name='Min egen pakke';applyTheme(theme)");assert.equal(colors['--accent'],'#416c57');
 });
+test('shared gallery URL contains only a validated gallery fragment, never an invitation token',()=>{
+  const f=fixture();f.run("location.search='?invite=DO_NOT_SHARE';location.hash='#unsafe'");
+  assert.equal(f.run("galleryShareUrl('a'.repeat(32))"),'https://example.test/LexGalleri/#gallery='+'a'.repeat(32));
+  assert.throws(()=>f.run("galleryShareUrl('../private')"));assert.equal(f.run("galleryIdFromHash('#gallery='+ 'b'.repeat(32))"),'b'.repeat(32));
+  assert.equal(f.run("galleryIdFromHash('#gallery='+ 'b'.repeat(32)+'&invite=secret')"),null);
+});
+test('sharing calls the native chooser directly and does not contact an external service',async()=>{
+  const f=fixture(),seen=[];f.ctx.isSecureContext=true;f.ctx.navigator.share=async p=>{seen.push({...p});};
+  f.run("current={id:'a'.repeat(32),name:'Mit galleri'};view='galleries'");await f.run('shareGallery(current)');
+  assert.equal(seen.length,1);assert.equal(seen[0].url,'https://example.test/LexGalleri/#gallery='+'a'.repeat(32));assert.equal(f.calls.length,0);assert(!f.element('#modal').open);
+});
+test('cancelling native sharing does not copy a link or open another dialog; denial offers explicit copying',async()=>{
+  const f=fixture();let copies=0;f.ctx.isSecureContext=true;f.ctx.navigator.clipboard.writeText=async()=>copies++;
+  f.ctx.payload={title:'Galleri',url:'https://example.test/LexGalleri/#gallery='+'a'.repeat(32)};
+  f.ctx.navigator.share=async()=>{throw{name:'AbortError'};};await f.run('shareLink(payload)');assert.equal(copies,0);assert(!f.element('#modal').open);
+  f.ctx.navigator.share=async()=>{throw{name:'NotAllowedError'};};await f.run('shareLink(payload)');assert(f.element('#modal').open);assert.equal(copies,0);assert(f.element('#modal').innerHTML.includes('Linket giver ikke adgang'));
+  await f.element('#copy-shared-link').onclick();assert.equal(copies,1);assert(f.element('#shared-link-status').textContent.includes('kopieret'));
+});
+test('a member cannot use the invitation-sharing helper',async()=>{
+  const f=fixture();let calls=0;f.ctx.isSecureContext=true;f.ctx.navigator.share=async()=>calls++;f.run('me={...member}');
+  await f.run("shareLink({url:'https://example.test/LexGalleri/?invite=synthetic'},{invitation:true})");assert.equal(calls,0);assert(!f.element('#modal').open);
+});
+test('a delayed share failure cannot restore a previous account dialog',async()=>{
+  const f=fixture();let reject;f.ctx.isSecureContext=true;f.ctx.navigator.share=()=>new Promise((_,r)=>reject=r);
+  const pending=f.run("shareLink({url:'https://example.test/LexGalleri/#gallery='+ 'a'.repeat(32)})");f.run("clearAccountWorkspace();me=null;M.innerHTML=''");reject({name:'NotAllowedError'});await pending;assert.equal(f.element('#modal').innerHTML,'');assert(!f.element('#modal').open);
+});
+test('shared links open only galleries in the signed-in account list and are consumed once',async()=>{
+  const f=fixture(),opened=[];f.ctx.opened=opened;f.run("openGallery=async id=>opened.push(id);me={...member};galleries=[{id:'a'.repeat(32)}];requestedGalleryId='c'.repeat(32)");
+  await f.run('consumeGalleryLink()');assert.equal(opened.length,0);assert.equal(f.calls.length,0);assert(f.messages.some(m=>m.includes('adgang')));
+  f.run("requestedGalleryId='a'.repeat(32)");await f.run('consumeGalleryLink()');await f.run('consumeGalleryLink()');assert.deepEqual(opened,['a'.repeat(32)]);
+});

@@ -77,7 +77,7 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
   const site=await fixture();let browser;
   try{
     browser=await chrome();const {evaluate:run,wait,submit,call}=browser;
-    await call('Page.navigate',{url:site.origin+'/LexGalleri/'});await wait("!!document.querySelector('#auth')",'password login');
+    await call('Page.navigate',{url:site.origin+'/LexGalleri/#gallery='+site.gallery_id});await wait("!!document.querySelector('#auth')",'password login');
     await submit('#auth',{email:site.admin_email,password:site.admin_password});
     await wait("!!document.querySelector('#mfa-key') && !!document.querySelector('#mfa-qr svg')",'local Authenticator enrollment QR');
     assert.equal(await run("document.querySelector('[data-view=galleries]')===null"),true,'password alone cannot open the authenticated gallery');
@@ -89,6 +89,7 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
     assert.equal(await run("document.querySelector('#mfa-key')===null && document.querySelector('#mfa-qr')===null"),true,'setup secrets are removed after confirmation');
     await run("document.querySelector('#recovery-saved').checked=true;document.querySelector('#recovery-saved').dispatchEvent(new Event('change'));document.querySelector('#recovery-continue').click()");
     await wait("!!document.querySelector('[data-view=profile]')",'authenticated gallery after confirmation');
+    await wait("!!document.querySelector('#photo-grid')",'shared gallery survives Authenticator and recovery acknowledgement');
     await t.test('own profile displays active Authenticator without exposing enrollment data',async()=>{
       await run("document.querySelector('[data-view=profile]').click()");await wait("!!document.querySelector('#mfa-replace')",'admin profile');
       assert(await run("document.querySelector('#content').textContent.includes('Aktiveret') && document.querySelector('#content').textContent.includes('browser-admin@example.test')"));
@@ -112,6 +113,7 @@ test('real PHP and Chromium: admin Authenticator enrollment and member profile m
       assert(await run("document.querySelector('#invite-email').disabled && !document.querySelector('#invite-email').required && document.querySelector('#invite-phone').required"),'hidden email cannot block a phone invitation');
       await submit('#invite-form',{name:'Phone Browser Guest',phone:'+45 20 00 00 03'});await wait("!!document.querySelector('#invite-link')",'telephone invitation acknowledgment');
       phoneLink=await run("document.querySelector('#invite-link').value");assert(phoneLink.startsWith(site.origin+'/LexGalleri/?invite='));
+      await run("Object.defineProperty(navigator,'share',{configurable:true,value:async data=>globalThis.__invitationShare={...data}});document.querySelector('#share-invitation').click()");assert.equal(await run("globalThis.__invitationShare.url"),phoneLink);
       assert(await run("document.querySelector('#modal').textContent.includes('åbnes igen')"));
       await run("document.querySelector('#close-modal').click();document.querySelector('#invitation-list').click()");await wait("!!document.querySelector('[data-revoke-invite]')",'invitation status listing');
       assert(await run("document.querySelector('#modal').textContent.includes('+4520000003')"));await run("document.querySelector('#close-modal').click()");
@@ -245,4 +247,26 @@ test('compact gallery: new-media reminder, snapshot acknowledgement and admin lo
     await member.evaluate('refreshGalleryNews()');await member.wait("!!document.querySelector('#gallery-grid')&&!document.querySelector('[data-gallery]')",'revoked gallery removed without ending member login');
     assert(await member.evaluate("!document.querySelector('[data-photo]')&&!document.querySelector('#auth')"));
   }finally{try{if(ownerBrowser)await ownerBrowser.close();if(memberBrowser)await memberBrowser.close();}finally{await site.close();}}
+});
+
+test('shared gallery survives ordinary member login and never grants invitation privileges',{
+  skip:process.env.LEXGALLERI_TEST!=='1'?'Isolated test database required':binary?false:'Chromium required',timeout:90000,
+},async()=>{
+  const site=await fixture();let browser;
+  try{
+    browser=await chrome();const {call,evaluate:run,wait,submit}=browser;
+    await call('Page.navigate',{url:site.origin+'/LexGalleri/#gallery='+site.gallery_id});await wait('!!document.querySelector("#auth")','shared link requires login');
+    assert.equal(await run('fetch("/LexGalleri/api/galleries").then(r=>r.status)'),401);
+    await submit('#auth',{email:site.member_email,password:site.member_password});await wait('!!document.querySelector("#photo-grid")','requested gallery after member login');
+    assert.equal(await run('document.querySelector("#gallery-title").textContent'),'Browser testgalleri');
+    assert.equal(await run('fetch("/LexGalleri/api/admin/invitations").then(r=>r.status)'),403,'sharing does not confer admin invitation permissions');
+    await run('Object.defineProperty(navigator,"share",{configurable:true,value:undefined});Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async value=>globalThis.__copiedLink=value}});document.querySelector("#share-gallery").click()');
+    await wait('document.querySelector("#modal").open&&!!document.querySelector("#shared-link")','explicit copy fallback');
+    await run('document.querySelector("#copy-shared-link").click()');await wait('!!globalThis.__copiedLink','copied gallery link');
+    assert.equal(await run('globalThis.__copiedLink'),site.origin+'/LexGalleri/#gallery='+site.gallery_id);
+    await run('document.querySelector("#close-modal").click();accountSignOut()');await wait('!!document.querySelector("#auth")','member logout');
+    await call('Page.navigate',{url:site.origin+'/LexGalleri/#gallery='+'0'.repeat(32)});await wait('!!document.querySelector("#auth")','unavailable shared gallery login');
+    await submit('#auth',{email:site.member_email,password:site.member_password});await wait('!!document.querySelector("#gallery-grid")&&document.querySelector("#toast").textContent.includes("adgang")','unavailable gallery explains access without opening content');
+    assert(await run('!document.querySelector("#photo-grid")&&!document.querySelector("#invite")'));
+  }finally{try{if(browser)await browser.close();}finally{await site.close();}}
 });
