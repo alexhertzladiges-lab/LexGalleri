@@ -44,4 +44,19 @@ Efter MySQL-rettelsen afviste MariaDB den samme samtidige operation med SQL-fejl
 - Ingen SQL, private konfigurationer, credentials, sessioner, rigtige medlemmer eller medier følger med pakken. Signal-deling er inkluderet, så den tidligere separate offentlige Signal-pakke ikke skal installeres først.
 - Ingen merge eller ændring på webhotellet er udført. Der er ikke sendt en rigtig Signal-besked, e-mail eller SMS. Lokale testdatabaser og testservere er stoppet og ryddet op; nul testdatabaser efterladt.
 
-**Status: færdigkodet, testet og pakket, endnu ikke installeret.** Upload af den private app.php (0600) skal ske via ejerens cPanel, da den eksisterende FTPS-konto kun har adgang til de offentlige filer. Derefter kan de offentlige filer installeres og efterkontrolleres. Ingen ny SQL er nødvendig. Vejledning: installation/member-sharing/INSTALLER.md. Ældre gallerier får først en medlemsejer, når admin udpeger den; eksisterende adgang ændres ikke ved selve installationen.
+**Status efter nedenstående installation: installeret og teknisk efterkontrol bestået.** Upload af den private app.php (0600) skal ske via ejerens cPanel, da den eksisterende FTPS-konto kun har adgang til de offentlige filer. Derefter kan de offentlige filer installeres og efterkontrolleres. Ingen ny SQL er nødvendig. Vejledning: installation/member-sharing/INSTALLER.md. Ældre gallerier får først en medlemsejer, når admin udpeger den; eksisterende adgang ændres ikke ved selve installationen.
+
+
+## Installation, 3. november 2026
+
+Ejeren godkendte installationen med »ok installér«. Den private app.php annoncerede member_gallery_sharing=true, account_security_ready=true og storage_overview=true før offentlig filoverførsel, så der var ingen manglende privat aktivering ved installationen.
+
+- [Installation 41704935183](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41704935183), job 126157610082: **SUCCESS**, installationscommit `9e89158e91c3ea1d605be41d6972c5021aaf1c1d`.
+- Installeret fra præcis den godkendte programversion `3b538029ddedabb180df2d1d7a7e45a87dd23ac0`. Grøn testkørsel, pakke-ID, ZIP-SHA-256 og alle 12 offentlige pakkefiler blev kontrolleret før overførsel. 15 FTPS-planprøver bestod igen.
+- Den eksisterende, begrænsede LexGalleri-FTPS-konto blev anvendt med krævet TLS, certifikat- og værtskontrol. Den offentlige index.php identificerede den godkendte installationsrod inden ændringer. Kun de 12 tilladte offentlige filer blev overført, genlæst og verificeret med SHA-256: **12 PASS**.
+- HTTP-efterkontrol kl. 19:38 UTC: offentlig indgang, installeret JavaScript/CSS SHA-256, kontosikkerhed, member_gallery_sharing og storage_overview: **PASS**. gallery_news og member_activity meldes nu også klar af den private backend.
+- [Installationsbevis](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41704935183/artifacts/13265272916), artefakt 13265272916, SHA-256 `bc9cf5e8f8abb09b0d0fce48e416a3ef7fa13bad24c0abe0112d7862504da3e6`. Desuden installation/member-sharing/public-installed.json.
+- Ingen private programfiler, SQL, konfiguration, credentials, medlemsadgange eller medier blev ændret af den automatiske installation. Den private fil var allerede uploadet af ejeren. Ingen rigtig Signal-besked, e-mail eller SMS er sendt, og ingen produktionskonto er brugt til at tildele adgang under efterkontrollen.
+- Engangsworkflowet er lukket med if=false efter succes; ingen merge. Ejerudpegning for ældre gallerier er en efterfølgende adminhandling og er ikke udført automatisk.
+
+**Status: installeret og teknisk efterkontrolleret.** Genindlæs appen. Admin kan i et ældre galleri vælge Del med medlemmer → Galleriets ejer og udpege den rette ejer. Ejeren kan herefter vælge eksisterende medlemmer og give læseadgang. Der er ikke udført en prøve med virkelige medlemsadgange på webhotellet; de fulde rolle-/login-/delingsforløb er testet med syntetiske konti før installationen.

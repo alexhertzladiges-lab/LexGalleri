@@ -11,9 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Owner authorized installation of the tested existing-member sharing package.
-    if: >-
-      ${{ github.event.before == '16151b97c12def8b450779034ded64fb62bc5e0a' && github.event.head_commit.message == 'deploy: install approved existing-member gallery sharing' }}
+    # Approval consumed: successful public installation run 41704935183.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
