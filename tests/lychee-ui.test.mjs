@@ -6,7 +6,7 @@ const source=fs.readFileSync(new URL('../public/static/app.js', import.meta.url)
 function fixture(){
  const elements=new Map();
  const doc={currentScript:{src:'https://example.test/LexGalleri/static/app.js'},querySelector(q){if(!elements.has(q)){const classes=new Set(),attributes=new Map();elements.set(q,{innerHTML:'',style:{},listeners:new Map(),classList:{add:value=>classes.add(value),remove:value=>classes.delete(value),contains:value=>classes.has(value),toggle(value,force){const on=force??!classes.has(value);if(on)classes.add(value);else classes.delete(value);return on;}},setAttribute:(key,value)=>attributes.set(key,String(value)),getAttribute:key=>attributes.get(key)??null,addEventListener(type,handler){this.listeners.set(type,handler)},close(){this.open=false;this.listeners.get('close')?.();},showModal(){this.open=true;},open:false});}return elements.get(q)},querySelectorAll(){return[]},documentElement:{style:{setProperty(){}}},body:{style:{}}};
- const ctx=vm.createContext({document:doc,URL,setTimeout,clearTimeout,console,FormData,Blob});vm.runInContext(source,ctx);
+ const ctx=vm.createContext({document:doc,location:{hash:'',origin:'https://example.test'},URL,setTimeout,clearTimeout,console,FormData,Blob});vm.runInContext(source,ctx);
  vm.runInContext("me={admin:true};view='lychee';globalThis.draws=[];globalThis.messages=[];lycheeDraw=()=>draws.push('paint');toast=s=>messages.push(s)",ctx);
  return{ctx,elements,run:s=>vm.runInContext(s,ctx)};
 }
