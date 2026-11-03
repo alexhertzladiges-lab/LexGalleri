@@ -128,6 +128,24 @@ try{
     gc_assert(gc_request($creator,'POST','/galleries/'.$id.'/members',['user_ids'=>[$freshUser['id']]])[0]===500&&gc_count('SELECT COUNT(*) FROM grants WHERE gallery_id=? AND user_id=?',[$id,$freshUser['id']])===0,'A database failure leaves no acknowledged or partial recipient grant');
     gc_assert(gc_request($admin,'PUT','/admin/galleries/'.$id.'/owner',['user_id'=>$freshUser['id'],'expected_owner_id'=>$member['id']])[0]===500&&gc_count('SELECT COUNT(*) FROM settings WHERE `key`=? AND value=?',['gallery_owner_'.$id,$member['id']])===1,'A failed ownership grant rolls back the owner record as well');
     $pdo->exec('DROP TRIGGER synthetic_share_failure');
+    // Force recipient deletion to commit while the HTTP request waits for its
+    // user-row lock. This reproduces an actual concurrent operation, not a delay
+    // assumption: SHOW PROCESSLIST confirms the request entered the locked query.
+    $pdo->beginTransaction();$pdo->query("SELECT id FROM users WHERE id='".$freshUser['id']."' FOR UPDATE")->fetchAll();
+    $multi=curl_multi_init();curl_setopt_array($creator,[CURLOPT_URL=>$origin.'/lexgalleri/api/galleries/'.$id.'/members',CURLOPT_CUSTOMREQUEST=>'POST',CURLOPT_POSTFIELDS=>json_encode(['user_ids'=>[$freshUser['id']]]),CURLOPT_HTTPHEADER=>['Origin: '.$origin,'Content-Type: application/json']]);curl_multi_add_handle($multi,$creator);
+    $running=0;$blocked=false;
+    for($i=0;$i<100;$i++){
+        curl_multi_exec($multi,$running);
+        foreach($pdo->query('SHOW FULL PROCESSLIST')->fetchAll() as $process)if(($process['db']??null)===$database&&str_contains((string)($process['Info']??''),'SELECT u.* FROM users u WHERE u.id IN')&&str_contains((string)$process['Info'],'FOR UPDATE'))$blocked=true;
+        if($blocked)break;usleep(20000);
+    }
+    gc_assert($blocked,'Concurrent test observes the real HTTP request waiting for its recipient lock');
+    $statement=$pdo->prepare('INSERT INTO settings(`key`,value) VALUES(?,?)');$statement->execute(['deleted_user_'.$freshUser['id'],'synthetic concurrent deletion']);
+    $pdo->prepare('UPDATE users SET password=? WHERE id=?')->execute(['!deleted-account!',$freshUser['id']]);$pdo->commit();
+    $until=microtime(true)+10;do{curl_multi_exec($multi,$running);if($running)curl_multi_select($multi,0.05);}while($running&&microtime(true)<$until);
+    $status=(int)curl_getinfo($creator,CURLINFO_RESPONSE_CODE);curl_multi_remove_handle($multi,$creator);curl_multi_close($multi);
+    gc_assert($status===409&&gc_count('SELECT COUNT(*) FROM grants WHERE gallery_id=? AND user_id=?',[$id,$freshUser['id']])===0,'Deleting a selected recipient during the request cannot restore that account or grant access');
+
 
     $beforeGalleries=gc_count('SELECT COUNT(*) FROM galleries');$beforeGrants=gc_count('SELECT COUNT(*) FROM grants');
     $beforeOwners=gc_count("SELECT COUNT(*) FROM settings WHERE LOCATE('gallery_owner_',`key`)=1");

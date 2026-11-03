@@ -20,7 +20,7 @@ Signal-deling og almindelige links er stadig separate fra adgangstildeling. Link
 
 PHP 8.4.24, MariaDB 11.8.6 og Chromium; kun syntetiske konti, lokale engangsdatabaser og testmedier. Ingen produktionsforbindelse eller rigtig besked.
 
-- Udvidet eksisterende gallerioprettelses-/HTTP/databaseprøve: **102 kontroller, 0 fejl**. Ejerregistrering trods forfalsket payload, nøglelængde, navneminimering, rolle-/MFA-/Origin-afvisning, uregistrerede/slettede modtagere, batch-atomicitet, læseadgang, ingen kontooprettelse/invitation, originalbeskyttelse, ingen videre tildeling, idempotens, bevarede adminrettigheder, ejerskifte, revokering, legacy-ejer og rollback ved databasefejl.
+- Udvidet eksisterende gallerioprettelses-/HTTP/databaseprøve: **104 kontroller, 0 fejl**. Ejerregistrering trods forfalsket payload, nøglelængde, navneminimering, rolle-/MFA-/Origin-afvisning, uregistrerede/slettede modtagere, batch-atomicitet, læseadgang, ingen kontooprettelse/invitation, originalbeskyttelse, ingen videre tildeling, idempotens, bevarede adminrettigheder, ejerskifte, revokering, legacy-ejer og rollback ved databasefejl.
 - PHP/database/browser: **15 tests bestået**, inklusive ny deling gennem UI, medlemssøgning med bevaret fokus, retry efter fejl, faktiske recipient-login uden upload/videretildeling og admins bekræftede ejerskifte. Mobil 320/390 px og pc 1280 px.
 - Eksisterende webapp-browser: **74 tests bestået**.
 - Lokale app-Node-prøver: **106 bestået, 0 fejl, én miljøbetinget skip**. De eksterne klientværktøjer til de øvrige protokolprøver kontrolleres i den eksisterende GitHub-opsætning.
@@ -28,3 +28,5 @@ PHP 8.4.24, MariaDB 11.8.6 og Chromium; kun syntetiske konti, lokale engangsdata
 Genkør eksisterende tests/gallery-create.php og tests/account-browser.test.mjs med LEXGALLERI_TEST=1 og isolerede TEST_DB_* indstillinger. Eksisterende workflows og fixtures er udvidet; intet nyt testsystem. Pak med python3 scripts/package-telefon-mp4.py --member-sharing.
 
 Status før GitHub-kontrol: kodet og lokalt testet, **ikke installeret**. Pakken kræver opdatering af én privat app.php og offentlige filer. Ingen ny SQL. Endelig test- og pakkehenvisning tilføjes efter GitHub-kørsel.
+
+Yderligere samtidighedskontrol: modtagerens brugerrække låses fra en anden databaseforbindelse, en ægte HTTP-deling startes, og SHOW FULL PROCESSLIST bekræfter, at requesten venter på rækkelåsen. Sletningsmarkør/passwordspærring committes før låsen frigives. Delingen afvises med 409 uden ny grant. Prøven er bestået lokalt og medtages i GitHub. Den første samlede browserkørsel fandt en ventebetingelse, der læste et DOM-element, mens gallerioversigten genindlæstes; betingelsen venter nu på elementet uden at ændre appens produktkode.
