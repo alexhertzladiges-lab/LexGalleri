@@ -128,7 +128,11 @@ function gallery_share_members(string $gallery,array $b): array {
             query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,0,0,0)',[$gallery,$id]);$added++;
         }
         $db->commit();return ['ok'=>true,'added'=>$added,'already_had_access'=>count($ids)-$added];
-    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+    }catch(Throwable $error){
+        if($db->inTransaction())$db->rollBack();
+        if($error instanceof PDOException&&($error->getCode()==='40001'||in_array((int)($error->errorInfo[1]??0),[1020,1205,1213],true)))fail(409,'Medlemskabet blev ændret undervejs. Ryd valget, opdatér listen og prøv igen');
+        throw $error;
+    }
 }
 function gallery_assign_owner(string $gallery,array $b): array {
     global $db;
@@ -153,7 +157,11 @@ function gallery_assign_owner(string $gallery,array $b): array {
             }
         }else query('DELETE FROM settings WHERE `key`=?',['gallery_owner_'.$gallery]);
         $db->commit();return ['ok'=>true,'owner_id'=>$id];
-    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+    }catch(Throwable $error){
+        if($db->inTransaction())$db->rollBack();
+        if($error instanceof PDOException&&($error->getCode()==='40001'||in_array((int)($error->errorInfo[1]??0),[1020,1205,1213],true)))fail(409,'Medlemskabet blev ændret undervejs. Ryd valget, opdatér listen og prøv igen');
+        throw $error;
+    }
 }
 function gallery_permission_flag(array $b,string $key): bool {
     if(!array_key_exists($key,$b))return false;

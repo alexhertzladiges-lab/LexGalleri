@@ -144,7 +144,8 @@ try{
     $pdo->prepare('UPDATE users SET password=? WHERE id=?')->execute(['!deleted-account!',$freshUser['id']]);$pdo->commit();
     $until=microtime(true)+10;do{curl_multi_exec($multi,$running);if($running)curl_multi_select($multi,0.05);}while($running&&microtime(true)<$until);
     $status=(int)curl_getinfo($creator,CURLINFO_RESPONSE_CODE);curl_multi_remove_handle($multi,$creator);curl_multi_close($multi);
-    gc_assert($status===409&&gc_count('SELECT COUNT(*) FROM grants WHERE gallery_id=? AND user_id=?',[$id,$freshUser['id']])===0,'Deleting a selected recipient during the request cannot restore that account or grant access');
+    if($status!==409&&is_file($temp.'/server.log')){preg_match_all('/[^\n]*(?:SQLSTATE|Deadlock|deadlock)[^\n]*/',file_get_contents($temp.'/server.log'),$details);foreach(array_slice($details[0],-2) as $line)fwrite(STDERR,$line."\n");}
+    gc_assert($status===409&&gc_count('SELECT COUNT(*) FROM grants WHERE gallery_id=? AND user_id=?',[$id,$freshUser['id']])===0,'Deleting a selected recipient during the request cannot restore that account or grant access (HTTP '.$status.')');
 
 
     $beforeGalleries=gc_count('SELECT COUNT(*) FROM galleries');$beforeGrants=gc_count('SELECT COUNT(*) FROM grants');
