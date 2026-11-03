@@ -5,14 +5,15 @@ import shutil
 import sys
 
 root = Path(__file__).resolve().parents[1]
-if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing']):
+if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing'], ['--member-sharing']):
     raise SystemExit('Unknown package option')
 thumbnails = sys.argv[1:] == ['--video-thumbnails']
 storage = sys.argv[1:] == ['--storage-overview']
 design = sys.argv[1:] == ['--design-news']
 sharing = sys.argv[1:] == ['--signal-sharing']
-thin = thumbnails or storage or sharing
-out = root / 'dist' / ('lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
+members = sys.argv[1:] == ['--member-sharing']
+thin = thumbnails or storage or sharing or members
+out = root / 'dist' / ('lexgalleri-member-sharing' if members else 'lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
 if out.exists():
     shutil.rmtree(out)
 files = {str(p.relative_to(root)): str(p.relative_to(root))
@@ -29,7 +30,7 @@ if design:
     files['sql/008_gallery_news_activity.sql'] = 'private/migrations/008_gallery_news_activity.sql'
 elif not thin:
     files['sql/007_reusable_phone_invitations.sql'] = 'private/migrations/007_reusable_phone_invitations.sql'
-files['INSTALLER.md'] = ('installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
+files['INSTALLER.md'] = ('installation/member-sharing/INSTALLER.md' if members else 'installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
 sums = []
 for target, source in sorted(files.items()):
     src, dst = root / source, out / target

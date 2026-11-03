@@ -20,6 +20,9 @@ try {
     $insert=$pdo->prepare('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,?)');
     $insert->execute([$adminId,$adminEmail,'Browser Admin',password_hash($adminPassword,PASSWORD_DEFAULT),1]);
     $insert->execute([$memberId,$memberEmail,'Browser Member',password_hash($memberPassword,PASSWORD_DEFAULT),0]);
+    $recipientId=$recipientEmail=$recipientPassword=null;
+    if(getenv('LEXGALLERI_TEST_RECIPIENT')==='1'){$recipientId=bin2hex(random_bytes(16));$recipientEmail='browser-recipient@example.test';$recipientPassword='browser-recipient-long-password';$insert->execute([$recipientId,$recipientEmail,'Browser Recipient',password_hash($recipientPassword,PASSWORD_DEFAULT),0]);}
+
     $pdo->prepare('INSERT INTO galleries VALUES(?,?,?,?)')->execute([$galleryId,'Browser testgalleri','Kun syntetiske browserdata',gmdate('Y-m-d\TH:i:s\Z')]);
     $pdo->prepare('INSERT INTO grants VALUES(?,?,1,0,0)')->execute([$galleryId,$memberId]);
     $config=['db_host'=>$host,'db_port'=>$port,'db_name'=>$database,'db_user'=>$user,'db_password'=>$password,'base_path'=>'/LexGalleri','secure_cookies'=>false,'setup_token'=>str_repeat('browser-test-setup-',3)];
@@ -34,7 +37,7 @@ try {
     if(!$ready)throw new RuntimeException('Disposable PHP browser server did not become ready');
     $videoPath=$temp.'/browser-video.mp4';file_put_contents($videoPath,base64_decode(file_get_contents($root.'/tests/fixtures/tiny.mp4.b64'),true));
     $stillPath=$temp.'/browser-still.jpg';$im=imagecreatetruecolor(120,80);imagefill($im,0,0,imagecolorallocate($im,77,135,172));imagejpeg($im,$stillPath);unset($im);
-    echo json_encode(['still_path'=>$stillPath,'video_path'=>$videoPath,'origin'=>$origin,'admin_email'=>$adminEmail,'admin_password'=>$adminPassword,'member_email'=>$memberEmail,'member_password'=>$memberPassword,'member_id'=>$memberId,'gallery_id'=>$galleryId],JSON_THROW_ON_ERROR)."\n";flush();
+    echo json_encode(['still_path'=>$stillPath,'video_path'=>$videoPath,'origin'=>$origin,'admin_email'=>$adminEmail,'admin_password'=>$adminPassword,'member_email'=>$memberEmail,'member_password'=>$memberPassword,'member_id'=>$memberId,'gallery_id'=>$galleryId,'recipient_id'=>$recipientId,'recipient_email'=>$recipientEmail,'recipient_password'=>$recipientPassword],JSON_THROW_ON_ERROR)."\n";flush();
     // Parent sends a line (or EOF) after closing Chromium, including on failure.
     fgets(STDIN);
 }catch(Throwable $error){$exit=1;fwrite(STDERR,'Account browser fixture: '.$error->getMessage()."\n");}

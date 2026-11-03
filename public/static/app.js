@@ -46,6 +46,64 @@ function shareGallery(gallery){
   if(!gallery||!me||current?.id!==gallery.id)return;
   return shareLink({title:gallery.name,text:'Se galleriet i LexGalleri. Du skal logge ind og have adgang.',url:galleryShareUrl(gallery.id)},{active:()=>current?.id===gallery.id&&view==='galleries'});
 }
+function memberSharingAvailable(){return !!me&&serverCapabilities.member_gallery_sharing===true&&permissions.share_members===true;}
+async function memberSharingDialog(gallery){
+  if(!memberSharingAvailable()||current?.id!==gallery.id)return;
+  modal('Del med medlemmer',`<div class="dialog-content member-sharing"><p>Vælg blandt eksisterende medlemmer. De får læseadgang til dette galleri. Kun admin kan invitere nye medlemmer ind i LexGalleri.</p><label>Søg medlem<input id="member-share-search" type="search" maxlength="100" placeholder="Søg på navn" autocomplete="off"></label><div id="member-share-list" class="member-share-list"></div><p id="member-share-count" role="status"></p><p id="member-share-status" role="status"></p><div class="share-actions"><button id="member-share-save" type="button" disabled>Giv valgte læseadgang</button><button class="secondary" id="member-share-clear" type="button">Ryd valg</button><button class="secondary" id="member-share-refresh" type="button">Opdatér liste</button><button class="secondary" id="member-share-signal" type="button">Del link via Signal</button></div><div id="member-share-owner"></div></div>`);
+  privateAccountDialog=true;
+  const account=accountGeneration,generation=photoViewerGeneration,root=$('.member-sharing'),list=$('#member-share-list'),status=$('#member-share-status'),search=$('#member-share-search'),selected=new Map();
+  const active=()=>me&&account===accountGeneration&&generation===photoViewerGeneration&&M.open&&$('.member-sharing')===root&&current?.id===gallery.id;
+  let data=null,busy=false,sequence=0,timer=null;
+  const state=()=>{
+    if(!active())return;
+    $('#member-share-count').textContent=selected.size+' valgte · højst 50 ad gangen';
+    $('#member-share-save').disabled=busy||selected.size===0;$('#member-share-clear').disabled=busy;$('#member-share-refresh').disabled=busy;$('#member-share-signal').disabled=busy;search.disabled=busy;
+    root.querySelectorAll('[data-share-member]').forEach(input=>input.disabled=busy||input.dataset.hasAccess==='true');
+    if($('#member-owner-save')){$('#member-owner-select').disabled=busy;$('#member-owner-confirm').disabled=busy;$('#member-owner-save').disabled=busy||!$('#member-owner-confirm').checked||($('#member-owner-select').value||null)===data?.owner_id;}
+  };
+  const load=async()=>{
+    if(!active()||busy)return;const request=++sequence;status.textContent='Henter medlemmer…';
+    try{
+      const reply=await api('/galleries/'+gallery.id+'/members?q='+encodeURIComponent(search.value));
+      if(!active()||busy||request!==sequence)return;
+      if(!Array.isArray(reply?.members)||typeof reply.can_assign_owner!=='boolean'||reply.members.some(m=>!m||typeof m.name!=='string'||!/^[a-f0-9]{32}$/.test(m.id)||typeof m.has_access!=='boolean'))throw Error('Medlemslisten kunne ikke bekræftes');
+      data=reply;list.innerHTML=data.members.map(member=>`<label class="member-share-row"><input type="checkbox" data-share-member="${esc(member.id)}" data-has-access="${member.has_access}" ${member.has_access?'disabled checked':selected.has(member.id)?'checked':''}><span>${esc(member.name)}</span>${member.has_access?'<small>Har adgang</small>':''}</label>`).join('')||'<p>Ingen medlemmer fundet. Nye medlemmer skal inviteres af admin.</p>';
+      list.querySelectorAll('[data-share-member]').forEach(input=>{
+        if(input.dataset.hasAccess==='true')selected.delete(input.dataset.shareMember);
+        input.onchange=()=>{if(busy)return;const member=data.members.find(m=>m.id===input.dataset.shareMember);if(!member||member.has_access)return;if(input.checked&&selected.size>=50){input.checked=false;status.textContent='Vælg højst 50 medlemmer ad gangen.';return;}if(input.checked)selected.set(member.id,member.name);else selected.delete(member.id);state();};
+      });
+      const owner=$('#member-share-owner');owner.innerHTML='';
+      if(me.admin&&data.can_assign_owner){
+        const options=data.members.filter(m=>m.id!==data.owner_id).map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+        owner.innerHTML=`<details class="member-owner-tools"><summary>Galleriets ejer · ${esc(data.owner?.name||'Ikke udpeget')}</summary><p>Admin kan udpege ejeren, også for ældre gallerier. Den valgte ejer får fuld galleriadgang: upload, redigering, originaler og GPS samt mulighed for at dele med eksisterende medlemmer. Eksisterende adgang bevares ved overdragelse.</p><label>Vælg ejer<select id="member-owner-select"><option value="" ${!data.owner_id?'selected':''}>Ingen medlemsejer</option>${data.owner_id?`<option value="${esc(data.owner_id)}" selected>${esc(data.owner?.name||'Tidligere medlem')} · nuværende ejer</option>`:''}${options}</select></label><label class="check"><input id="member-owner-confirm" type="checkbox">Jeg bekræfter ændringen af ejerskab og rettigheder</label><button class="secondary" id="member-owner-save" type="button" disabled>Gem ejer</button></details>`;
+        $('#member-owner-select').onchange=state;$('#member-owner-confirm').onchange=state;
+        $('#member-owner-save').onclick=async()=>{
+          if(!active()||busy||!me.admin||!$('#member-owner-confirm').checked)return;
+          const user_id=$('#member-owner-select').value||null,expected_owner_id=data.owner_id;
+          busy=true;sequence++;state();
+          try{const reply=await api('/admin/galleries/'+gallery.id+'/owner','PUT',{user_id,expected_owner_id});if(reply?.ok!==true)throw Error('Ejerskabet kunne ikke bekræftes');if(!active())return;busy=false;await load();if(active())status.textContent='Galleriets ejer er opdateret.';}
+          catch(error){if(active())status.textContent=error.message;}
+          finally{busy=false;state();}
+        };
+      }
+      status.textContent=data.has_more?'Viser de første 100 navne. Søg for at finde flere.':'';state();
+    }catch(error){if(active()&&request===sequence)status.textContent=error.message;}
+  };
+  search.oninput=()=>{if(timer)clearTimeout(timer);timer=setTimeout(()=>load(),250);};
+  $('#member-share-clear').onclick=()=>{if(busy)return;selected.clear();list.querySelectorAll('[data-share-member]').forEach(input=>{if(input.dataset.hasAccess!=='true')input.checked=false;});state();};
+  $('#member-share-refresh').onclick=()=>load();
+  $('#member-share-signal').onclick=()=>{if(active()&&!busy)shareGallery(gallery);};
+  $('#member-share-save').onclick=async()=>{
+    if(!active()||busy||!selected.size)return;
+    const user_ids=[...selected.keys()];busy=true;sequence++;state();
+    try{
+      const reply=await api('/galleries/'+gallery.id+'/members','POST',{user_ids});if(reply?.ok!==true||!Number.isInteger(reply.added))throw Error('Adgangen kunne ikke bekræftes');
+      if(!active())return;selected.clear();busy=false;await load();if(active())status.textContent=reply.added+' medlemmer har fået læseadgang. Du kan nu sende linket via Signal. Ingen besked er sendt automatisk.';
+    }catch(error){if(active())status.textContent=error.message;}
+    finally{busy=false;state();}
+  };
+  await load();state();
+}
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,method='GET',body){const opt={method};if(body instanceof FormData)opt.body=body;else if(body!==undefined){opt.headers={'Content-Type':'application/json'};opt.body=JSON.stringify(body)}const r=await fetch(BASE+'/api'+path,opt);let b;try{b=await r.json()}catch{throw Error('Serveren kunne ikke svare')}if(!r.ok){const error=Error(b.detail||'Der opstod en fejl');error.status=r.status;throw error}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',4500)}
@@ -350,9 +408,10 @@ async function galleryView(){
   }
   if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
   photos=result.photos;permissions=result.permissions;
-  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${memberSharingAvailable()?'<button class="secondary" id="member-sharing" type="button">Del med medlemmer</button>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
   $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
   $('#share-gallery').onclick=()=>shareGallery(requestGallery);
+  if($('#member-sharing'))$('#member-sharing').onclick=()=>memberSharingDialog(requestGallery);
   $('#copy-gallery-link').onclick=()=>{if(me&&current?.id===requestGallery.id)shareLinkDialog({url:galleryShareUrl(requestGallery.id)},false);};
   recordGalleryVisit(requestGallery,photos,()=>galleryRequestActive(generation,account,requestView,requestGallery));
   bindGalleryDelete(requestGallery);if($('#edit-gallery'))$('#edit-gallery').onclick=()=>editGallery(requestGallery);

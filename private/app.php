@@ -83,6 +83,78 @@ function gallery_editor_set(string $gallery,string $user,bool $enabled): void {
     if($enabled)query('INSERT IGNORE INTO gallery_editors(gallery_id,user_id) VALUES(?,?)',[$gallery,$user]);
     else query('DELETE FROM gallery_editors WHERE gallery_id=? AND user_id=?',[$gallery,$user]);
 }
+function gallery_owner_id(string $gallery): ?string {
+    $saved=one('SELECT value FROM settings WHERE `key`=?',['gallery_owner_'.$gallery]);
+    if(!$saved)return null;
+    if(!preg_match('/^[a-f0-9]{32}$/D',$saved['value']))fail(503,'Galleriets ejer kunne ikke bekræftes');
+    return $saved['value'];
+}
+function gallery_member_share_allowed(string $gallery,array $u,?array $grant=null): bool {
+    if(!gallery_permissions_ready())return false;
+    if($u['admin'])return true;
+    $grant??=one('SELECT * FROM grants WHERE gallery_id=? AND user_id=?',[$gallery,$u['id']]);
+    return gallery_owner_id($gallery)===$u['id']&&gallery_edit_allowed($gallery,$u,$grant);
+}
+function gallery_members(string $gallery): array {
+    [$u,$grant]=access($gallery);
+    if(!gallery_member_share_allowed($gallery,$u,$grant))fail(403,'Kun galleriets ejer eller admin kan dele med medlemmer');
+    $search=text(['q'=>$_GET['q']??''],'q',100);
+    $members=rows("SELECT u.id,u.name,EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=? AND a.user_id=u.id) has_access FROM users u WHERE u.admin=0 AND u.id<>? AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) AND (?='' OR LOCATE(?,u.name)>0) ORDER BY u.name,u.id LIMIT 101",[$gallery,$u['id'],$search,$search]);
+    $more=count($members)>100;if($more)array_pop($members);
+    foreach($members as &$member)$member['has_access']=(bool)$member['has_access'];unset($member);
+    $ownerId=gallery_owner_id($gallery);
+    $owner=$ownerId?one("SELECT u.id,u.name,u.admin FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))",[$ownerId]):null;
+    return ['members'=>$members,'has_more'=>$more,'owner_id'=>$ownerId,'owner'=>$owner,'can_assign_owner'=>(bool)$u['admin']];
+}
+function gallery_share_members(string $gallery,array $b): array {
+    global $db;
+    [$actor,$grant]=access($gallery);
+    if(!gallery_member_share_allowed($gallery,$actor,$grant))fail(403,'Kun galleriets ejer eller admin kan dele med medlemmer');
+    $ids=$b['user_ids']??null;
+    if(array_keys($b)!==['user_ids']||!is_array($ids)||!array_is_list($ids)||count($ids)<1||count($ids)>50)fail(400,'Vælg mellem 1 og 50 eksisterende medlemmer');
+    foreach($ids as $id)if(!is_string($id)||!preg_match('/^[a-f0-9]{32}$/D',$id))fail(400,'Vælg kun eksisterende medlemmer');
+    $ids=array_values(array_unique($ids));$locks=array_values(array_unique(array_merge($ids,[$actor['id']])));sort($locks,SORT_STRING);
+    $db->beginTransaction();
+    try{
+        if(!one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$gallery]))fail(404,'Galleriet findes ikke');
+        $people=rows("SELECT u.* FROM users u WHERE u.id IN (".implode(',',array_fill(0,count($locks),'?')).") AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) ORDER BY u.id FOR UPDATE",$locks);
+        $people=array_column($people,null,'id');$fresh=$people[$actor['id']]??null;
+        if(!$fresh)fail(401,'Log ind igen');lg_security_validate_session($fresh);
+        if(!gallery_member_share_allowed($gallery,$fresh))fail(403,'Din adgang til at dele galleriet er ændret');
+        foreach($ids as $id)if($id===$fresh['id']||!isset($people[$id])||$people[$id]['admin'])fail(409,'Valget indeholder et medlem, som ikke længere kan tilføjes. Opdatér listen');
+        $added=0;
+        foreach($ids as $id){
+            if(one('SELECT 1 FROM grants WHERE gallery_id=? AND user_id=?',[$gallery,$id]))continue;
+            query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,0,0,0)',[$gallery,$id]);$added++;
+        }
+        $db->commit();return ['ok'=>true,'added'=>$added,'already_had_access'=>count($ids)-$added];
+    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+}
+function gallery_assign_owner(string $gallery,array $b): array {
+    global $db;
+    $actor=user(true);
+    if(count($b)!==2||array_diff(array_keys($b),['user_id','expected_owner_id'])||!array_key_exists('user_id',$b)||!array_key_exists('expected_owner_id',$b))fail(400,'Angiv ejer og den nuværende ejer');
+    foreach(['user_id','expected_owner_id'] as $key)if($b[$key]!==null&&(!is_string($b[$key])||!preg_match('/^[a-f0-9]{32}$/D',$b[$key])))fail(400,'Ugyldigt medlem');
+    if(!gallery_permissions_ready())fail(503,'Galleriets redigeringsrettigheder er ikke klar');
+    $ids=array_values(array_unique(array_filter([$actor['id'],$b['user_id']])));sort($ids,SORT_STRING);
+    $db->beginTransaction();
+    try{
+        if(!one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$gallery]))fail(404,'Galleriet findes ikke');
+        $people=rows("SELECT u.* FROM users u WHERE u.id IN (".implode(',',array_fill(0,count($ids),'?')).") AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id)) ORDER BY u.id FOR UPDATE",$ids);$people=array_column($people,null,'id');
+        $fresh=$people[$actor['id']]??null;if(!$fresh)fail(401,'Log ind igen');lg_security_validate_session($fresh);if(!$fresh['admin'])fail(403,'Kun administrator');
+        if(gallery_owner_id($gallery)!==$b['expected_owner_id'])fail(409,'Ejeren er ændret. Opdatér listen før du prøver igen');
+        $id=$b['user_id'];
+        if($id!==null){
+            if(!isset($people[$id]))fail(409,'Medlemmet findes ikke længere');
+            query('INSERT INTO settings(`key`,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',['gallery_owner_'.$gallery,$id]);
+            if(!$people[$id]['admin']){
+                query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1) ON DUPLICATE KEY UPDATE upload=1,download=1,gps=1',[$gallery,$id]);
+                gallery_editor_set($gallery,$id,true);
+            }
+        }else query('DELETE FROM settings WHERE `key`=?',['gallery_owner_'.$gallery]);
+        $db->commit();return ['ok'=>true,'owner_id'=>$id];
+    }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+}
 function gallery_permission_flag(array $b,string $key): bool {
     if(!array_key_exists($key,$b))return false;
     if(!in_array($b[$key],[true,false,0,1],true))fail(400,'Ugyldig rettighed: '.$key);
@@ -598,7 +670,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'member_gallery_sharing'=>gallery_permissions_ready(),'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -688,6 +760,11 @@ function route(string $method,string $path): never {
     if (in_array($method,['POST','DELETE'],true) && preg_match('~^/photos/([a-f0-9]{32})/deletion-request$~D',$path,$m)) {
         send(['ok'=>true,'request'=>$method==='POST'?media_delete_request_create($m[1],$u):media_delete_request_cancel($m[1],$u)]);
     }
+    if(preg_match('~^/galleries/([a-f0-9]{32})/members$~D',$path,$m)){
+        if($method==='GET')send(gallery_members($m[1]));
+        if($method==='POST')send(gallery_share_members($m[1],body()));
+    }
+    if($method==='PUT'&&preg_match('~^/admin/galleries/([a-f0-9]{32})/owner$~D',$path,$m))send(gallery_assign_owner($m[1],body()));
     if ($method==='GET' && $path==='/galleries') send(activity_galleries($u));
     if($method==='GET'&&$path==='/news'){
         activity_require();$list=activity_galleries($u);$g=$_GET['gallery_id']??'';
@@ -705,6 +782,7 @@ function route(string $method,string $path): never {
         $b=body();$name=text($b,'name',100,true);$description=text($b,'description',1000);$id=uid();
         $db->beginTransaction();
         query('INSERT INTO galleries(id,name,description,created) VALUES(?,?,?,?)',[$id,$name,$description,stamp()]);
+        query('INSERT INTO settings(`key`,value) VALUES(?,?)',['gallery_owner_'.$id,$u['id']]);
         // The authenticated creator gets access only to this new gallery.
         // Administrators already have full access through their existing role.
         if(!$u['admin']){query('INSERT INTO grants(gallery_id,user_id,upload,download,gps) VALUES(?,?,1,1,1)',[$id,$u['id']]);if(gallery_permissions_ready())gallery_editor_set($id,$u['id'],true);}
@@ -730,7 +808,7 @@ function route(string $method,string $path): never {
                 }
                 unset($p['digest'],$p['filename'],$p['_import_metadata']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null;
             }
-            unset($p);send(['photos'=>$ps,'permissions'=>['edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
+            unset($p);send(['photos'=>$ps,'permissions'=>['share_members'=>gallery_member_share_allowed($g,$u,$a),'edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
         }
         if ($method==='POST') {
             if(empty($_FILES)&&!empty($_SERVER['CONTENT_LENGTH']))fail(413,'Webhotellets uploadgrænse er for lav, eller uploaden er ufuldstændig');
@@ -797,7 +875,7 @@ function route(string $method,string $path): never {
         if(array_key_exists('edit',$b)&&!gallery_permissions_ready())fail(503,'Installér 006_gallery_permissions.sql for at ændre redigeringsrettigheder');
         $edit=array_key_exists('edit',$b)?gallery_permission_flag($b,'edit'):null;
         $db->beginTransaction();
-        if(!one('SELECT id FROM galleries WHERE id=?',[$g]) || !one('SELECT id FROM users WHERE id=? FOR UPDATE',[$id]) || one('SELECT 1 FROM settings WHERE `key`=? FOR UPDATE',['deleted_user_'.$id]))fail(404,'Galleri eller bruger findes ikke');
+        if(!one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$g]) || !one('SELECT id FROM users WHERE id=? FOR UPDATE',[$id]) || one('SELECT 1 FROM settings WHERE `key`=? FOR UPDATE',['deleted_user_'.$id]))fail(404,'Galleri eller bruger findes ikke');
         if($b['view']??false)query('INSERT INTO grants VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE upload=VALUES(upload),download=VALUES(download),gps=VALUES(gps)',[$g,$id,(int)!empty($b['upload']),(int)!empty($b['download']),(int)!empty($b['gps'])]);
         else query('DELETE FROM grants WHERE gallery_id=? AND user_id=?',[$g,$id]);
         if(!empty($b['view'])&&$edit!==null)gallery_editor_set($g,$id,$edit);

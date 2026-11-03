@@ -125,3 +125,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+      - name: Build existing-member gallery sharing update
+        run: python3 scripts/package-telefon-mp4.py --member-sharing
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-member-sharing-${{ github.sha }}
+          path: dist/lexgalleri-member-sharing/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
