@@ -43,3 +43,18 @@ Ejeren skal først uploade pakkens **private/app.php** til **/home/lexandkk/lexg
 Det efterfølgende offentlige installationsworkflow er færdiggjort, syntakskontrolleret og **deaktiveret** i `.github/workflows/install-gallery-bulk-metadata-public.yml`. Det låser præcis grøn kilde/pakke og kræver `gallery_bulk_metadata=true` over den lille HTTPS-adresse før offentlig upload. Det genbruger eksisterende mål-/bootstrapkontrol, obligatorisk verificeret TLS,12-fil-allowlist og hashgenlæsning. Aktivér kun efter ejerens bekræftelse af den konkrete private upload; markér forløbet afsluttet efter verificeret installation. Den nye bulk-funktion er endnu ikke installeret.
 
 Den tidligere godkendte kompakte tidslinje er allerede installeret og verificeret i kørsel41815491054. Ingen bulk-skrivning af rigtige medlems-/gallerioplysninger, ingen ændring af Fiskerhyttens LexApp og ingen merge er udført. Den lokale MariaDB er stoppet, og SHOW DATABASES bekræftede, at alle engangsdatabaser var fjernet. Hver test ryddede sine PHP-servere, private fixtures og browserprofiler op.
+
+## Fuldført installation 4. november 2026
+
+Efter ejerens »uploadet« blev den præcist låste pakke installeret. [Installation41819919706](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41819919706), job126540108365, commit`aa2cd3ff9dc7758c2f2d087d5731cad8347c81dd`: **SUCCESS**. Tidligere afsnit om manglende privat upload er historik; den aktuelle status er installeret og verificeret.
+
+- PASS: den uændrede grønne testkilde, artifactets ZIP-digest, præcis15-entry-allowlist, alle14 manifestposter og sammenligning med kildefiler.
+- PASS:15 eksisterende FTPS-plantests og shellsyntaks; den private backend annoncerer gallery_bulk_metadata=true før offentlig overførsel.
+- PASS: LexGalleris låste host/konto, bootstrapkontrol før ændringer og verificeret TLS. Alle12 offentlige filer overført og genlæst med korrekte SHA-256.
+- PASS: lille HTTPS-indgang, JavaScript/CSS-hashes, ny adminfunktion, bevaret datotidslinje og knaptekst samt eksisterende kontosikkerhed, galleri-/medlemsdeling og slettefunktioner.
+
+Installationsbevis artifact13315704273, ZIP-SHA256 `1413b02c48e00873d32e3ac1eba6430c8ae478164b3a3ef34da3f49d79ca84d3`. Backendkontrol artifact13316671162, ZIP-SHA256 `4594c26257e12d87f9177573f29c90f902cf5341e805633c83381c953e3c5d3f`. Begge er uafhængigt genhentet; installationsbevisets12 offentlige digests matcher den grønne release og lokale filer.
+
+Den private fil blev lagt ind af ejeren, ikke gennem vores begrænsede offentlige FTP-konto. Serverens private filbytes blev ikke læst; tilgængelighed og funktion blev kontrolleret via HTTPS-capabilities. Ingen SQL, ændring af rigtige gallerioplysninger, routing, konfiguration, medier eller Fiskerhyttens LexApp. Funktionelle masseændringer blev kun prøvet med syntetiske lokale/CI-data. Ingen merge.
+
+Journal: `installation/gallery-bulk-metadata/public-installed.json`, `backend-preflight.json` og opdaterede release-pins. Godkendelsen er forbrugt, og engangsworkflowet er lukket. Admin kan genindlæse appen, åbne et galleri og vælge **Redigér alle billeder**; kun valgte felter ændres efter gennemgang og navnebekræftelse.
