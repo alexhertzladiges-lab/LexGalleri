@@ -18,12 +18,12 @@
   "local_new_browser_checks": 7,
   "independently_verified": true,
   "requires_sql": false,
-  "private_upload_required": true,
+  "private_upload_required": false,
   "private_upload_target": "/home/lexandkk/lexgalleri-private/app.php",
   "private_upload_mode": "0600",
   "private_file_sha256": "24d74be63d625b6799f88d58fc46c67ed7391c5f884fac79666919cb472fd2f8",
-  "installed": false,
-  "state": "waiting_for_owner_private_backend_upload",
+  "installed": true,
+  "state": "installed_and_verified",
   "public_installer_prepared": true,
   "public_installer_disabled": true,
   "production_metadata_changes_performed": false,
@@ -44,5 +44,13 @@
     "public/static/pwa.js": "4dd9535250eaa9c783f72b6417b456997753d23787f36f4163ad94db27717ffe",
     "public/static/qrcode.js": "3a37975079ddc00ed73102d210dfda36d292461f21bb42a5dfce4dcf4666e7c5",
     "public/static/style.css": "367b8cb0106e3d3ff680e8fa84b0e8417a378f43c04f77930d15fc05cb2e97c8"
-  }
+  },
+  "private_upload_confirmation_received": true,
+  "approval_consumed": true,
+  "installation_run": 41819919706,
+  "installation_job": 126540108365,
+  "installation_commit": "aa2cd3ff9dc7758c2f2d087d5731cad8347c81dd",
+  "installation_evidence_artifact": 13315704273,
+  "installation_evidence_zip_sha256": "1413b02c48e00873d32e3ac1eba6430c8ae478164b3a3ef34da3f49d79ca84d3",
+  "installation_journal": "installation/gallery-bulk-metadata/public-installed.json"
 }
