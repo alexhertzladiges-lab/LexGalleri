@@ -1,6 +1,6 @@
-# LexGalleri – slet hele gallerier
+# lexgalleri – slet hele gallerier
 
-Kun LexGalleri. Fiskerhyttens LexApp er en anden app og er urørt. Branch `feature/lexgalleri-gallery-deletion-v1`, afledt fra `aa9ebb3db07768e6ab756328b88bde47276376ba`.
+Kun lexgalleri. Fiskerhyttens LexApp er en anden app og er urørt. Branch `feature/lexgalleri-gallery-deletion-v1`, afledt fra `aa9ebb3db07768e6ab756328b88bde47276376ba`.
 
 ## Adfærd
 
@@ -40,11 +40,11 @@ Syntetiske konti/filer; PHP 8.4.24 og lokal engangs-MariaDB 11.8.6 på loopback.
 
 Regressionerne dækker ejerens anmodning, dublet, annullering, afvisning, admins godkendelse og direkte sletning af tomt galleri, navne-/versionsbekræftelse, ændret ejerskab, tilbagekaldte ejer-/adminrettigheder, afventende MFA, origin/cross-site, MP4/billeder, import- og invitationsreferencer, andre galleriers filer samt database-/journalfejl og genoptagelse. Browseren kontrollerer bl.a. dobbeltklik, låst dialog under afsendelse, afbrudt svar, genoptagelse og valgt anmodnings-id.
 
-En automatisk testgodkendelse anvendte først den tidligere LexApp-afgrænsning og afviste lokal testnetadgang. Den aktuelle LexGalleri-opgave og behovet for loopback-sockets blev dokumenteret; den isolerede testkørsel blev derefter godkendt. Der blev ikke omgået en netværksafvisning eller anvendt en produktionsforbindelse.
+En automatisk testgodkendelse anvendte først den tidligere LexApp-afgrænsning og afviste lokal testnetadgang. Den aktuelle lexgalleri-opgave og behovet for loopback-sockets blev dokumenteret; den isolerede testkørsel blev derefter godkendt. Der blev ikke omgået en netværksafvisning eller anvendt en produktionsforbindelse.
 
 ## GitHub og pakke
 
-Den eksisterende `.github/workflows/tests.yml` er udvidet med den nye database-test og pakkemuligheden `--gallery-delete`. Samlet MySQL 8.4-/Node-/browserkontrol og præcis CI-pakke afventes her, indtil resultatet er journalført.
+Den eksisterende `.github/workflows/tests.yml` er udvidet med den nye database-test og pakkemuligheden `--gallery-delete`. Samlet MySQL 8.4-/Node-/browserkontrol og præcis CI-pakke afventes her, indtil resultatet er journalført. Første kørsel 41799986928 bestod alle PHP/databaseprøver, men to ældre VM-dialogprøver savnede modalens querySelector-metode. Lukkehåndteringen anvender nu den eksisterende globale formvælger; de gamle dialogprøver og de seks nye browserforløb består lokalt. Både begyndelse og afslutning af slettejobbet kræver desuden eksplicit databasebekræftelse. En afsluttende fuld CI køres på den præcise kildecommit.
 
 Genkør med de eksisterende syntetiske TEST_DB-indstillinger og `LEXGALLERI_TEST=1`:
 
@@ -58,7 +58,7 @@ TEST_BROWSER=/usr/bin/chromium node --test tests/webapp-browser.test.mjs
 python3 scripts/package-telefon-mp4.py --gallery-delete
 ```
 
-Pakken `dist/lexgalleri-gallery-delete/` indeholder de 12 offentlige filer, privat app.php, INSTALLER.md og SHA256SUMS. Den eksisterende LexGalleri-FTPS-konto har kun offentlig adgang; den private fil skal fortsat installeres i den rigtige private mappe med 0600. Vejledning: `installation/gallery-delete/INSTALLER.md`.
+Pakken `dist/lexgalleri-gallery-delete/` indeholder de 12 offentlige filer, privat app.php, INSTALLER.md og SHA256SUMS. Den eksisterende lexgalleri-FTPS-konto har kun offentlig adgang; den private fil skal fortsat installeres i den rigtige private mappe med 0600. Vejledning: `installation/gallery-delete/INSTALLER.md`.
 
 ## Afgrænsning
 

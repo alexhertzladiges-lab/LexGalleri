@@ -1261,7 +1261,7 @@ async function adminSecurityView(){
   decorateAdmin('admin-security');loadStorageSummary('admin-security');$('#admin-status-refresh').onclick=()=>navigateView('admin-security');$('#admin-own-security').onclick=()=>navigateView('profile');
 }
 function requestDialogClose(){
-  if(M.querySelector('[data-whole-gallery-pending="true"]')?.dataset?.wholeGalleryPending==='true')return;
+  if($('#whole-gallery-form')?.dataset?.wholeGalleryPending==='true')return;
   if(grantDialog?.busy)return;
   if(grantDialog?.dirty()){$('#grant-leave-warning').hidden=false;$('#grant-stay').focus();return;}
   cancelGalleryDeleteConfirmation();photoViewerGeneration++;closeModal();

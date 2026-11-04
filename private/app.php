@@ -628,7 +628,7 @@ function gallery_delete_step(string $g,array $admin,array $b): array {
                 $job=['id'=>uid(),'gallery_id'=>$g,'name'=>$gallery['name'],'version'=>$version,'status'=>'deleting','processed'=>0,'pending'=>[],'started_by'=>$admin['id'],'created'=>stamp()];
                 gallery_delete_save('gallery_delete_',$g,$job);
                 if($request&&$request['status']==='pending'){$request['status']='deleting';$request['resolved_by']=$admin['id'];$request['updated']=stamp();gallery_delete_save('gallery_request_',$g,$request);}
-                $db->commit();
+                if(!$db->commit())throw new RuntimeException('Databasens bekræftelse af slettejobbet mangler');
             }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
         }
         if(!is_array($job['pending']??null)||count($job['pending'])>10)fail(409,'Slettekøen kræver kontrol.');
@@ -675,7 +675,7 @@ function gallery_delete_step(string $g,array $admin,array $b): array {
             $job['status']='deleted';$job['completed']=stamp();gallery_delete_save('gallery_delete_',$g,$job);
             $request=gallery_delete_record('gallery_request_',$g);
             if($request&&in_array($request['status'],['pending','deleting'],true)){$request['status']='approved';$request['resolved_by']=$admin['id'];$request['updated']=stamp();gallery_delete_save('gallery_request_',$g,$request);}
-            $db->commit();
+            if(!$db->commit())throw new RuntimeException('Databasens afsluttende slettebekræftelse mangler');
         }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
         return ['ok'=>true,'done'=>true,'job_id'=>$job['id'],'processed'=>$job['processed'],'remaining'=>0];
     });
