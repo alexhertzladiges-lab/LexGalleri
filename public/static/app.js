@@ -522,7 +522,8 @@ function bulkGalleryMetadata(){
       if(!reply||typeof reply.token!=='string'||!Number.isInteger(reply.count)||reply.count<1||reply.gallery_id!==gallery.id||typeof reply.name!=='string'||!reply.changes)throw Error('Serveren kunne ikke bekræfte gennemgangen.');
       plan=reply;$('#bulk-review-count').textContent=reply.count+' billeder og videoer i '+reply.name+' omfattes af ændringen.';
       const labels={title:'Titel',taken:'Dato',precision:'Datopræcision',place:'Sted',lat:'Breddegrad',lon:'Længdegrad'};
-      $('#bulk-review-values').innerHTML=Object.entries(reply.changes).map(([key,value])=>'<li><strong>'+esc(labels[key]||key)+':</strong> '+esc(value===null||value===''?'Fjernes / ukendt':String(value))+'</li>').join('');
+      const precisionLabels={exact:'Dato og klokkeslæt',day:'Dag',month:'Måned',year:'År',circa:'Cirka år',unknown:'Ukendt'};
+      $('#bulk-review-values').innerHTML=Object.entries(reply.changes).map(([key,value])=>'<li><strong>'+esc(labels[key]||key)+':</strong> '+esc(key==='precision'?(precisionLabels[value]||String(value)):value===null||value===''?'Fjernes / ukendt':String(value))+'</li>').join('');
       review.hidden=false;status.textContent='Intet er gemt endnu.';
     }catch(error){if(active()){form.querySelector('.error').textContent=error.message;status.textContent='';}}finally{if(active())busy(false);}
   };
