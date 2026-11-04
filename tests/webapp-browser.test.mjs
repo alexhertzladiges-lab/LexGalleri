@@ -214,7 +214,7 @@ async function fixture({bulkMetadata=false,timeline=false,wholeGallery=false,who
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
       if(bulkRefreshFailure){bulkRefreshFailure=false;json({detail:'Synthetic refresh failure'},503);return;}
-      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{delete_request:wholeGallery&&member&&wholeOwner,upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).sort((a,b)=>timeline?(b.taken||b.uploaded).localeCompare(a.taken||a.uploaded):0).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{delete_request:wholeGallery&&member&&wholeOwner,upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
       json(otherRevoked?{detail:'Du har ikke adgang'}:{photos:otherPhotos,permissions:{upload:false,download:false,gps:false,video:false}},otherRevoked?403:200);return;
@@ -1628,4 +1628,46 @@ test('real Chromium: members and an older private backend do not expose gallery 
       assert(await run('!document.querySelector("#bulk-gallery-metadata")'));assert.equal(site.bulkPreviews.length,0);assert.equal(site.bulkApplies.length,0);
     }finally{if(browser)await browser.close();await site.close();}
   }
+});
+
+
+test('real Chromium: gallery uses compact date sections with working search, sorting, editing and deletion',{
+  skip:binary?false:'Chromium required',timeout:60000,
+},async t=>{
+  const site=await fixture({timeline:true,mediaDelete:true,galleryEditing:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector(".timeline-day")','grouped gallery');
+    await t.test('gallery has the same vertical date groups and six/three responsive columns',async()=>{
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),24);
+      const groups=await run('[...document.querySelectorAll(".timeline-day")].map(s=>({key:s.dataset.timelineDate,count:s.querySelectorAll("[data-photo]").length}))');
+      assert.deepEqual(groups.map(g=>g.key),['2026-11-01','2026-10-31','2026-10-29','2020-05','2020','circa:2019','unknown']);assert.equal(groups[0].count,8);
+      for(const width of [320,390,1280,1920]){
+        await call('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<500});
+        const result=await run(`(()=>{const sections=[...document.querySelectorAll('.timeline-day')];return{columns:sections.map(s=>getComputedStyle(s.querySelector('.timeline-photos')).gridTemplateColumns.split(' ').length),vertical:sections.every((s,i)=>!i||s.getBoundingClientRect().top>=sections[i-1].getBoundingClientRect().bottom),overflow:document.documentElement.scrollWidth>innerWidth}})()`);
+        assert(result.columns.every(c=>c===(width<500?3:6)));assert(result.vertical&&!result.overflow);
+        if(width===390)await screenshot(call,'gallery-date-mobile.png');if(width===1280)await screenshot(call,'gallery-date-desktop.png');
+      }
+    });
+    await t.test('upload sorting groups by upload date and empty searches leave no stale date headings',async()=>{
+      await run('document.querySelector("#sort").value="uploaded";document.querySelector("#sort").dispatchEvent(new Event("change"))');
+      const groups=await run('[...document.querySelectorAll(".timeline-day")].map(s=>({key:s.dataset.timelineDate,count:s.querySelectorAll("[data-photo]").length}))');assert.deepEqual(groups,[{key:'2026-10-29',count:22},{key:'unknown',count:2}]);
+      await run('document.querySelector("#search-photo").value="no synthetic match";document.querySelector("#search-photo").dispatchEvent(new Event("input"))');assert.equal(await run('document.querySelectorAll(".timeline-day").length'),0);assert(await run('!!document.querySelector("#photo-grid .empty")'));
+      await run('document.querySelector("#sort").value="taken";document.querySelector("#search-photo").value="Familie 02";document.querySelector("#search-photo").dispatchEvent(new Event("input"))');assert.equal(await run('document.querySelectorAll("[data-photo]").length'),1);assert.equal(await run('document.querySelector(".timeline-count").textContent'),'1 billede');
+    });
+    await t.test('a date edit moves only the visible card and preserves the filtered gallery and image',async()=>{
+      await run(`window.__galleryDateGrid=document.querySelector('#photo-grid');window.__galleryDateCard=document.querySelector('[data-photo="${site.stillPhotoId}"]');window.__galleryDateImage=__galleryDateCard.querySelector('img');__galleryDateCard.click()`);await wait('!!document.querySelector("#photo-info-toggle")','viewer');
+      await run('document.querySelector("#photo-info-toggle").click();document.querySelector("#edit-photo").click()');await wait('!!document.querySelector("#edit")','date editor');
+      await run('document.querySelector("#edit [name=precision]").value="day";document.querySelector("#edit [name=taken]").value="2026-10-28";document.querySelector("#edit").requestSubmit()');await wait(`!!document.querySelector('[data-timeline-date="2026-10-28"]')`,'changed group');
+      assert(await run('__galleryDateGrid===document.querySelector("#photo-grid")&&__galleryDateImage===__galleryDateCard.querySelector("img")&&__galleryDateCard.isConnected'));assert.equal(await run('document.querySelectorAll("[data-photo]").length'),1);
+      await run('document.querySelector("#close-modal").click()');await wait('!document.querySelector("#modal").open','closed viewer');assert.equal(await run('document.querySelector("#search-photo").value'),'Familie 02');
+      await run('document.querySelector("#search-photo").value="";document.querySelector("#search-photo").dispatchEvent(new Event("input"))');
+    });
+    await t.test('deleting updates section counts and removes an empty date without replacing surviving images',async()=>{
+      await run(`window.__gallerySurvivors=[...document.querySelectorAll("[data-photo] img")];document.querySelector("#gallery-delete-toggle").click();document.querySelector('[data-timeline-date="2020"] [data-photo]').click();document.querySelector("#gallery-delete-review").click()`);await wait('!!document.querySelector("#gallery-delete-submit")','deletion review');
+      await run(`document.querySelector("#gallery-delete-submit").click()`);await wait('!document.querySelector("#modal").open','completed date deletion');assert(await run(`!document.querySelector('[data-timeline-date="2020"]')`));assert.equal(await run('document.querySelectorAll("[data-photo]").length'),23);
+      await run(`document.querySelector("#gallery-delete-toggle").click();document.querySelector('[data-timeline-date="2026-11-01"] [data-photo]').click();document.querySelector("#gallery-delete-review").click()`);await wait('!!document.querySelector("#gallery-delete-submit")','second review');await run(`document.querySelector("#gallery-delete-submit").click()`);await wait('!document.querySelector("#modal").open','second deletion');
+      assert.equal(await run(`document.querySelector('[data-timeline-date="2026-11-01"] .timeline-count').textContent`),'6 billeder');assert.equal(site.deleteRequests.length,2);assert.equal(await run('__gallerySurvivors.filter(i=>i.isConnected).length'),22);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
 });

@@ -155,3 +155,13 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+      - name: Build public gallery date layout without private files or SQL
+        run: python3 scripts/package-telefon-mp4.py --gallery-date-layout
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-gallery-date-layout-${{ github.sha }}
+          path: dist/lexgalleri-gallery-date-layout/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

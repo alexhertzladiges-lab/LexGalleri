@@ -5,7 +5,7 @@ import shutil
 import sys
 
 root = Path(__file__).resolve().parents[1]
-if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing'], ['--member-sharing'], ['--gallery-delete'], ['--gallery-bulk-metadata']):
+if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing'], ['--member-sharing'], ['--gallery-delete'], ['--gallery-bulk-metadata'], ['--gallery-date-layout']):
     raise SystemExit('Unknown package option')
 thumbnails = sys.argv[1:] == ['--video-thumbnails']
 storage = sys.argv[1:] == ['--storage-overview']
@@ -14,8 +14,9 @@ sharing = sys.argv[1:] == ['--signal-sharing']
 members = sys.argv[1:] == ['--member-sharing']
 gallery_delete = sys.argv[1:] == ['--gallery-delete']
 bulk_metadata = sys.argv[1:] == ['--gallery-bulk-metadata']
-thin = thumbnails or storage or sharing or members or gallery_delete or bulk_metadata
-out = root / 'dist' / ('lexgalleri-gallery-bulk-metadata' if bulk_metadata else 'lexgalleri-gallery-delete' if gallery_delete else 'lexgalleri-member-sharing' if members else 'lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
+gallery_layout = sys.argv[1:] == ['--gallery-date-layout']
+thin = thumbnails or storage or sharing or members or gallery_delete or bulk_metadata or gallery_layout
+out = root / 'dist' / ('lexgalleri-gallery-date-layout' if gallery_layout else 'lexgalleri-gallery-bulk-metadata' if bulk_metadata else 'lexgalleri-gallery-delete' if gallery_delete else 'lexgalleri-member-sharing' if members else 'lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
 if out.exists():
     shutil.rmtree(out)
 files = {str(p.relative_to(root)): str(p.relative_to(root))
@@ -26,13 +27,15 @@ expected = {'.htaccess', 'index.php', 'manifest.webmanifest', 'service-worker.js
             'static/icon.svg', 'static/icon-192.png', 'static/icon-512.png',
             'static/apple-touch-icon.png'}
 assert set(k.removeprefix('public/') for k in files) == expected
-for name in (() if sharing else ('app.php', 'security.php') if design else ('app.php',) if thin else ('app.php', 'security.php', 'lychee-import.php')):
+for name in (() if sharing or gallery_layout else ('app.php', 'security.php') if design else ('app.php',) if thin else ('app.php', 'security.php', 'lychee-import.php')):
     files['private/' + name] = 'private/' + name
 if design:
     files['sql/008_gallery_news_activity.sql'] = 'private/migrations/008_gallery_news_activity.sql'
 elif not thin:
     files['sql/007_reusable_phone_invitations.sql'] = 'private/migrations/007_reusable_phone_invitations.sql'
-files['INSTALLER.md'] = ('installation/gallery-bulk-metadata/INSTALLER.md' if bulk_metadata else 'installation/gallery-delete/INSTALLER.md' if gallery_delete else 'installation/member-sharing/INSTALLER.md' if members else 'installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
+files['INSTALLER.md'] = ('installation/gallery-date-layout/INSTALLER.md' if gallery_layout else 'installation/gallery-bulk-metadata/INSTALLER.md' if bulk_metadata else 'installation/gallery-delete/INSTALLER.md' if gallery_delete else 'installation/member-sharing/INSTALLER.md' if members else 'installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
+if sharing or gallery_layout:
+    assert not any(name.startswith(('private/', 'sql/')) for name in files)
 sums = []
 for target, source in sorted(files.items()):
     src, dst = root / source, out / target
