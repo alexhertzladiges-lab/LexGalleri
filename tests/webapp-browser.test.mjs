@@ -33,7 +33,7 @@ async function screenshot(call,name){
 
 async function fixture({bulkMetadata=false,timeline=false,wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
   const requests=[];let denied=false, disconnected=false;
-  const bulkPreviews=[],bulkApplies=[],pendingBulk=[];let bulkPlan=null,holdBulk=false,failBulk=false;
+  const bulkPreviews=[],bulkApplies=[],pendingBulk=[];let bulkPlan=null,holdBulk=false,failBulk=false,bulkRefreshFailure=false;
   const wholeRequests=[],pendingWhole=[];let wholePending=wholeRequestPending,wholeGone=false,wholeStep=0,holdWhole=false,failWhole=wholeFailure;
   const videoRequests=[],pendingVideoHeads=[];let videoStatus=200,holdVideoHeads=false,videoFlag;
   let directoryUnavailable=false,holdDirectory=false;const pendingDirectories=[];
@@ -213,6 +213,7 @@ async function fixture({bulkMetadata=false,timeline=false,wholeGallery=false,who
       if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
+      if(bulkRefreshFailure){bulkRefreshFailure=false;json({detail:'Synthetic refresh failure'},503);return;}
       json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{delete_request:wholeGallery&&member&&wholeOwner,upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
@@ -256,7 +257,7 @@ async function fixture({bulkMetadata=false,timeline=false,wholeGallery=false,who
     json({detail:'Ikke fundet'},404);
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-  return {bulkPreviews,bulkApplies,holdBulk:()=>{holdBulk=true;},releaseBulk:()=>{holdBulk=false;assert(pendingBulk.length);pendingBulk.shift()();},failNextBulk:()=>{failBulk=true;},wholeRequests,holdWhole:()=>{holdWhole=true;},releaseWhole:()=>{holdWhole=false;assert(pendingWhole.length);pendingWhole.shift()();},origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+  return {failBulkRefresh:()=>{bulkRefreshFailure=true;},bulkPreviews,bulkApplies,holdBulk:()=>{holdBulk=true;},releaseBulk:()=>{holdBulk=false;assert(pendingBulk.length);pendingBulk.shift()();},failNextBulk:()=>{failBulk=true;},wholeRequests,holdWhole:()=>{holdWhole=true;},releaseWhole:()=>{holdWhole=false;assert(pendingWhole.length);pendingWhole.shift()();},origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
     videoRequests,setVideoStatus:status=>{videoStatus=status;},setVideoFlag:flag=>{videoFlag=flag;},holdVideoHeads:()=>{holdVideoHeads=true;},releaseVideoHead:()=>{assert(pendingVideoHeads.length);pendingVideoHeads.shift()();},
     invitationCreates,galleryEdits,photoEdits,holdInvites:()=>{holdInvites=true;},releaseInvite:error=>{assert(pendingInvites.length,'an invitation must be pending');pendingInvites.shift()(error);},holdGalleryEdits:()=>{holdGalleryEdits=true;},releaseGalleryEdit:error=>{assert(pendingGalleryEdits.length,'a gallery update must be pending');pendingGalleryEdits.shift()(error);},disableMultiInvites:()=>{multiInviteCapability=false;},
     memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
@@ -1605,6 +1606,13 @@ test('real Chromium: admin reviews only selected gallery metadata fields and sub
       await run(`document.querySelector('#bulk-confirm-name').value='Syntetisk galleri';document.querySelector('#bulk-apply').click()`);
       await wait('document.querySelector("#gallery-bulk-form .error").textContent.includes("ændret")','stale review error');assert(await run('document.querySelector("#bulk-review").hidden'));
       const count=site.bulkApplies.length;await run('document.querySelector("#bulk-apply").click()');assert.equal(site.bulkApplies.length,count);
+    });
+    await t.test('a confirmed save remains successful when the following gallery refresh fails',async()=>{
+      await run('document.querySelector("#close-modal").click();document.querySelector("#bulk-gallery-metadata").click()');
+      await run(`document.querySelector('[data-bulk-field="place"]').click();document.querySelector('#gallery-bulk-form [name=place]').value='Gemt sted';document.querySelector('#gallery-bulk-form').requestSubmit()`);await wait('!document.querySelector("#bulk-review").hidden','final review');
+      site.failBulkRefresh();const before=site.bulkApplies.length;
+      await run(`document.querySelector('#bulk-confirm-name').value='Syntetisk galleri';document.querySelector('#bulk-apply').click()`);
+      await wait('document.querySelector("#toast").textContent.includes("Oplysningerne er gemt")','honest committed-save notice');assert.equal(site.bulkApplies.length,before+1);assert(await run('!document.querySelector("#modal").open'));
     });
   }finally{if(browser)await browser.close();await site.close();}
 });

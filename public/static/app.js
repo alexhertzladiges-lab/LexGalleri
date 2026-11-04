@@ -534,7 +534,9 @@ function bulkGalleryMetadata(){
     try{
       const reply=await api('/galleries/'+gallery.id+'/metadata-apply','POST',{token:reviewed.token,confirm_name:reviewed.name});if(!active())return;
       if(reply?.ok!==true||reply.gallery_id!==gallery.id||reply.count!==reviewed.count||!Number.isInteger(reply.changed))throw Error('Serveren kunne ikke bekræfte ændringen. Opdatér galleriet og kontrollér oplysningerne.');
-      plan=null;closeModal();await galleryView();toast(reply.count+' billeder og videoer gennemgået; '+reply.changed+' ændret.');
+      plan=null;closeModal();
+      try{await galleryView();if(account===accountGeneration)toast(reply.count+' billeder og videoer gennemgået; '+reply.changed+' ændret.');}
+      catch{if(account===accountGeneration)toast('Oplysningerne er gemt. Genindlæs galleriet, da visningen ikke kunne opdateres.');}
     }catch(error){if(active()){invalidate();form.querySelector('.error').textContent=error.message;status.textContent='Opdatér galleriet ved tvivl. En ny gennemgang er påkrævet før et nyt forsøg.';}}finally{if(active())busy(false);}
   };
 }
