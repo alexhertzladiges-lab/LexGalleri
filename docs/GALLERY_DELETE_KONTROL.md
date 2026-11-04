@@ -97,3 +97,23 @@ Produktnavnet er **LexGalleri**. Produktionsadressen er præcist **https://lexan
 Repositoryets AGENTS.md fastholder denne opdeling. Installationsværktøjet er låst til LexGalleris egen server/konto og kontrollerer den godkendte offentlige bootstrap før upload. De konkrete LexApp-værdier afvises, også ved ren forbindelsesdiagnose. Dette er kontrolleret uden netværk eller filoverførsel. Fysisk mappenavn følger eksisterende routing og den verificerede FTPS-rod; det udledes ikke af store/små bogstaver i produktnavnet.
 
 Den grønne pakke, programfilerne og kontrolsummerne er uændrede. Dens tidligere brug af lille produktnavn i pakketekstens overskrift ændrer ikke appnavnet eller adressen; denne præcisering og AGENTS.md er den supplerende vejledning. Ingen installation eller omdøbning er udført.
+
+## Installationsforsøg 4. november 2026
+
+Ejeren godkendte installationen med »ok installér«. Den godkendte pakke er fortsat artifact13307512756 fra den grønne kildecommit8c70814d44cfd95adfc32e28ef1e5ca878485d20; runtime og kontrolsummer er uændrede.
+
+[Installationskørsel41804486568](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41804486568), job126488017307, commitb7635c1e25c8bd55d18b62439b3cf4fcc93d28d5:
+
+- PASS: grøn testkilde, CI-artifactets SHA-256, præcis fil-allowlist, alle14 manifestposter og byte-sammenligning med testkilden.
+- PASS: alle15 eksisterende FTPS-plantests og shellsyntaks.
+- PASS: HTTPS200 på den præcise lille URL `https://lexan.dk/lexgalleri/api/status`, eksisterende sikkerhedsheaders, lukket installation, kontosikkerhed, pladsoversigt og medlemsdeling.
+- STOP: privat backend annoncerer endnu hverken `gallery_delete` eller `gallery_delete_requests`. Den påkrævede backendkontrol afbrød før installation af FTPS-klient og før forbindelse/overførsel af offentlige filer.
+- Ingen produktionsfiler, SQL eller rigtige gallerier blev ændret. Jobstatus er FAILURE på grund af denne manglende forudsætning, ikke en fejlet programtest.
+
+Den ikke-følsomme status er genhentet og kontrolleret: artifact13309332216, ZIP-SHA256 `6f0af023979f0a17dbd12bd88bc884ef1843301c123e9343ab3acacf57e6e2a7`. Resultatet findes i `installation/gallery-delete/backend-preflight.json`; forløb og genoptagelse i `installation/gallery-delete/pending-installation.json`.
+
+### Næste konkrete trin
+
+Ejeren henter [den allerede testede pakke](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41801200808/artifacts/13307512756), pakker den ud og erstatter **kun** pakkens `private/app.php` på `/home/lexandkk/lexgalleri-private/app.php` via cPanel med0600. Filens SHA-256 skal være `9783bf8f6ef1eae352eea179a4739c1b97172054120c11a5a1278bae293ad53a`. Ingen SQL eller ændring af konfiguration, security.php, medier, sessions eller routing kræves.
+
+FTPS-kontoen er begrænset til de offentlige filer; den kan ikke udføre dette private trin. Når filen er uploadet, genkøres alene det fejlede installationsjob126488017307 på den uforanderlige installationscommit. Det genkontrollerer pakken og backend før de12 offentlige filer overføres og genlæses. Godkendelsen til samme konkrete pakke gælder fortsat. Workflowets nye push-kørsler er sat på pause med `if: false`, så journalændringer ikke udløser en installation. En vellykket overførsel skal efterfølgende journalføres særskilt; dette dokument hævder ikke, at installationen er fuldført.

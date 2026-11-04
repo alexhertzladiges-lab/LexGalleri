@@ -1,0 +1,13 @@
+{
+  "application": "LexGalleri",
+  "url": "https://lexan.dk/lexgalleri/api/status",
+  "setup": false,
+  "account_security_ready": true,
+  "capabilities": {
+    "storage_overview": true,
+    "member_gallery_sharing": true,
+    "gallery_delete": null,
+    "gallery_delete_requests": null
+  },
+  "production_mutations_performed": false
+}

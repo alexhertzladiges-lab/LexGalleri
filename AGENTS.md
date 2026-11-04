@@ -40,7 +40,13 @@ produktionsmål. Foretag ikke en global søg/erstat af `LexGalleri`.
 
 Kilde `8c70814d44cfd95adfc32e28ef1e5ca878485d20`, grøn CI41801200808,
 artifact13307512756: 1.274 PHP-kontroller og209 Node-/browserprøver bestået.
-Pakken er kodet/testet og **ikke installeret**. Pins findes i
+Pakken er kodet/testet og godkendt, men **ikke installeret**. Installationskørsel
+41804486568 stoppede før offentlige filændringer, fordi privat app.php endnu
+ikke annoncerer gallery_delete/gallery_delete_requests. FTPS-kontoen kan ikke
+opdatere den private fil. Ejeren skal uploade den testede app.php med 0600,
+hvorefter den allerede godkendte installation kan fortsættes ved bevidst
+genkørsel af job126488017307 på commit b7635c1e25c8bd55d18b62439b3cf4fcc93d28d5.
+Engangsworkflowets nye kørsler er sat på pause. Pins findes i
 `installation/gallery-delete/release.json`; rapporten er
 `docs/GALLERY_DELETE_KONTROL.md`. Ret kun dokumentationen om navn/adresse
 uden at ændre den allerede fastlåste pakke eller dens SHA256SUMS.

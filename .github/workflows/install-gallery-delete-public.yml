@@ -11,8 +11,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Explicit owner approval: "ok installér", LexGalleri gallery-delete package.
-    if: ${{ github.repository == 'alexhertzladiges-lab/LexGalleri' && github.event.head_commit.message == 'Install approved LexGalleri gallery deletion package (2026-11-04)' }}
+    # Paused: run 41804486568 stopped before writes; private app.php is not updated.
+    # Existing package approval remains valid. After owner upload, deliberately
+    # rerun failed job 126488017307 on its immutable installation commit.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -155,3 +157,4 @@ jobs:
           path: ${{ runner.temp }}/public-installation-evidence.json
           if-no-files-found: error
           retention-days: 30
+
