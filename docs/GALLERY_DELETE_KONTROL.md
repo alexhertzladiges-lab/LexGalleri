@@ -1,5 +1,7 @@
 # lexgalleri – slet hele gallerier
 
+**Status: kodet, fuldt testet og pakket. Ikke installeret.**
+
 Kun lexgalleri. Fiskerhyttens LexApp er en anden app og er urørt. Branch `feature/lexgalleri-gallery-deletion-v1`, afledt fra `aa9ebb3db07768e6ab756328b88bde47276376ba`.
 
 ## Adfærd
@@ -63,3 +65,27 @@ Pakken `dist/lexgalleri-gallery-delete/` indeholder de 12 offentlige filer, priv
 ## Afgrænsning
 
 Ikke installeret på webhotellet. Ingen rigtige gallerier, konti, medier, adgangsrettigheder eller credentials er ændret. Ingen merge. En konkret grøn pakke skal godkendes før installation; der må ikke køres en sletteprøve med rigtige gallerier uden særskilt aftale. Fysiske telefoner er ikke testet i denne opgave.
+
+## Afsluttende grøn kontrol
+
+Kildecommit `8c70814d44cfd95adfc32e28ef1e5ca878485d20`. [GitHub Actions 41801200808](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41801200808), job126477101617: **SUCCESS**.
+
+- **1.274 PHP-/MySQL 8.4-kontroller**, inklusive de 91 nye galleri-slettekontroller, bestået.
+- **209 Node-/browserprøver**, inklusive de seks nye browserforløb og de eksisterende login-, profil-, import- og galleri-prøver, bestået. Ingen fejl eller oversprungne prøver.
+- Alle pakker blev bygget efter testene. Den konkrete pakke for denne opgave er `lexgalleri-gallery-delete-8c70814d44cfd95adfc32e28ef1e5ca878485d20`, artifact 13307512756, 106.134 bytes.
+- [Download den testede pakke](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41801200808/artifacts/13307512756). GitHub-adgang kræves.
+- ZIP-SHA256: `6a0b5b408fb720b3221ac13d60dace1ab033b8b90e7f3b5d01384bf1517b14b9`.
+- Pakken blev genhentet og kontrolleret uafhængigt: ZIP-digest og CRC, alle 14 SHA256SUMS-poster, præcis 12 offentlige filer + privat app.php + vejledning. De to programfiler matcher de lokalt testede bytes. Ingen SQL, config, sessioner, originals eller andre private medier. Pins: `installation/gallery-delete/release.json`.
+- Den lokale engangs-MariaDB er stoppet; hver test rydder egne databaser, filer, PHP-servere og browserprofiler op.
+
+Den senere journalcommit ændrer kun dokumentation og pakke-pins. Kildecommit og artifact ovenfor er de testede. Ingen produktionstest med rigtige gallerier og ingen installation er udført.
+
+### Ændrede filer
+
+- `private/app.php`: beskyttede endpoints, ejeranmodninger, moderationskø, navne-/versionsbekræftelse, genoptagelig batchsletning og referenceoprydning.
+- `public/static/app.js`: ejerens anmodning/annullering, admins direkte sletning og godkendelse/afvisning/genoptagelse.
+- `tests/gallery-delete.php`, `tests/webapp-browser.test.mjs`: database-/HTTP- og browserregressioner.
+- `.github/workflows/tests.yml`, `scripts/package-telefon-mp4.py`: genbrug af eksisterende CI og allowlist-pakning med `--gallery-delete`.
+- `installation/gallery-delete/INSTALLER.md`, `installation/gallery-delete/release.json` og denne rapport.
+
+Før installation: godkend den konkrete pakke og upload den private app.php til den eksisterende private lexgalleri-mappe med 0600. Den offentlige FTP-konto kan derefter installere de offentlige filer. Ingen ny SQL er nødvendig. Gallerier slettes kun gennem en efterfølgende, udtrykkeligt bekræftet adminhandling i appen.
