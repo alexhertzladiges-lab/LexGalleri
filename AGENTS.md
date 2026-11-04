@@ -64,3 +64,14 @@ Alle12 offentlige hashes og den nye tekst er kontrolleret via FTPS og HTTPS.
 Journal: installation/media-delete-label/public-installed.json. Godkendelsen er
 forbrugt; det nye engangsworkflow er lukket med if:false og må ikke genkøres.
 Den oprindelige galleri-slettepakke og dens historiske journal er bevaret.
+
+## Installeret tidslinje med lodrette datosektioner
+
+Kilde65265db378240bb77af8e03fa009d486961878fc, grøn CI41814877251, artifact13313754064.
+Seks billeder pr. række på pc, tre på mobil; hver dato har sin egen sektion.
+Installeret i kørsel41815491054, job126525046453. Alle12 offentlige hashes og
+JavaScript/CSS er kontrolleret via FTPS og HTTPS. Privat backend og SQL er uændret.
+Journal: installation/timeline-dates/public-installed.json. Rapport:
+docs/TIMELINE_DATE_GROUPS_KONTROL.md. Godkendelsen er forbrugt; engangsworkflowet
+er lukket og må ikke genkøres. Det efterfølgende ønske om admin-masseredigering
+udvikles separat fra denne allerede installerede, uforanderlige pakke.

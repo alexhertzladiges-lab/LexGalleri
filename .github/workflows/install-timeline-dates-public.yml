@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Owner approved six desktop / three mobile date groups and installation.
-    if: ${{ github.repository == 'alexhertzladiges-lab/LexGalleri' && github.event.head_commit.message == 'Install approved LexGalleri dated timeline package (2026-11-04)' }}
+    # Approval consumed: successful installation run 41815491054, job 126525046453.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -163,3 +163,4 @@ jobs:
           path: ${{ runner.temp }}/public-installation-evidence.json
           if-no-files-found: error
           retention-days: 30
+
