@@ -533,7 +533,37 @@ function bindPhotoVideo(p,rights){
   if(!player||!message)return;
   player.addEventListener('error',()=>{message.textContent='Browseren kan ikke afspille denne video.'+(rights.download&&rights.gps?' Hent originalen for at åbne den i en anden afspiller.':' Prøv en anden browser.');message.hidden=false});
 }
-function drawPhotos(ps){$('#photo-grid').innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}${p.is_new?'<span class="new-badge photo-new">Nyt</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span>${deletionRequestBadge(p)}</button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{const state=galleryDeleteState;if(galleryDeleteActive(state)&&state.active){if(state.pending||!galleryDeletionEligible(photos.find(photo=>photo.id===b.dataset.photo)||{}))return;if(state.selected.has(b.dataset.photo))state.selected.delete(b.dataset.photo);else state.selected.add(b.dataset.photo);syncGalleryDelete(state);return;}showPhoto(b.dataset.photo).catch(error=>toast(error.message));});if(galleryDeleteActive(galleryDeleteState))syncGalleryDelete(galleryDeleteState);}
+// Group by the recorded calendar date without shifting it to the viewer's timezone.
+// Partial/circa dates stay partial; missing capture dates use the upload date.
+function timelineDate(photo){
+  const value=String(photo.taken||photo.uploaded||'').slice(0,10);
+  if(!/^[0-9]{4}(?:-[0-9]{2}){0,2}$/.test(value)||value.startsWith('0000'))return {key:'unknown',label:'Dato ukendt'};
+  const day=value+(value.length===4?'-01-01':value.length===7?'-01':'');
+  const parsed=new Date(day+'T12:00:00Z');
+  if(Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,value.length)!==value)return {key:'unknown',label:'Dato ukendt'};
+  const options=value.length===4?{year:'numeric'}:value.length===7?{month:'long',year:'numeric'}:{weekday:'long',day:'numeric',month:'long',year:'numeric'};
+  let label=parsed.toLocaleDateString('da-DK',{...options,timeZone:'UTC'}).replace(' den ',' ');
+  label=label[0].toLocaleUpperCase('da-DK')+label.slice(1);
+  const circa=!!photo.taken&&photo.precision==='circa';
+  return {key:(circa?'circa:':'')+value,label:(circa?'Ca. ':'')+label};
+}
+function groupTimelinePhotos(list,grid){
+  // Move existing cards rather than recreating their loaded images or handlers.
+  const cards=new Map([...grid.querySelectorAll('.photo')].map(card=>[card.querySelector('[data-photo]').dataset.photo,card]));
+  const groups=new Map();
+  for(const photo of list){const date=timelineDate(photo);if(!groups.has(date.key))groups.set(date.key,{...date,photos:[]});groups.get(date.key).photos.push(photo);}
+  grid.replaceChildren();
+  let index=0;
+  for(const group of groups.values()){
+    const section=document.createElement('section'),heading='timeline-date-'+index++;
+    section.className='timeline-day';section.dataset.timelineDate=group.key;section.setAttribute('aria-labelledby',heading);
+    section.innerHTML=`<header class="timeline-day-heading"><h2 id="${heading}">${esc(group.label)}</h2><span class="timeline-count">${group.photos.length} ${group.photos.length===1?'billede':'billeder'}</span></header><div class="timeline-photos"></div>`;
+    const target=section.querySelector('.timeline-photos');
+    for(const photo of group.photos){const card=cards.get(photo.id);if(card)target.append(card);}
+    grid.append(section);
+  }
+}
+function drawPhotos(ps){const grid=$('#photo-grid');grid.classList.toggle('timeline-groups',view==='timeline'&&!current);grid.innerHTML=ps.map(p=>`<article class="photo"><button data-photo="${esc(p.id)}"><span class="photo-image"><img src="${photoPath(p)}/image" alt="${esc(p.title)}" loading="lazy">${p.mime==='video/mp4'?'<span class="video-badge">▶ Video</span>':''}${p.is_new?'<span class="new-badge photo-new">Nyt</span>':''}</span><span class="caption"><span>${esc(p.title)}</span><span>${p.favorite?'♥':''} ${esc(p.taken?p.taken.slice(0,4):'')}</span></span>${deletionRequestBadge(p)}</button></article>`).join('')||'<div class="empty"><h2>Plads til flere minder</h2><p>Der er endnu ingen billeder at vise her.</p></div>';if(grid.classList.contains('timeline-groups')&&ps.length)groupTimelinePhotos(ps,grid);document.querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>{const state=galleryDeleteState;if(galleryDeleteActive(state)&&state.active){if(state.pending||!galleryDeletionEligible(photos.find(photo=>photo.id===b.dataset.photo)||{}))return;if(state.selected.has(b.dataset.photo))state.selected.delete(b.dataset.photo);else state.selected.add(b.dataset.photo);syncGalleryDelete(state);return;}showPhoto(b.dataset.photo).catch(error=>toast(error.message));});if(galleryDeleteActive(galleryDeleteState))syncGalleryDelete(galleryDeleteState);}
 function galleryDeleteActive(state){
   return !!state&&state===galleryDeleteState&&state.account===accountGeneration&&state.navigation===navigationGeneration&&current===state.gallery&&state.grid===$('#photo-grid')&&galleryDeletionAllowed();
 }
@@ -642,12 +672,16 @@ function reviewGalleryDelete(state){
 // Keep the thumbnail elements and their loaded image bytes when a favorite is
 // changed in the viewer. Closing a dialog never needs to rebuild this grid.
 function updatePhotoCard(p){
+  let dateChanged=false;
   for(const button of document.querySelectorAll('[data-photo]')){
     if(button.dataset.photo!==p.id)continue;
     const caption=$('.caption',button);
     if(caption?.children[0])caption.children[0].textContent=p.title;
     if(caption?.children[1])caption.children[1].textContent=(p.favorite?'♥ ':'')+(p.taken?p.taken.slice(0,4):'');
+    const section=button.closest('[data-timeline-date]');
+    if(section&&section.dataset.timelineDate!==timelineDate(p).key)dateChanged=true;
   }
+  if(dateChanged&&view==='timeline'&&!current){photos.sort((a,b)=>(b.taken||b.uploaded).localeCompare(a.taken||a.uploaded));groupTimelinePhotos(photos,$('#photo-grid'));}
 }
 function removeUnselectedFavorites(){
   if(view!=='favorites'||current)return;

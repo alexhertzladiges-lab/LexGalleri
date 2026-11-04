@@ -31,7 +31,7 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
+async function fixture({timeline=false,wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
   const requests=[];let denied=false, disconnected=false;
   const wholeRequests=[],pendingWhole=[];let wholePending=wholeRequestPending,wholeGone=false,wholeStep=0,holdWhole=false,failWhole=wholeFailure;
   const videoRequests=[],pendingVideoHeads=[];let videoStatus=200,holdVideoHeads=false,videoFlag;
@@ -63,9 +63,21 @@ async function fixture({wholeGallery=false,wholeRequestPending=false,wholeFailur
   }));
   photos[0].mime='video/mp4';
   if(deletionRequests){for(const photo of [photos[1],photos[2]]){photo.uploader=memberId;photo.uploader_name='Syntetisk medlem';}photos[2].mime='video/mp4';}
+  if(timeline){
+    photos.splice(24);
+    for(const [index,photo] of photos.entries()){
+      photo.taken=index<8?'2026-11-01T'+(index===0?'00:05:00':'23:55:00'):index<15?'2026-10-31T12:00:00':'';
+      photo.precision=photo.taken?'exact':'unknown';photo.uploaded='2026-10-29T08:00:00Z';
+    }
+    Object.assign(photos[19],{taken:'2020',precision:'year'});
+    Object.assign(photos[20],{taken:'2019',precision:'circa'});
+    Object.assign(photos[21],{taken:'2020-05',precision:'month'});
+    for(const photo of photos.slice(22))photo.uploaded='';
+  }
   const newApproval=photo=>({id:'6'.repeat(30)+String(approvalRequests.length+1).padStart(2,'0'),photo_id:photo.id,gallery_id:photo.gallery_id,gallery_name:'Syntetisk galleri',title:photo.title,mime:photo.mime,requester_id:memberId,requester_name:'Syntetisk medlem',status:'pending',created:'2026-10-28T18:00:00Z',updated:'2026-10-28T18:00:00Z'});
   if(longPhotoTitles)for(const photo of [photos[1],photos[2]])photo.title='En lang familietitel med mange minder og detaljer. '.repeat(5).slice(0,200);
   const otherPhotos=[{...photos[1],id:'d'.repeat(31)+'1',gallery_id:otherGalleryId,title:'Privat syntetisk minde',favorite:true}];
+  if(timeline)Object.assign(otherPhotos[0],{taken:'2026-11-01T13:00:00',precision:'exact'});
   const video=Buffer.from((await readFile(join(root,'tests','fixtures','tiny.mp4.b64'),'utf8')).replace(/\s/g,''),'base64');
   const html='<!doctype html><html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>LexGalleri browser test</title><link rel="manifest" href="'+base+'/manifest.webmanifest"><link rel="apple-touch-icon" href="'+base+'/static/apple-touch-icon.png"><link rel="stylesheet" href="'+base+'/static/style.css"><script src="'+base+'/static/app.js" defer></script><script src="'+base+'/static/pwa.js" defer></script></head><body><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div></body></html>';
   const server=createServer(async(req,res)=>{
@@ -1485,5 +1497,65 @@ test('whole-gallery queue approval binds deletion to the selected member request
     await run('document.querySelector("#whole-gallery-name").value="Syntetisk galleri";document.querySelector("#whole-gallery-form").requestSubmit()');
     await wait('!document.querySelector("#modal").open&&!document.querySelector("[data-gallery]")','approved deletion completed');
     assert.equal(site.wholeRequests[0].fields.request_id,'d'.repeat(32));
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+
+test('real Chromium: timeline keeps each date in one vertical section with six desktop and three mobile thumbnails',{
+  skip:binary?false:'Chromium required',timeout:60000,
+},async t=>{
+  const site=await fixture({timeline:true,member:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    const timeline=async()=>{await run('document.querySelector("[data-view=timeline]").click()');await wait('!!document.querySelector(".timeline-day")','date grouped timeline');};
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await timeline();
+    await t.test('capture dates, upload fallback and partial dates remain honest across galleries',async()=>{
+      const groups=await run('[...document.querySelectorAll(".timeline-day")].map(s=>({key:s.dataset.timelineDate,label:s.querySelector("h2").textContent,count:s.querySelectorAll("[data-photo]").length}))');
+      assert.deepEqual(groups.map(g=>g.key),['2026-11-01','2026-10-31','2026-10-29','2020-05','2020','circa:2019','unknown']);
+      assert.deepEqual(groups.map(g=>g.count),[9,7,4,1,1,1,2]);
+      assert.equal(groups[0].label,'Søndag 1. november 2026');assert.equal(groups[2].label,'Torsdag 29. oktober 2026');
+      assert.equal(groups[3].label,'Maj 2020');assert.equal(groups[4].label,'2020');assert.equal(groups[5].label,'Ca. 2019');assert.equal(groups[6].label,'Dato ukendt');
+      assert.equal(await run('document.querySelectorAll("[data-photo]").length'),25);
+    });
+    await t.test('six/three fixed columns, chronological sections and no overflow at narrow and wide sizes',async()=>{
+      for(const width of [320,390,850,1280,1920]){
+        await call('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<=850});
+        const layout=await run(`(()=>{const sections=[...document.querySelectorAll('.timeline-day')],grids=sections.map(s=>s.querySelector('.timeline-photos')),cards=grids.flatMap(g=>[...g.querySelectorAll('[data-photo]')]);return{columns:grids.map(g=>getComputedStyle(g).gridTemplateColumns.split(' ').length),vertical:sections.every((s,i)=>!i||s.getBoundingClientRect().top>=sections[i-1].getBoundingClientRect().bottom),overflow:document.documentElement.scrollWidth>innerWidth,smallest:Math.min(...cards.map(c=>c.getBoundingClientRect().width)),firstRows:new Set([...grids[0].querySelectorAll('.photo')].map(c=>Math.round(c.getBoundingClientRect().top))).size,ratio:grids[0].querySelector('.photo-image').getBoundingClientRect().width/grids[0].querySelector('.photo-image').getBoundingClientRect().height}})()`);
+        assert(layout.columns.every(c=>c===(width<=850?3:6)));assert(layout.vertical&&!layout.overflow,'dates stay vertical without overflow at '+width);assert(layout.smallest>=44);assert.equal(layout.firstRows,width<=850?3:2);assert(Math.abs(layout.ratio-4/3)<.03);
+        if(width===390)await screenshot(call,'timeline-date-mobile.png');if(width===1280)await screenshot(call,'timeline-date-desktop.png');
+      }
+    });
+    await t.test('opening and closing media retains grouped cards and loaded thumbnails',async()=>{
+      await run(`window.__timelineGrid=document.querySelector('#photo-grid');window.__timelineImages=[...__timelineGrid.querySelectorAll('img')];document.querySelector('[data-photo="${site.stillPhotoId}"]').click()`);
+      await wait('document.querySelector("#modal").open&&!!document.querySelector("#photo-info-toggle")','timeline photo viewer');
+      await run('document.querySelector("#close-modal").click()');await wait('!document.querySelector("#modal").open','closed timeline viewer');
+      assert(await run('__timelineGrid===document.querySelector("#photo-grid")&&__timelineImages.every(i=>i.isConnected&&__timelineGrid.contains(i))'));
+    });
+    await t.test('favorites retain their existing layout',async()=>{
+      await run('document.querySelector("[data-view=favorites]").click()');await wait('document.querySelector("h1")?.textContent==="Favoritter"','favorites view');
+      assert(await run('!document.querySelector(".timeline-day")&&!document.querySelector("#photo-grid").classList.contains("timeline-groups")'));
+    });
+    await t.test('revoked galleries and an empty authorized timeline leave no stale date groups',async()=>{
+      site.revokeOtherGallery();await timeline();assert.equal(await run('document.querySelectorAll("[data-photo]").length'),24);
+      assert(await run(`!document.querySelector('[data-photo="${site.otherPhotoId}"]')`));
+      site.deny();await run('document.querySelector("[data-view=timeline]").click()');await wait('!!document.querySelector("#photo-grid .empty")','empty timeline');assert.equal(await run('document.querySelectorAll(".timeline-day").length'),0);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: editing a capture date moves the existing timeline card to its new group',{
+  skip:binary?false:'Chromium required',timeout:45000,
+},async()=>{
+  const site=await fixture({timeline:true,galleryEditing:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');
+    await run('document.querySelector("[data-view=timeline]").click()');await wait('!!document.querySelector(".timeline-day")','timeline');
+    await run(`window.__datedCard=document.querySelector('[data-photo="${site.stillPhotoId}"]');window.__datedImage=__datedCard.querySelector('img');__datedCard.click()`);await wait('!!document.querySelector("#photo-info-toggle")','viewer');
+    await run('document.querySelector("#photo-info-toggle").click();document.querySelector("#edit-photo").click()');await wait('!!document.querySelector("#edit")','date editor');
+    await run('document.querySelector("#edit [name=precision]").value="day";document.querySelector("#edit [name=taken]").value="2026-10-28";document.querySelector("#edit").requestSubmit()');
+    await wait(`!!document.querySelector('[data-timeline-date="2026-10-28"]')`,'new date section');
+    assert(await run('__datedCard.isConnected&&__datedImage===__datedCard.querySelector("img")&&__datedCard.closest(".timeline-day").dataset.timelineDate==="2026-10-28"'));
+    assert.equal(site.photoEdits.length,1);
   }finally{if(browser)await browser.close();await site.close();}
 });
