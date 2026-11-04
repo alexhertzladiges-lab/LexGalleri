@@ -93,3 +93,16 @@ genkøres. Journal/pins: installation/gallery-bulk-metadata/public-installed.jso
 og release.json. Rapport: docs/GALLERY_BULK_METADATA_KONTROL.md.
 Testet kilde, pakke og SHA256SUMS er uændrede. Ingen produktions-bulkprøve
 uden aftale om de præcise værdier og berørte gallerier.
+
+## Installeret samme datodesign inde i gallerierne
+
+Branch feature/lexgalleri-gallery-date-layout-v1, kilde96094e9c0d68d2a7a922b2e27389fd25612e2a3a.
+Grøn CI41823053945:1.340 PHP-kontroller og228 Node-/browserprøver.
+Offentlig pakke13316889178, SHA256 ac77f1ad3a2bce421d56d8742c2b26bac00be5eb14858a5e9f67f2393c940c19.
+Installeret og verificeret i kørsel41823659759, job126552801586; alle12 offentlige
+hashes og HTTPS-kontroller bestod. Kun public/static/app.js ændrer runtime.
+Ingen privat upload, SQL, datarettelse eller merge. Gallerier og tidslinje bruger
+samme6/3-datogrupper; galleri-søgning, sortering, redigering og sletning bevares.
+Journal: installation/gallery-date-layout/public-installed.json. Rapport:
+docs/GALLERY_DATE_LAYOUT_KONTROL.md. Anmodningen er opfyldt; engangsworkflowet
+er lukket med if:false og må ikke genkøres. Ældre journaler er historiske.
