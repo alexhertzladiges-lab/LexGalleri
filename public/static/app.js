@@ -408,8 +408,9 @@ async function galleryView(){
   }
   if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
   photos=result.photos;permissions=result.permissions;
-  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${memberSharingAvailable()?'<button class="secondary" id="member-sharing" type="button">Del med medlemmer</button>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${memberSharingAvailable()?'<button class="secondary" id="member-sharing" type="button">Del med medlemmer</button>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${wholeGalleryButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
   $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
+  const wholeDelete=$('#whole-gallery-delete')||$('#whole-gallery-request');if(wholeDelete)wholeDelete.onclick=()=>wholeGalleryDialog(requestGallery);
   $('#share-gallery').onclick=()=>shareGallery(requestGallery);
   if($('#member-sharing'))$('#member-sharing').onclick=()=>memberSharingDialog(requestGallery);
   $('#copy-gallery-link').onclick=()=>{if(me&&current?.id===requestGallery.id)shareLinkDialog({url:galleryShareUrl(requestGallery.id)},false);};
@@ -445,6 +446,8 @@ async function deletionRequestsView(){
   if(!me?.admin)return;
   content.innerHTML='<div class="heading"><div><h1>Sletteønsker</h1><p>Medlemmer markerer egne billeder og videoer. Filerne slettes først, når du godkender.</p></div></div>';
   decorateAdmin('deletions');
+  await wholeGalleryQueue(content,generation,account);
+  if(!galleryRequestActive(generation,account,'deletions',null)||!me?.admin)return;
   if(serverCapabilities.media_delete_requests!==true){content.insertAdjacentHTML('beforeend','<div class="panel"><p role="status">Godkendelse af sletning er ikke aktiveret endnu. Opsætningen skal færdiggøres, før du kan behandle markeringer.</p><a href="https://github.com/alexhertzladiges-lab/LexGalleri/blob/main/ACCOUNTS.md#markering-til-sletning-og-admins-godkendelse" target="_blank" rel="noopener">Se installationsvejledningen</a></div>');return;}
   content.insertAdjacentHTML('beforeend','<p role="status" id="deletion-request-loading">Henter markeringer…</p>');
   const active=()=>galleryRequestActive(generation,account,'deletions',null)&&!!me?.admin;
@@ -1242,8 +1245,8 @@ async function peopleView(){
 }
 function adminContentView(){
   if(!me?.admin)return;
-  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Indhold</h2><p class="muted">Åbn et galleri for at rette navn, tilføje medier eller vælge billeder til sletning.</p></div><button id="admin-new-gallery" type="button">＋ Nyt galleri</button></div><div class="panel admin-gallery-list">${galleries.map(g=>`<div class="admin-gallery-row"><div><h3>${esc(g.name)}</h3><p class="muted">${Math.max(0,Number(g.count)||0)} billeder og videoer</p></div><button class="secondary" type="button" data-admin-gallery="${esc(g.id)}">Åbn galleri</button></div>`).join('')||'<p>Der er endnu ingen gallerier.</p>'}</div><button class="secondary" id="admin-deletions" type="button">Gennemgå sletteønsker</button>`;
-  decorateAdmin('admin-content');$('#admin-new-gallery').onclick=newGallery;$('#admin-deletions').onclick=()=>navigateView('deletions');document.querySelectorAll('[data-admin-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.adminGallery));
+  $('#content').innerHTML=`<div class="heading admin-page-intro"><div><h2>Indhold</h2><p class="muted">Åbn et galleri for at rette navn, tilføje medier eller vælge billeder til sletning.</p></div><button id="admin-new-gallery" type="button">＋ Nyt galleri</button></div><div class="panel admin-gallery-list">${galleries.map(g=>`<div class="admin-gallery-row"><div><h3>${esc(g.name)}</h3><p class="muted">${Math.max(0,Number(g.count)||0)} billeder og videoer</p></div><div class="gallery-delete-actions"><button class="secondary" type="button" data-admin-gallery="${esc(g.id)}">Åbn galleri</button>${serverCapabilities.gallery_delete===true?`<button class="danger" type="button" data-admin-gallery-delete="${esc(g.id)}">Slet galleri</button>`:''}</div></div>`).join('')||'<p>Der er endnu ingen gallerier.</p>'}</div><button class="secondary" id="admin-deletions" type="button">Gennemgå sletteønsker</button>`;
+  decorateAdmin('admin-content');$('#admin-new-gallery').onclick=newGallery;$('#admin-deletions').onclick=()=>navigateView('deletions');document.querySelectorAll('[data-admin-gallery]').forEach(b=>b.onclick=()=>openGallery(b.dataset.adminGallery));document.querySelectorAll('[data-admin-gallery-delete]').forEach(b=>b.onclick=()=>wholeGalleryDialog({id:b.dataset.adminGalleryDelete}));
 }
 async function adminSecurityView(){
   if(!me?.admin)return;
@@ -1258,6 +1261,7 @@ async function adminSecurityView(){
   decorateAdmin('admin-security');loadStorageSummary('admin-security');$('#admin-status-refresh').onclick=()=>navigateView('admin-security');$('#admin-own-security').onclick=()=>navigateView('profile');
 }
 function requestDialogClose(){
+  if(M.querySelector('[data-whole-gallery-pending="true"]')?.dataset?.wholeGalleryPending==='true')return;
   if(grantDialog?.busy)return;
   if(grantDialog?.dirty()){$('#grant-leave-warning').hidden=false;$('#grant-stay').focus();return;}
   cancelGalleryDeleteConfirmation();photoViewerGeneration++;closeModal();
@@ -1270,4 +1274,73 @@ if(typeof window!=='undefined')window.addEventListener('beforeunload',event=>{if
 M.addEventListener('keydown',photoViewerKeydown);
 M.addEventListener('cancel',event=>{event?.preventDefault?.();if(grantDialog&&(grantDialog.busy||grantDialog.dirty())){requestDialogClose();return;}cancelGalleryDeleteConfirmation();closeModal();});
 M.addEventListener('close',()=>{const handled=pendingModalCloses>0;if(handled)pendingModalCloses--;if(M.open)return;grantDialog=null;if(!handled)photoViewerGeneration++;photoViewerNavigation=null;stopPhotoVideo();removeUnselectedFavorites();if(privateAccountDialog){M.innerHTML='';privateAccountDialog=false}});
+function wholeGalleryButtonMarkup(){
+  if(me?.admin&&serverCapabilities.gallery_delete===true)return '<button id="whole-gallery-delete" class="danger" type="button">Slet galleri</button>';
+  if(permissions.delete_request===true&&serverCapabilities.gallery_delete_requests===true)return '<button id="whole-gallery-request" class="secondary" type="button">Send galleri til sletning</button>';
+  return '';
+}
+async function wholeGalleryDialog(gallery,requestId=null){
+  const account=accountGeneration,navigation=navigationGeneration,admin=!!me?.admin;
+  modal(admin?'Slet hele galleriet':'Send galleri til sletning','<p role="status">Henter galleriets oplysninger…</p>');
+  const generation=photoViewerGeneration;
+  const active=()=>account===accountGeneration&&navigation===navigationGeneration&&generation===photoViewerGeneration&&M.open&&!!me;
+  let preview;
+  try{preview=await api('/galleries/'+encodeURIComponent(gallery.id)+'/deletion');}
+  catch(error){if(active())M.insertAdjacentHTML('beforeend','<p class="error" role="alert">'+esc(error.message)+'</p>');return;}
+  if(!active())return;
+  const pendingRequest=preview.request?.status==='pending',resume=preview.job?.status==='deleting';
+  const wrapper=document.createElement('div');wrapper.className='dialog-content';wrapper.innerHTML=`<form id="whole-gallery-form"><h3>${esc(preview.name)}</h3><p>${Math.max(0,Number(preview.count)||0)} billeder og videoer.</p><p>${admin?'Hele galleriet, alle dets billeder og videoer samt adgangene til galleriet bliver slettet. Det kan ikke fortrydes her. Indhold i andre gallerier bevares.':pendingRequest?'Anmodningen afventer admin. Galleriet og indholdet er endnu ikke slettet.':'Galleriet og alle dets billeder og videoer sendes til sletning hos admin. Intet slettes, før admin godkender.'}</p>${admin&&!resume?'<label>Skriv galleriets navn for at bekræfte<input id="whole-gallery-name" name="confirm_name" autocomplete="off" required></label>':''}<p id="whole-gallery-progress" role="status" aria-live="polite">${resume?'Sletningen er påbegyndt. Genoptag for at færdiggøre den.':''}</p><p class="error" role="alert"></p><div class="gallery-delete-actions"><button type="submit" class="${admin?'danger':'secondary'}">${admin?(resume?'Genoptag sletning':'Slet hele galleriet'):pendingRequest?'Annullér sletteanmodning':'Send anmodning til admin'}</button><button id="whole-gallery-cancel" class="secondary" type="button">Luk</button></div></form>`;
+  M.querySelector('[role=status]')?.remove();M.append(wrapper);
+  const form=$('#whole-gallery-form'),submit=form.querySelector('button[type=submit]'),cancel=$('#whole-gallery-cancel'),close=$('#close-modal'),status=$('#whole-gallery-progress');
+  let pending=false;
+  cancel.onclick=()=>{if(!pending)closeModal();};
+  form.onsubmit=async event=>{
+    event.preventDefault();if(pending||!active())return;
+    if(admin&&!resume&&$('#whole-gallery-name').value!==preview.name){form.querySelector('.error').textContent='Skriv galleriets navn præcist for at bekræfte.';return;}
+    pending=true;form.dataset.wholeGalleryPending='true';submit.disabled=true;cancel.disabled=true;close.disabled=true;form.querySelector('.error').textContent='';
+    try{
+      if(!admin){
+        const reply=await api('/galleries/'+gallery.id+'/deletion-request',pendingRequest?'DELETE':'POST',{});
+        if(reply?.ok!==true||reply.request?.status!==(pendingRequest?'cancelled':'pending'))throw Error('Serveren kunne ikke bekræfte anmodningen. Opdatér galleriet før et nyt forsøg.');
+        if(!active())return;closeModal();toast(pendingRequest?'Sletteanmodningen er annulleret.':'Galleriet er sendt til sletning hos admin.');return;
+      }
+      let body=resume?{job_id:preview.job.id}:{confirm_name:preview.name,version:preview.version,...(requestId?{request_id:requestId}:{})};
+      while(active()){
+        status.textContent='Sletter galleriets billeder og videoer…';
+        const result=await api('/galleries/'+gallery.id,'DELETE',body);
+        if(!active())return;
+        if(result?.ok!==true||typeof result.done!=='boolean'||typeof result.job_id!=='string'||!Number.isInteger(result.processed)||!Number.isInteger(result.remaining))throw Error('Serveren kunne ikke bekræfte sletningen. Luk og genoptag fra Sletteønsker.');
+        if(result.done){
+          closeModal();galleries=galleries.filter(g=>g.id!==gallery.id);if(current?.id===gallery.id){current=null;photos=[];permissions={};}
+          await refreshGalleryView('galleries');toast('Galleriet og dets indhold er slettet.');return;
+        }
+        status.textContent=result.processed+' slettet · '+result.remaining+' tilbage';body={job_id:result.job_id};
+      }
+    }catch(error){if(active()){form.querySelector('.error').textContent=error.message;status.textContent=admin?'Hvis sletningen er påbegyndt, kan den genoptages under Administration → Sletteønsker.':'';}}
+    finally{pending=false;if(active()){form.dataset.wholeGalleryPending='false';submit.disabled=false;cancel.disabled=false;close.disabled=false;}}
+  };
+}
+async function wholeGalleryQueue(content,generation,account){
+  if(serverCapabilities.gallery_delete!==true)return;
+  const active=()=>galleryRequestActive(generation,account,'deletions',null)&&!!me?.admin;
+  const panel=document.createElement('section');panel.className='panel';panel.innerHTML='<h2>Hele gallerier</h2><p role="status">Henter sletteanmodninger og afbrudte sletninger…</p>';content.append(panel);
+  try{
+    const result=await api('/admin/gallery-deletion-requests');if(!active())return;
+    if(!Array.isArray(result.requests)||!Array.isArray(result.deletions))throw Error('Listen kunne ikke bekræftes.');
+    panel.innerHTML='<h2>Hele gallerier</h2><p class="error" role="alert"></p>'+(result.requests.length||result.deletions.length?'':'<p>Ingen afventende gallerier.</p>');
+    for(const request of result.requests){
+      const row=document.createElement('article');row.className='admin-gallery-row';row.innerHTML=`<div><h3>${esc(request.name)}</h3><p>Sendt af ${esc(request.requester_name)}</p></div><div class="gallery-delete-actions"><button class="danger" type="button" data-whole-approve>Gennemgå og slet galleri</button><button class="secondary" type="button" data-whole-reject>Afvis anmodning</button></div>`;panel.append(row);
+      row.querySelector('[data-whole-approve]').onclick=()=>{if(active())wholeGalleryDialog({id:request.gallery_id},request.id);};
+      const reject=row.querySelector('[data-whole-reject]');reject.onclick=async()=>{
+        if(!active()||reject.disabled)return;reject.disabled=true;
+        try{const reply=await api('/admin/galleries/'+request.gallery_id+'/deletion-reject','POST',{request_id:request.id});if(reply?.ok!==true)throw Error('Afvisningen kunne ikke bekræftes. Opdatér listen.');if(active()){row.remove();toast('Anmodningen er afvist. Galleriet er bevaret.');}}
+        catch(error){if(active())panel.querySelector('.error').textContent=error.message;}finally{if(active())reject.disabled=false;}
+      };
+    }
+    for(const job of result.deletions){
+      const row=document.createElement('article');row.className='admin-gallery-row';row.innerHTML=`<div><h3>${esc(job.name)}</h3><p>Sletningen skal færdiggøres · ${Number(job.processed)||0} filer behandlet</p></div><button class="danger" type="button">Genoptag sletning</button>`;panel.append(row);row.querySelector('button').onclick=()=>{if(active())wholeGalleryDialog({id:job.gallery_id});};
+    }
+  }catch(error){if(active())panel.innerHTML='<h2>Hele gallerier</h2><p class="error" role="alert">'+esc(error.message)+'</p>';}
+}
+
 init();

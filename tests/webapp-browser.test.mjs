@@ -31,8 +31,9 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
+async function fixture({wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
   const requests=[];let denied=false, disconnected=false;
+  const wholeRequests=[],pendingWhole=[];let wholePending=wholeRequestPending,wholeGone=false,wholeStep=0,holdWhole=false,failWhole=wholeFailure;
   const videoRequests=[],pendingVideoHeads=[];let videoStatus=200,holdVideoHeads=false,videoFlag;
   let directoryUnavailable=false,holdDirectory=false;const pendingDirectories=[];
   const extraMembers=adminDirectory?Array.from({length:8},(_,i)=>({id:(0x810+i).toString(16).padStart(32,'0'),admin:0,name:'Demoperson '+String(i+1).padStart(2,'0'),email:'demo'+(i+1)+'@example.test'})):[];
@@ -77,8 +78,26 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob: data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
       send('text/html; charset=utf-8',html);return;
     }
+    if(wholeGallery&&url.pathname===base+'/api/galleries/'+galleryId+'/deletion'){
+      json({gallery_id:galleryId,name:galleryName,count:wholeGone?0:2,version:'preview-version',request:wholePending?{id:'d'.repeat(32),gallery_id:galleryId,name:galleryName,requester_name:'Medlem',status:'pending'}:null,job:wholeStep&&!wholeGone?{id:'e'.repeat(32),status:'deleting',processed:1}:null});return;
+    }
+    if(wholeGallery&&url.pathname===base+'/api/galleries/'+galleryId&&req.method==='DELETE'){
+      let raw='';for await(const part of req)raw+=part;const fields=JSON.parse(raw);wholeRequests.push({method:req.method,fields});
+      if(member){json({detail:'Kun administrator'},403);return;}
+      const finish=()=>{wholeStep++;wholeGone=wholeStep>=2;if(failWhole){failWhole=false;json({detail:"Afbrudt prøve"},503);return;}json({ok:true,done:wholeGone,job_id:'e'.repeat(32),processed:wholeStep,remaining:wholeGone?0:1});};
+      if(holdWhole)pendingWhole.push(finish);else finish();return;
+    }
+    if(wholeGallery&&url.pathname===base+'/api/galleries/'+galleryId+'/deletion-request'){
+      wholeRequests.push({method:req.method,path:'request'});wholePending=req.method==='POST';json({ok:true,request:{id:'d'.repeat(32),status:wholePending?'pending':'cancelled'}});return;
+    }
+    if(wholeGallery&&url.pathname===base+'/api/admin/gallery-deletion-requests'){
+      json({requests:wholePending?[{id:'d'.repeat(32),gallery_id:galleryId,name:galleryName,requester_name:'Medlem',status:'pending'}]:[],deletions:wholeStep&&!wholeGone?[{gallery_id:galleryId,name:galleryName,id:'e'.repeat(32),processed:1}]:[]});return;
+    }
+    if(wholeGallery&&url.pathname===base+'/api/admin/galleries/'+galleryId+'/deletion-reject'){
+      let raw='';for await(const part of req)raw+=part;wholeRequests.push({method:req.method,path:'reject',fields:JSON.parse(raw)});wholePending=false;json({ok:true});return;
+    }
     if(url.pathname===base+'/api/status'){
-      const capabilities={...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
+      const capabilities={...(wholeGallery?{gallery_delete:true,gallery_delete_requests:true}:{}),...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
     if(url.pathname===base+'/api/me'){if(authenticator){json({detail:'Bekræft login'},401);return;}json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
@@ -127,6 +146,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       if(holdGalleryCreates)pendingGalleryCreates.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries'&&req.method==='GET'){
+      if(wholeGone){json([]);return;}
       const visiblePhotos=photos.filter(photo=>!deleted.has(photo.id));
       json([{id:galleryId,name:galleryName,description:galleryDescription,count:visiblePhotos.length,cover:mediaDelete?visiblePhotos[0]?.id??null:null},...(permissions||multiInvites||member&&!otherRevoked?[{id:otherGalleryId,name:member?'Privat syntetisk galleri':'Et andet galleri',description:member?'Beskrivelse kun for inviterede':'Kun genererede testdata',count:member?37:0,cover:null}]:[]),...createdGalleries]);return;
     }
@@ -170,7 +190,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
       if(holdGrantWrites)pendingGrantWrites.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries/'+galleryId+'/photos'){
-      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
+      json(denied?{detail:'Du har ikke adgang'}:{photos:photos.filter(photo=>!deleted.has(photo.id)).map(photo=>({...photo,...(deletionRequests?{deletion_request:approvalRequests.find(request=>request.photo_id===photo.id&&request.status==='pending')??null}:{})})),permissions:{delete_request:wholeGallery&&member&&wholeOwner,upload:false,edit:galleryEditing&&(!member||editMember),download:!editMember,gps:!editMember,...(guestVideo?(videoFlag===undefined?{}:{video:videoFlag}):{video:!editMember})}},denied?403:200);return;
     }
     if(member&&url.pathname===base+'/api/galleries/'+otherGalleryId+'/photos'){
       json(otherRevoked?{detail:'Du har ikke adgang'}:{photos:otherPhotos,permissions:{upload:false,download:false,gps:false,video:false}},otherRevoked?403:200);return;
@@ -213,7 +233,7 @@ async function fixture({permissions=false,member=false,mediaDelete=false,themePa
     json({detail:'Ikke fundet'},404);
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-  return {origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+  return {wholeRequests,holdWhole:()=>{holdWhole=true;},releaseWhole:()=>{holdWhole=false;assert(pendingWhole.length);pendingWhole.shift()();},origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
     videoRequests,setVideoStatus:status=>{videoStatus=status;},setVideoFlag:flag=>{videoFlag=flag;},holdVideoHeads:()=>{holdVideoHeads=true;},releaseVideoHead:()=>{assert(pendingVideoHeads.length);pendingVideoHeads.shift()();},
     invitationCreates,galleryEdits,photoEdits,holdInvites:()=>{holdInvites=true;},releaseInvite:error=>{assert(pendingInvites.length,'an invitation must be pending');pendingInvites.shift()(error);},holdGalleryEdits:()=>{holdGalleryEdits=true;},releaseGalleryEdit:error=>{assert(pendingGalleryEdits.length,'a gallery update must be pending');pendingGalleryEdits.shift()(error);},disableMultiInvites:()=>{multiInviteCapability=false;},
     memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
@@ -1385,5 +1405,85 @@ test('real Chromium: Signal chooser cancellation, fallback and gallery links on 
     await run('document.querySelector("#close-modal").click();location.hash="#gallery="+"0".repeat(32)');await wait('document.querySelector("#toast").textContent.includes("adgang")','unavailable target explains access');
     assert(!site.requests.some(p=>p.includes('/galleries/'+'0'.repeat(32)+'/photos')),'unavailable gallery metadata is not requested');
     assert(!site.requests.some(p=>/signal\.(org|me)|textsecure/.test(p)),'no Signal server or bot is contacted');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('whole-gallery owner requests and cancels; never receives direct delete', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true,member:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait("!!document.querySelector('[data-gallery]')",'galleries');
+    await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#whole-gallery-request")','owner request action');
+    assert.equal(await run('!!document.querySelector("#whole-gallery-delete")'),false);
+    await run('document.querySelector("#whole-gallery-request").click()');await wait('!!document.querySelector("#whole-gallery-form")','request dialog');
+    await run('document.querySelector("#whole-gallery-form").requestSubmit()');await wait('!document.querySelector("#modal").open','request saved');
+    assert.equal(site.wholeRequests.length,1);assert.equal(site.wholeRequests[0].method,'POST');
+    await run('document.querySelector("#whole-gallery-request").click()');await wait('document.querySelector("#whole-gallery-form")?.textContent.includes("Annullér sletteanmodning")','pending request');
+    await run('document.querySelector("#whole-gallery-form").requestSubmit()');await wait('!document.querySelector("#modal").open','cancel saved');
+    assert.equal(site.wholeRequests.length,2);assert.equal(site.wholeRequests[1].method,'DELETE');assert(site.wholeRequests.every(r=>r.path==='request'));
+    assert(await run('!!document.querySelector("#gallery-title")'),'gallery preserved');
+  }finally{if(browser)await browser.close();await site.close();}
+});
+test('whole-gallery admin confirms exact name, blocks duplicate submits and finishes batches', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait("!!document.querySelector('[data-gallery]')",'galleries');
+    await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#whole-gallery-delete")','admin delete action');
+    await run('document.querySelector("#whole-gallery-delete").click()');await wait('!!document.querySelector("#whole-gallery-name")','confirm dialog');
+    await run('document.querySelector("#whole-gallery-name").value="forkert";document.querySelector("#whole-gallery-form").requestSubmit()');
+    assert.equal(site.wholeRequests.length,0);
+    site.holdWhole();await run('document.querySelector("#whole-gallery-name").value="Syntetisk galleri";document.querySelector("#whole-gallery-form").requestSubmit();document.querySelector("#whole-gallery-form").requestSubmit()');
+    await wait('document.querySelector("#close-modal").disabled','pending locks close');assert.equal(site.wholeRequests.length,1);
+    await run('requestDialogClose()');assert(await run('document.querySelector("#modal").open'));
+    site.releaseWhole();await wait('!document.querySelector("#modal").open&&!document.querySelector("[data-gallery]")','whole gallery removed');
+    assert.equal(site.wholeRequests.length,2);assert.deepEqual(site.wholeRequests[0].fields,{confirm_name:'Syntetisk galleri',version:'preview-version'});assert.deepEqual(site.wholeRequests[1].fields,{job_id:'e'.repeat(32)});
+  }finally{if(browser)await browser.close();await site.close();}
+});
+test('whole-gallery admin queue can reject while preserving gallery', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true,wholeRequestPending:true,deletionRequests:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=deletions]")','admin navigation');
+    await run('document.querySelector("[data-view=deletions]").click()');await wait('!!document.querySelector("[data-whole-reject]")','whole-gallery queue');
+    await run('document.querySelector("[data-whole-reject]").click()');await wait('!document.querySelector("[data-whole-reject]")','rejection saved');
+    assert.equal(site.wholeRequests.length,1);assert.equal(site.wholeRequests[0].path,'reject');assert.deepEqual(site.wholeRequests[0].fields,{request_id:'d'.repeat(32)});
+  }finally{if(browser)await browser.close();await site.close();}
+});
+test('whole-gallery uncertain response stops automatic work and admin resumes from queue', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true,wholeFailure:true,deletionRequests:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait("!!document.querySelector('[data-gallery]')",'galleries');
+    await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#whole-gallery-delete")','delete action');
+    await run('document.querySelector("#whole-gallery-delete").click()');await wait('!!document.querySelector("#whole-gallery-name")','confirmation');
+    await run('document.querySelector("#whole-gallery-name").value="Syntetisk galleri";document.querySelector("#whole-gallery-form").requestSubmit()');
+    await wait('document.querySelector("#whole-gallery-form .error").textContent.includes("Afbrudt prøve")','uncertain error');assert.equal(site.wholeRequests.length,1);
+    await run('document.querySelector("#close-modal").click();document.querySelector("[data-view=deletions]").click()');await wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="Genoptag sletning")','resume queue');
+    await run('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Genoptag sletning").click()');await wait('!!document.querySelector("#whole-gallery-form")','resume dialog');assert.equal(await run('!!document.querySelector("#whole-gallery-name")'),false);
+    await run('document.querySelector("#whole-gallery-form").requestSubmit()');await wait('!document.querySelector("#modal").open&&!document.querySelector("[data-gallery]")','resume complete');
+    assert.equal(site.wholeRequests.length,2);assert.deepEqual(site.wholeRequests[1].fields,{job_id:'e'.repeat(32)});
+  }finally{if(browser)await browser.close();await site.close();}
+});
+test('whole-gallery shared editor does not receive owner deletion-request button', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true,wholeOwner:false,member:true,galleryEditing:true,editMember:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait("!!document.querySelector('[data-gallery]')",'galleries');
+    await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#gallery-title")','gallery');
+    assert.equal(await run('!!document.querySelector("#whole-gallery-request")||!!document.querySelector("#whole-gallery-delete")'),false);
+    assert.equal(site.wholeRequests.length,0);
+  }finally{if(browser)await browser.close();await site.close();}
+});
+test('whole-gallery queue approval binds deletion to the selected member request', {skip:!binary,timeout:45000}, async()=>{
+  const site=await fixture({wholeGallery:true,wholeRequestPending:true,deletionRequests:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-view=deletions]")','admin navigation');
+    await run('document.querySelector("[data-view=deletions]").click()');await wait('!!document.querySelector("[data-whole-approve]")','gallery queue');
+    await run('document.querySelector("[data-whole-approve]").click()');await wait('!!document.querySelector("#whole-gallery-name")','approve confirmation');
+    await run('document.querySelector("#whole-gallery-name").value="Syntetisk galleri";document.querySelector("#whole-gallery-form").requestSubmit()');
+    await wait('!document.querySelector("#modal").open&&!document.querySelector("[data-gallery]")','approved deletion completed');
+    assert.equal(site.wholeRequests[0].fields.request_id,'d'.repeat(32));
   }finally{if(browser)await browser.close();await site.close();}
 });

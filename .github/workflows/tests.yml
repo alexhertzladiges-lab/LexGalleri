@@ -50,6 +50,7 @@ jobs:
           php tests/media-delete-requests.php
           php tests/theme-delete.php
           php tests/gallery-create.php
+          php tests/gallery-delete.php
           php tests/asset-version.php
           php tests/routing.php
           php tests/lychee-import.php
@@ -131,6 +132,16 @@ jobs:
         with:
           name: lexgalleri-member-sharing-${{ github.sha }}
           path: dist/lexgalleri-member-sharing/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build whole-gallery deletion update without SQL
+        run: python3 scripts/package-telefon-mp4.py --gallery-delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lexgalleri-gallery-delete-${{ github.sha }}
+          path: dist/lexgalleri-gallery-delete/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

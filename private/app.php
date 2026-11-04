@@ -54,6 +54,7 @@ function access(string $g, ?string $permission = null): array {
         if($permission==='edit'){if(!gallery_edit_allowed($g,$u,$a))fail(403,'Du har ikke adgang til at redigere dette galleri');}
         elseif($permission&&!$a[$permission])fail(403,'Du har ikke adgang');
     }
+    if(gallery_delete_busy($g))fail(409,'Galleriet er ved at blive slettet. Admin kan genoptage sletningen.');
     return [$u,$a];
 }
 function gallery_permissions_ready(): bool {
@@ -450,7 +451,7 @@ function media_delete_cleanup(string $directory): void {
     // contains no media and must not turn a completed deletion into a failure.
     @rmdir($directory);
 }
-function delete_photo(string $id): void {
+function delete_photo(string $id,?string $expectedGallery=null): void {
     global $db,$private;
     $lock='lexgalleri-delete-'.$id;
     if(!(int)query('SELECT GET_LOCK(?,5)',[$lock])->fetchColumn())fail(409,'Filen er ved at blive slettet. Prøv igen.');
@@ -459,6 +460,7 @@ function delete_photo(string $id): void {
     $commitAttempted=false;$committed=false;$journalReady=false;
     try {
         $db->beginTransaction();$photo=one('SELECT * FROM photos WHERE id=? FOR UPDATE',[$id]);
+        if($photo&&$expectedGallery!==null&&$photo['gallery_id']!==$expectedGallery)fail(409,'Filen er flyttet til et andet galleri. Opdatér sletningen.');
         $root=$private.'/.deletions';
         if(is_link($root)||file_exists($root)&&!is_dir($root)||is_link($directory)||file_exists($directory)&&!is_dir($directory))fail(409,'Filernes placering kræver kontrol før sletning.');
         $journal=is_file($receipt)&&!is_link($receipt)?json_decode((string)file_get_contents($receipt),true):null;
@@ -527,6 +529,158 @@ function delete_photo(string $id): void {
         try{query('SELECT RELEASE_LOCK(?)',[$lock]);}catch(Throwable $ignored){}
     }
 }
+// Whole-gallery deletion uses the existing settings store and resumable media
+// deletion journal. There are no new SQL tables or filesystem paths from input.
+function gallery_delete_record(string $prefix,string $id): ?array {
+    $r=one('SELECT value FROM settings WHERE `key`=?',[$prefix.$id]);
+    if(!$r)return null;
+    $v=json_decode($r['value'],true);
+    if(!is_array($v)||($v['gallery_id']??null)!==$id||!is_string($v['id']??null)||!preg_match('/^[a-f0-9]{32}$/D',$v['id']))fail(409,'Sletteoplysningerne kræver kontrol. Kontakt admin.');
+    return $v;
+}
+function gallery_delete_save(string $prefix,string $id,array $v): void {
+    query('INSERT INTO settings(`key`,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[$prefix.$id,json_encode($v,JSON_THROW_ON_ERROR)]);
+}
+function gallery_delete_busy(string $g): bool {
+    return (gallery_delete_record('gallery_delete_',$g)['status']??null)==='deleting';
+}
+function gallery_delete_lock(string $g,callable $operation): mixed {
+    $key='lg-gallery-delete-'.$g;
+    if((int)query('SELECT GET_LOCK(?,5)',[$key])->fetchColumn()!==1)fail(409,'Galleriets sletning behandles allerede. Prøv igen.');
+    try{return $operation();}finally{try{query('SELECT RELEASE_LOCK(?)',[$key]);}catch(Throwable $ignored){}}
+}
+function gallery_delete_owner(string $g,array $u): void {
+    [, $grant]=access($g);
+    if(gallery_owner_id($g)!==$u['id']||!gallery_edit_allowed($g,$u,$grant))fail(403,'Kun galleriets ejer kan sende det til sletning.');
+}
+function gallery_delete_version(array $g): string {
+    return hash('sha256',json_encode([$g['id'],$g['name'],array_column(rows('SELECT id FROM photos WHERE gallery_id=? ORDER BY id',[$g['id']]),'id')],JSON_THROW_ON_ERROR));
+}
+function gallery_delete_preview(string $g,array $u): array {
+    if(!$u['admin'])gallery_delete_owner($g,$u);
+    $gallery=one('SELECT id,name FROM galleries WHERE id=?',[$g]);
+    $job=$u['admin']?gallery_delete_record('gallery_delete_',$g):null;
+    if(!$gallery&&!$job)fail(404,'Galleriet findes ikke.');
+    return ['gallery_id'=>$g,'name'=>$gallery['name']??$job['name'],'count'=>(int)query('SELECT COUNT(*) FROM photos WHERE gallery_id=?',[$g])->fetchColumn(),
+        'version'=>$gallery?gallery_delete_version($gallery):$job['version'],'request'=>gallery_delete_record('gallery_request_',$g),
+        'job'=>$job?['id'=>$job['id'],'status'=>$job['status'],'processed'=>$job['processed']]:null];
+}
+function gallery_delete_request(string $g,array $u,bool $cancel): array {
+    return gallery_delete_lock($g,function()use($g,$u,$cancel){
+        gallery_delete_owner($g,$u);
+        $request=gallery_delete_record('gallery_request_',$g);
+        if($cancel){
+            if(!$request||$request['requester_id']!==$u['id']||$request['status']!=='pending')fail(409,'Der er ingen af dine afventende anmodninger at annullere.');
+            $request['status']='cancelled';$request['updated']=stamp();
+        }else{
+            if($request&&$request['status']==='pending'){
+                if($request['requester_id']!==$u['id'])fail(409,'En tidligere ejers anmodning skal behandles af admin.');
+                return $request;
+            }
+            $gallery=one('SELECT name FROM galleries WHERE id=?',[$g]);
+            $request=['id'=>uid(),'gallery_id'=>$g,'name'=>$gallery['name'],'requester_id'=>$u['id'],'requester_name'=>$u['name'],'status'=>'pending','created'=>stamp(),'updated'=>stamp()];
+        }
+        gallery_delete_save('gallery_request_',$g,$request);return $request;
+    });
+}
+function gallery_delete_queue(): array {
+    $requests=[];$jobs=[];
+    foreach(rows('SELECT `key`,value FROM settings WHERE LEFT(`key`,16)=? OR LEFT(`key`,15)=? ORDER BY `key`',['gallery_request_','gallery_delete_']) as $row){
+        $isRequest=str_starts_with($row['key'],'gallery_request_');$g=substr($row['key'],$isRequest?16:15);
+        if(!preg_match('/^[a-f0-9]{32}$/D',$g))continue;
+        $v=gallery_delete_record($isRequest?'gallery_request_':'gallery_delete_',$g);
+        if($isRequest&&$v['status']==='pending')$requests[]=$v;
+        elseif(!$isRequest&&$v['status']==='deleting')$jobs[]=['gallery_id'=>$g,'name'=>$v['name'],'id'=>$v['id'],'status'=>'deleting','processed'=>$v['processed']];
+    }
+    return ['requests'=>$requests,'deletions'=>$jobs];
+}
+function gallery_delete_reject(string $g,array $admin,array $b): array {
+    return gallery_delete_lock($g,function()use($g,$admin,$b){
+        $r=gallery_delete_record('gallery_request_',$g);
+        if(!$r||($b['request_id']??null)!==$r['id'])fail(409,'Anmodningen er ændret. Opdatér listen.');
+        if($r['status']==='rejected')return $r;
+        if($r['status']!=='pending'||gallery_delete_busy($g))fail(409,'Sletningen er allerede behandlet eller påbegyndt.');
+        $r['status']='rejected';$r['resolved_by']=$admin['id'];$r['updated']=stamp();gallery_delete_save('gallery_request_',$g,$r);return $r;
+    });
+}
+function gallery_delete_step(string $g,array $admin,array $b): array {
+    global $db,$private;
+    return gallery_delete_lock($g,function()use($g,$admin,$b,$db,$private){
+        if(array_diff(array_keys($b),['confirm_name','version','job_id','request_id']))fail(400,'Ugyldig slettebekræftelse.');
+        $job=gallery_delete_record('gallery_delete_',$g);
+        if($job){
+            if(($b['job_id']??null)!==$job['id']&&(($b['version']??null)!==$job['version']||($b['confirm_name']??null)!==$job['name']))fail(409,'Bekræft galleriets aktuelle sletning.');
+            if($job['status']==='deleted')return ['ok'=>true,'done'=>true,'job_id'=>$job['id'],'processed'=>$job['processed'],'remaining'=>0];
+        }else{
+            $db->beginTransaction();
+            try{
+                $gallery=one('SELECT id,name FROM galleries WHERE id=? FOR UPDATE',[$g]);if(!$gallery)fail(404,'Galleriet findes ikke.');
+                $version=gallery_delete_version($gallery);
+                if(($b['confirm_name']??null)!==$gallery['name'])fail(400,'Skriv galleriets navn præcist for at bekræfte.');
+                if(($b['version']??null)!==$version)fail(409,'Galleriet er ændret. Gennemgå det igen før sletning.');
+                $request=gallery_delete_record('gallery_request_',$g);
+                if(isset($b['request_id'])){
+                    if(!$request||$request['id']!==$b['request_id']||$request['status']!=='pending')fail(409,'Anmodningen er ændret. Opdatér listen.');
+                    $requester=one("SELECT u.* FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM settings s WHERE s.`key`=CONCAT('deleted_user_',u.id))",[$request['requester_id']]);
+                    $grant=one('SELECT * FROM grants WHERE gallery_id=? AND user_id=?',[$g,$request['requester_id']]);
+                    if(!$requester||gallery_owner_id($g)!==$requester['id']||!$requester['admin']&&(!$grant||!gallery_edit_allowed($g,$requester,$grant)))fail(409,'Ejeren eller ejerens rettigheder er ændret. Opdatér listen.');
+                }
+                $job=['id'=>uid(),'gallery_id'=>$g,'name'=>$gallery['name'],'version'=>$version,'status'=>'deleting','processed'=>0,'pending'=>[],'started_by'=>$admin['id'],'created'=>stamp()];
+                gallery_delete_save('gallery_delete_',$g,$job);
+                if($request&&$request['status']==='pending'){$request['status']='deleting';$request['resolved_by']=$admin['id'];$request['updated']=stamp();gallery_delete_save('gallery_request_',$g,$request);}
+                $db->commit();
+            }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+        }
+        if(!is_array($job['pending']??null)||count($job['pending'])>10)fail(409,'Slettekøen kræver kontrol.');
+        if(!$job['pending']){
+            $job['pending']=array_column(rows('SELECT id FROM photos WHERE gallery_id=? ORDER BY id LIMIT 10',[$g]),'id');
+            gallery_delete_save('gallery_delete_',$g,$job);
+        }
+        foreach($job['pending'] as $id){
+            if(!is_string($id)||!preg_match('/^[a-f0-9]{32}$/D',$id))fail(409,'Slettekøen kræver kontrol.');
+            try{media_delete_direct($id,$admin,$g);}
+            catch(ApiError $e){
+                if($e->status!==404||one('SELECT id FROM photos WHERE id=?',[$id]))throw $e;
+                // A previous attempt may have completed cleanup before its
+                // progress write failed. Only an entirely absent file can skip.
+                foreach(['original','view','thumb'] as $kind){$path=image_path($id,$kind);if(file_exists($path)||is_link($path))throw $e;}
+                if(file_exists($private.'/.deletions/'.$id)||is_link($private.'/.deletions/'.$id))throw $e;
+            }
+            array_shift($job['pending']);$job['processed']++;gallery_delete_save('gallery_delete_',$g,$job);
+        }
+        $remaining=(int)query('SELECT COUNT(*) FROM photos WHERE gallery_id=?',[$g])->fetchColumn();
+        if($remaining)return ['ok'=>true,'done'=>false,'job_id'=>$job['id'],'processed'=>$job['processed'],'remaining'=>$remaining];
+        $db->beginTransaction();
+        try{
+            one('SELECT id FROM galleries WHERE id=? FOR UPDATE',[$g]);
+            // A foreign-key writer already in flight must finish before this
+            // parent lock. If it committed another photo, process it next time.
+            if(one('SELECT id FROM photos WHERE gallery_id=? LIMIT 1 FOR UPDATE',[$g])){$db->rollBack();return ['ok'=>true,'done'=>false,'job_id'=>$job['id'],'processed'=>$job['processed'],'remaining'=>1];}
+            foreach(rows('SELECT token FROM invitations WHERE gallery_id=? FOR UPDATE',[$g]) as $inv){
+                $other=gallery_permissions_ready()?one('SELECT gallery_id,upload,download,gps FROM invitation_galleries WHERE token=? AND gallery_id<>? ORDER BY gallery_id LIMIT 1',[$inv['token'],$g]):null;
+                if($other)query('UPDATE invitations SET gallery_id=?,upload=?,download=?,gps=? WHERE token=?',[$other['gallery_id'],$other['upload'],$other['download'],$other['gps'],$inv['token']]);else query('DELETE FROM invitations WHERE token=?',[$inv['token']]);
+            }
+            if(gallery_permissions_ready())query('DELETE FROM invitation_galleries WHERE gallery_id=?',[$g]);
+            query('DELETE FROM grants WHERE gallery_id=?',[$g]);
+            query('DELETE FROM settings WHERE `key`=?',['gallery_owner_'.$g]);
+            if(one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='lychee_import_albums'")){
+                // Remove only this gallery's album mappings. Keeping a NULL
+                // target mapping would make the importer recreate the gallery.
+                // Completed item receipts remain, so deleted photos are not
+                // silently imported again when the existing job resumes.
+                query("UPDATE lychee_import_items i JOIN lychee_import_albums a ON a.job_id=i.job_id AND a.source_id=i.source_album_id SET i.status='failed',i.error='Galleriet er slettet af admin' WHERE a.target_gallery_id=? AND i.status='pending'",[$g]);
+                query('DELETE FROM lychee_import_albums WHERE target_gallery_id=?',[$g]);
+            }
+            query('DELETE FROM galleries WHERE id=?',[$g]);
+            $job['status']='deleted';$job['completed']=stamp();gallery_delete_save('gallery_delete_',$g,$job);
+            $request=gallery_delete_record('gallery_request_',$g);
+            if($request&&in_array($request['status'],['pending','deleting'],true)){$request['status']='approved';$request['resolved_by']=$admin['id'];$request['updated']=stamp();gallery_delete_save('gallery_request_',$g,$request);}
+            $db->commit();
+        }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+        return ['ok'=>true,'done'=>true,'job_id'=>$job['id'],'processed'=>$job['processed'],'remaining'=>0];
+    });
+}
+
 function media_delete_requests_ready(): bool {
     // Existing galleries keep working while the owner installs this migration.
     return (int)query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='media_delete_requests' AND column_name IN ('id','photo_id','gallery_id','gallery_name','requester_id','requester_name','title','mime','status','created','updated','resolved_by','resolved_at')")->fetchColumn()===13;
@@ -544,10 +698,10 @@ function media_delete_request_resolve(string $photoId,array $admin): void {
     // No foreign key points at photos: approval keeps its own audit receipt.
     if(media_delete_requests_ready())query("UPDATE media_delete_requests SET status='approved',updated=?,resolved_at=?,resolved_by=? WHERE photo_id=? AND status='pending'",[stamp(),stamp(),$admin['id'],$photoId]);
 }
-function media_delete_direct(string $photoId,array $admin): void {
-    if(!media_delete_requests_ready()){delete_photo($photoId);return;}
-    media_delete_request_lock($photoId,function()use($photoId,$admin){
-        try{delete_photo($photoId);}
+function media_delete_direct(string $photoId,array $admin,?string $gallery=null): void {
+    if(!media_delete_requests_ready()){delete_photo($photoId,$gallery);return;}
+    media_delete_request_lock($photoId,function()use($photoId,$admin,$gallery){
+        try{delete_photo($photoId,$gallery);}
         catch(ApiError $error){
             // Cleanup may have completed before writing the request outcome
             // failed. Only an existing pending receipt permits this recovery.
@@ -678,7 +832,7 @@ function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'member_gallery_sharing'=>gallery_permissions_ready(),'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'gallery_delete'=>true,'gallery_delete_requests'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'member_gallery_sharing'=>gallery_permissions_ready(),'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -755,6 +909,11 @@ function route(string $method,string $path): never {
         lychee_route($method,substr($path,strlen('/admin/lychee-import')));
     }
     if ($method==='GET' && $path==='/me') send(safe_user($u));
+    if($method==='GET'&&$path==='/admin/gallery-deletion-requests'){user(true);send(gallery_delete_queue());}
+    if($method==='POST'&&preg_match('~^/admin/galleries/([a-f0-9]{32})/deletion-reject$~D',$path,$m))send(['ok'=>true,'request'=>gallery_delete_reject($m[1],user(true),body())]);
+    if($method==='GET'&&preg_match('~^/galleries/([a-f0-9]{32})/deletion$~D',$path,$m))send(gallery_delete_preview($m[1],$u));
+    if($method==='DELETE'&&preg_match('~^/galleries/([a-f0-9]{32})$~D',$path,$m))send(gallery_delete_step($m[1],user(true),body()));
+    if(in_array($method,['POST','DELETE'],true)&&preg_match('~^/galleries/([a-f0-9]{32})/deletion-request$~D',$path,$m))send(['ok'=>true,'request'=>gallery_delete_request($m[1],$u,$method==='DELETE')]);
     if ($method==='GET' && $path==='/deletion-requests') {
         media_delete_requests_require();
         send(rows('SELECT r.* FROM media_delete_requests r WHERE r.requester_id=? AND (?=1 OR EXISTS(SELECT 1 FROM grants a WHERE a.gallery_id=r.gallery_id AND a.user_id=?)) ORDER BY r.created DESC,r.id DESC',[$u['id'],(int)$u['admin'],$u['id']]));
@@ -816,7 +975,7 @@ function route(string $method,string $path): never {
                 }
                 unset($p['digest'],$p['filename'],$p['_import_metadata']);foreach(['lat','lon'] as $key) $p[$key]=($u['admin'] || $a['gps']) && $p[$key]!==null?(float)$p[$key]:null;
             }
-            unset($p);send(['photos'=>$ps,'permissions'=>['share_members'=>gallery_member_share_allowed($g,$u,$a),'edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
+            unset($p);send(['photos'=>$ps,'permissions'=>['delete_request'=>!$u['admin']&&gallery_owner_id($g)===$u['id']&&gallery_edit_allowed($g,$u,$a),'share_members'=>gallery_member_share_allowed($g,$u,$a),'edit'=>gallery_edit_allowed($g,$u,$a),'upload'=>(bool)($u['admin']||$a['upload']),'download'=>(bool)($u['admin']||$a['download']),'gps'=>(bool)($u['admin']||$a['gps']),'video'=>(bool)($u['admin']||$a['download']&&$a['gps'])]]);
         }
         if ($method==='POST') {
             if(empty($_FILES)&&!empty($_SERVER['CONTENT_LENGTH']))fail(413,'Webhotellets uploadgrænse er for lav, eller uploaden er ufuldstændig');
