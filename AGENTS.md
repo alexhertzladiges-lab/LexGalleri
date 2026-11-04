@@ -40,16 +40,16 @@ produktionsmål. Foretag ikke en global søg/erstat af `LexGalleri`.
 
 Kilde `8c70814d44cfd95adfc32e28ef1e5ca878485d20`, grøn CI41801200808,
 artifact13307512756: 1.274 PHP-kontroller og209 Node-/browserprøver bestået.
-Pakken er kodet/testet og godkendt, men **ikke installeret**. Installationskørsel
-41804486568 stoppede før offentlige filændringer, fordi privat app.php endnu
-ikke annoncerer gallery_delete/gallery_delete_requests. FTPS-kontoen kan ikke
-opdatere den private fil. Ejeren skal uploade den testede app.php med 0600,
-hvorefter den allerede godkendte installation kan fortsættes ved bevidst
-genkørsel af job126488017307 på commit b7635c1e25c8bd55d18b62439b3cf4fcc93d28d5.
-Engangsworkflowets nye kørsler er sat på pause. Pins findes i
-`installation/gallery-delete/release.json`; rapporten er
-`docs/GALLERY_DELETE_KONTROL.md`. Ret kun dokumentationen om navn/adresse
-uden at ændre den allerede fastlåste pakke eller dens SHA256SUMS.
+Pakken er **installeret** på https://lexan.dk/lexgalleri/ efter ejerens private
+app.php-upload. Kørsel41804486568, forsøg2, job126509164268: SUCCESS.
+Alle12 offentlige filer er genlæst via FTPS med korrekte SHA-256; HTTPS
+bekræfter JavaScript/CSS, kontosikkerhed, gallery_delete/gallery_delete_requests,
+medlemsdeling og pladsoversigt. Ingen SQL eller rigtige gallerisletninger blev
+udført. Den private fil er lagt ind af ejeren, ikke gennem FTPS-kontoen.
+Godkendelsen er forbrugt, og engangsworkflowet er lukket med if:false. Genkør
+ikke det historiske installationsjob. Pins: installation/gallery-delete/release.json.
+Journal: installation/gallery-delete/public-installed.json. Rapport:
+docs/GALLERY_DELETE_KONTROL.md. Testet kilde, artifact og SHA256SUMS er uændrede.
 
 Tests bruger kun syntetiske konti, medier og engangsdatabaser. Installation
 af kode er ikke tilladelse til at slette rigtige gallerier som en prøve.

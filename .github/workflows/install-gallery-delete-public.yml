@@ -11,9 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Paused: run 41804486568 stopped before writes; private app.php is not updated.
-    # Existing package approval remains valid. After owner upload, deliberately
-    # rerun failed job 126488017307 on its immutable installation commit.
+    # Approval consumed: successful run 41804486568 attempt 2, job 126509164268.
+    # Installation retired; do not rerun the historical one-shot writer.
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12

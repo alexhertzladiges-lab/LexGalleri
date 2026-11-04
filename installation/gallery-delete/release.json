@@ -9,7 +9,7 @@
   "node_browser_tests": 209,
   "independently_verified": true,
   "requires_sql": false,
-  "installed": false,
+  "installed": true,
   "files": {
     "INSTALLER.md": "48442deca607e673fd0fbb268af3c599c70ad1d8408e436bbfde12ee166bb5e3",
     "private/app.php": "9783bf8f6ef1eae352eea179a4739c1b97172054120c11a5a1278bae293ad53a",
@@ -29,5 +29,12 @@
   "application_name": "LexGalleri",
   "repository": "alexhertzladiges-lab/LexGalleri",
   "public_url": "https://lexan.dk/lexgalleri/",
-  "base_path": "/lexgalleri"
+  "base_path": "/lexgalleri",
+  "installation_run": 41804486568,
+  "installation_attempt": 2,
+  "installation_job": 126509164268,
+  "installation_evidence_artifact": 13312311932,
+  "installation_evidence_zip_sha256": "0780508299d55fb9ba6f6b0b382fc5392e6d129e0c94c0405fdb654dc7a23534",
+  "approval_consumed": true,
+  "installation_journal": "installation/gallery-delete/public-installed.json"
 }

@@ -117,3 +117,20 @@ Den ikke-følsomme status er genhentet og kontrolleret: artifact13309332216, ZIP
 Ejeren henter [den allerede testede pakke](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41801200808/artifacts/13307512756), pakker den ud og erstatter **kun** pakkens `private/app.php` på `/home/lexandkk/lexgalleri-private/app.php` via cPanel med0600. Filens SHA-256 skal være `9783bf8f6ef1eae352eea179a4739c1b97172054120c11a5a1278bae293ad53a`. Ingen SQL eller ændring af konfiguration, security.php, medier, sessions eller routing kræves.
 
 FTPS-kontoen er begrænset til de offentlige filer; den kan ikke udføre dette private trin. Når filen er uploadet, genkøres alene det fejlede installationsjob126488017307 på den uforanderlige installationscommit. Det genkontrollerer pakken og backend før de12 offentlige filer overføres og genlæses. Godkendelsen til samme konkrete pakke gælder fortsat. Workflowets nye push-kørsler er sat på pause med `if: false`, så journalændringer ikke udløser en installation. En vellykket overførsel skal efterfølgende journalføres særskilt; dette dokument hævder ikke, at installationen er fuldført.
+
+## Fuldført installation 4. november 2026
+
+Efter ejeren skrev »uploadet« blev det allerede godkendte installationsjob genkørt på den uforanderlige installationscommit. [Kørsel41804486568, forsøg2](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41804486568/attempts/2), job126509164268: **SUCCESS**. Installationen blev verificeret kl.10.56 dansk tid. De foregående afsnit beskriver historiske test- og første-forsøgsresultater; den aktuelle status er installeret.
+
+- PASS: samme grønne kilde, uændret artifact13307512756, ZIP-digest, præcis allowlist, alle14 manifestposter og byte-sammenligning med den testede kilde.
+- PASS: alle15 eksisterende FTPS-plantests og shellsyntaks.
+- PASS: privat backend annoncerer nu gallery_delete og gallery_delete_requests samt eksisterende kontosikkerhed, pladsoversigt og medlemsdeling. Ejeren uploadede den private fil; FTP-kontoen læste eller ændrede den ikke. Der hævdes ikke en separat hashkontrol af private serverbytes.
+- PASS: korrekt LexGalleri-host/konto, TLS med certifikat-/værtsnavnekontrol og godkendt offentlig bootstrap før ændringer. Alle12 offentlige filer blev installeret gennem den eksisterende allowlist og genlæst med korrekt størrelse og SHA-256.
+- PASS: den præcise lille HTTPS-adresse, offentlig indgang, JavaScript-/CSS-SHA-256 og eksisterende kontosikkerhed samt begge nye slettefunktioner efter overførsel.
+- Ingen SQL, routing, medlems-/mediedata eller rigtige gallerier blev ændret eller slettet af installationsjobbet. Fiskerhyttens separate LexApp indgik ikke i installationen.
+
+Installationsbevis: artifact13312311932, ZIP-SHA256 `0780508299d55fb9ba6f6b0b382fc5392e6d129e0c94c0405fdb654dc7a23534`. Den nye backendkontrol: artifact13311943065, ZIP-SHA256 `ade321857a263d91c471b83c14a528f20a3e70cdc57d58434e08df42a69c9e09`. Begge er genhentet og kontrolleret; alle12 offentlige digests matcher release.json.
+
+Journal og kontroller: `installation/gallery-delete/public-installed.json`, `backend-preflight.json`, `release.json` og den afsluttede `pending-installation.json`. Godkendelsen er forbrugt. Engangsworkflowet forbliver `if: false` og er markeret som afsluttet; historiske installationsjobs må ikke genkøres på denne godkendelse.
+
+Appen kan genindlæses. Admin kan slette hele gallerier med navnebekræftelse. Ejere kan anmode om sletning af deres egne gallerier; admin kan godkende eller afvise. Funktionelle sletteforløb er dækket af de grønne syntetiske HTTP-/database- og browsertests (1.274 PHP-kontroller og209 Node-/browserprøver). Installationen tilføjede ikke en destruktiv prøve med rigtige produktionsgallerier. Ingen merge er udført.

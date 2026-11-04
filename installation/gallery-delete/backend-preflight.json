@@ -6,8 +6,8 @@
   "capabilities": {
     "storage_overview": true,
     "member_gallery_sharing": true,
-    "gallery_delete": null,
-    "gallery_delete_requests": null
+    "gallery_delete": true,
+    "gallery_delete_requests": true
   },
   "production_mutations_performed": false
 }
