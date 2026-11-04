@@ -540,12 +540,12 @@ function galleryDeleteActive(state){
 function galleryDeletionAllowed(){return !!me&&(me.admin?serverCapabilities.media_delete===true:serverCapabilities.media_delete_requests===true);}
 function galleryDeletionOverviewMarkup(){
   if(!me.admin&&serverCapabilities.media_delete_requests!==true)return '';
-  return `<button id="gallery-delete-overview" class="secondary" type="button" ${galleryDeletionAllowed()&&galleries.length?'':'disabled'}>${me.admin?'Slet billeder':'Markér til sletning'}</button>`;
+  return `<button id="gallery-delete-overview" class="secondary" type="button" ${galleryDeletionAllowed()&&galleries.length?'':'disabled'}>${me.admin?'Slet billeder':'Markér billeder til sletning'}</button>`;
 }
 function chooseDeletionGallery(){
   if(!galleryDeletionAllowed()||!galleries.length)return;
   const account=accountGeneration;
-  modal(me.admin?'Slet billeder':'Markér til sletning',`<div class="dialog-content"><form id="gallery-delete-choose"><label>Vælg galleri<select name="gallery_id" id="gallery-delete-choice">${galleries.map(gallery=>`<option value="${esc(gallery.id)}">${esc(gallery.name)} · ${gallery.count} billeder</option>`).join('')}</select></label><p>${me.admin?'Du vælger billeder og videoer i næste trin. Intet slettes, før du har gennemgået og bekræftet listen.':'Du kan markere dine egne uploads. De bliver liggende, indtil admin godkender.'}</p><p class="error" role="alert"></p><button id="gallery-delete-open" type="submit">Vælg billeder</button></form></div>`);
+  modal(me.admin?'Slet billeder':'Markér billeder til sletning',`<div class="dialog-content"><form id="gallery-delete-choose"><label>Vælg galleri<select name="gallery_id" id="gallery-delete-choice">${galleries.map(gallery=>`<option value="${esc(gallery.id)}">${esc(gallery.name)} · ${gallery.count} billeder</option>`).join('')}</select></label><p>${me.admin?'Du vælger billeder og videoer i næste trin. Intet slettes, før du har gennemgået og bekræftet listen.':'Du kan markere dine egne uploads. De bliver liggende, indtil admin godkender.'}</p><p class="error" role="alert"></p><button id="gallery-delete-open" type="submit">Vælg billeder</button></form></div>`);
   const generation=photoViewerGeneration;
   formHandler('#gallery-delete-choose',async fields=>{
     if(account!==accountGeneration||generation!==photoViewerGeneration||!M.open||!galleryDeletionAllowed())return;
@@ -557,7 +557,7 @@ function chooseDeletionGallery(){
 }
 function galleryDeletionToggleMarkup(){
   if(!me.admin&&serverCapabilities.media_delete_requests!==true)return '';
-  return `<button class="secondary" id="gallery-delete-toggle" type="button" aria-expanded="false" ${galleryDeletionAllowed()?'aria-controls="gallery-delete-tools"':'disabled'}>${me.admin?'Slet billeder':'Markér til sletning'}</button>${galleryDeletionAllowed()?'':'<p class="muted" role="status">Sletning er ikke aktiveret endnu.</p>'}`;
+  return `<button class="secondary" id="gallery-delete-toggle" type="button" aria-expanded="false" ${galleryDeletionAllowed()?'aria-controls="gallery-delete-tools"':'disabled'}>${me.admin?'Slet billeder':'Markér billeder til sletning'}</button>${galleryDeletionAllowed()?'':'<p class="muted" role="status">Sletning er ikke aktiveret endnu.</p>'}`;
 }
 function galleryDeletionToolsMarkup(){
   if(!galleryDeletionAllowed())return '';
@@ -604,7 +604,7 @@ function bindGalleryDelete(gallery){
 function reviewGalleryDelete(state){
   if(!galleryDeleteActive(state)||!state.active||state.pending)return;
   const chosen=photos.filter(photo=>state.selected.has(photo.id)&&galleryDeletionEligible(photo));if(!chosen.length)return;
-  modal(state.requestOnly?'Markér til sletning':'Slet valgte billeder og videoer',`<div class="dialog-content" id="gallery-delete-confirm"><p>Du er ved at ${state.requestOnly?'markere':'slette'} <strong id="gallery-delete-total"></strong> fra <strong>${esc(state.gallery.name)}</strong>. ${state.requestOnly?'Filerne bliver liggende, indtil admin godkender sletningen.':'Handlingen kan ikke fortrydes her.'}</p><ul id="gallery-delete-list" class="gallery-delete-list"></ul>${state.requestOnly?'':'<p>Andre placeringer af samme billede eller video i andre gallerier bevares.</p>'}<p id="gallery-delete-status" role="status" aria-live="polite" aria-atomic="true"></p><div class="gallery-delete-actions"><button id="gallery-delete-submit" class="danger" type="button">${state.requestOnly?'Send til godkendelse':'Bekræft sletning'}</button><button id="gallery-delete-cancel" class="secondary" type="button">Annullér</button></div></div>`);
+  modal(state.requestOnly?'Markér billeder til sletning':'Slet valgte billeder og videoer',`<div class="dialog-content" id="gallery-delete-confirm"><p>Du er ved at ${state.requestOnly?'markere':'slette'} <strong id="gallery-delete-total"></strong> fra <strong>${esc(state.gallery.name)}</strong>. ${state.requestOnly?'Filerne bliver liggende, indtil admin godkender sletningen.':'Handlingen kan ikke fortrydes her.'}</p><ul id="gallery-delete-list" class="gallery-delete-list"></ul>${state.requestOnly?'':'<p>Andre placeringer af samme billede eller video i andre gallerier bevares.</p>'}<p id="gallery-delete-status" role="status" aria-live="polite" aria-atomic="true"></p><div class="gallery-delete-actions"><button id="gallery-delete-submit" class="danger" type="button">${state.requestOnly?'Send til godkendelse':'Bekræft sletning'}</button><button id="gallery-delete-cancel" class="secondary" type="button">Annullér</button></div></div>`);
   const confirmation={cancelled:false,generation:photoViewerGeneration,remaining:chosen};state.confirmation=confirmation;
   const submit=$('#gallery-delete-submit'),cancel=$('#gallery-delete-cancel'),status=$('#gallery-delete-status'),list=$('#gallery-delete-list'),total=$('#gallery-delete-total');
   const active=()=>galleryDeleteActive(state)&&state.confirmation===confirmation&&!confirmation.cancelled&&confirmation.generation===photoViewerGeneration&&M.open;

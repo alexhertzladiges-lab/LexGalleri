@@ -1123,7 +1123,7 @@ test('real Chromium: members request deletion approval only for their own media 
       for(const [width,height,mobile] of [[1280,900,false],[390,844,true]]){
         await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:mobile?2:1,mobile});
         const entry=await run('(()=>{const b=document.querySelector("#gallery-delete-toggle"),r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{text:b.textContent,enabled:!b.disabled,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&(hit===b||b.contains(hit))};})()');
-        assert.match(entry.text,/Markér til sletning/);assert(entry.enabled&&entry.visible);
+        assert.match(entry.text,/Markér billeder til sletning/);assert(entry.enabled&&entry.visible);
       }
       await call('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
       await run('document.querySelector("#gallery-delete-toggle").click()');
