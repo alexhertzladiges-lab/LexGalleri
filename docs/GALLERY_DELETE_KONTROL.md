@@ -1,8 +1,8 @@
-# lexgalleri – slet hele gallerier
+# LexGalleri – slet hele gallerier
 
 **Status: kodet, fuldt testet og pakket. Ikke installeret.**
 
-Kun lexgalleri. Fiskerhyttens LexApp er en anden app og er urørt. Branch `feature/lexgalleri-gallery-deletion-v1`, afledt fra `aa9ebb3db07768e6ab756328b88bde47276376ba`.
+Appen hedder **LexGalleri**; dens offentlige adresse er **https://lexan.dk/lexgalleri/** med små bogstaver. Fiskerhyttens LexApp ligger på **https://fiskerhyttenkoege.dk/dk/** i et andet repository og er urørt. Branch `feature/lexgalleri-gallery-deletion-v1`, afledt fra `aa9ebb3db07768e6ab756328b88bde47276376ba`.
 
 ## Adfærd
 
@@ -89,3 +89,11 @@ Den senere journalcommit ændrer kun dokumentation og pakke-pins. Kildecommit og
 - `installation/gallery-delete/INSTALLER.md`, `installation/gallery-delete/release.json` og denne rapport.
 
 Før installation: godkend den konkrete pakke og upload den private app.php til den eksisterende private lexgalleri-mappe med 0600. Den offentlige FTP-konto kan derefter installere de offentlige filer. Ingen ny SQL er nødvendig. Gallerier slettes kun gennem en efterfølgende, udtrykkeligt bekræftet adminhandling i appen.
+
+## Navn og adresse præciseret
+
+Produktnavnet er **LexGalleri**. Produktionsadressen er præcist **https://lexan.dk/lexgalleri/**; `/LexGalleri/` er en gammel URL, som eksisterende routing kan viderestille til den lille adresse. Det er ikke en anden app. Fiskerhyttens **LexApp** er den separate app på **https://fiskerhyttenkoege.dk/dk/**.
+
+Repositoryets AGENTS.md fastholder denne opdeling. Installationsværktøjet er låst til LexGalleris egen server/konto og kontrollerer den godkendte offentlige bootstrap før upload. De konkrete LexApp-værdier afvises, også ved ren forbindelsesdiagnose. Dette er kontrolleret uden netværk eller filoverførsel. Fysisk mappenavn følger eksisterende routing og den verificerede FTPS-rod; det udledes ikke af store/små bogstaver i produktnavnet.
+
+Den grønne pakke, programfilerne og kontrolsummerne er uændrede. Dens tidligere brug af lille produktnavn i pakketekstens overskrift ændrer ikke appnavnet eller adressen; denne præcisering og AGENTS.md er den supplerende vejledning. Ingen installation eller omdøbning er udført.

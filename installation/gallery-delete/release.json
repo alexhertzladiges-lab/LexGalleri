@@ -25,5 +25,9 @@
     "public/static/pwa.js": "4dd9535250eaa9c783f72b6417b456997753d23787f36f4163ad94db27717ffe",
     "public/static/qrcode.js": "3a37975079ddc00ed73102d210dfda36d292461f21bb42a5dfce4dcf4666e7c5",
     "public/static/style.css": "19adec4a4ea1fbb2f51a6c2b10a35786fa48d80a71e3cd81f5f72a131404cdb2"
-  }
+  },
+  "application_name": "LexGalleri",
+  "repository": "alexhertzladiges-lab/LexGalleri",
+  "public_url": "https://lexan.dk/lexgalleri/",
+  "base_path": "/lexgalleri"
 }
