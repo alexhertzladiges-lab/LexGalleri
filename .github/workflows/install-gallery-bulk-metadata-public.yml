@@ -11,9 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Prepared for the requested admin metadata feature; owner private upload is required.
-    # Keep disabled until owner confirms the pinned private app.php is uploaded.
-    if: ${{ false }}
+    # Owner confirmed the tested private app.php upload; install this pinned package once.
+    if: ${{ github.repository == 'alexhertzladiges-lab/LexGalleri' && github.event.head_commit.message == 'Install approved LexGalleri gallery metadata package (2026-11-04)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
