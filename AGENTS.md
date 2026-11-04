@@ -53,3 +53,14 @@ docs/GALLERY_DELETE_KONTROL.md. Testet kilde, artifact og SHA256SUMS er uændred
 
 Tests bruger kun syntetiske konti, medier og engangsdatabaser. Installation
 af kode er ikke tilladelse til at slette rigtige gallerier som en prøve.
+
+## Seneste offentlige tekstrettelse
+
+Kilde95b30289414d961ce75b115244084dea724a93fa ændrer kun fire knap-/dialogtekster
+i public/static/app.js til »Markér billeder til sletning«; privat backend er uændret.
+CI41811970538 er grøn, og den målrettede lokale browserprøve bestod5 kontroller.
+Installeret på https://lexan.dk/lexgalleri/ i kørsel41812499715, job126514963809.
+Alle12 offentlige hashes og den nye tekst er kontrolleret via FTPS og HTTPS.
+Journal: installation/media-delete-label/public-installed.json. Godkendelsen er
+forbrugt; det nye engangsworkflow er lukket med if:false og må ikke genkøres.
+Den oprindelige galleri-slettepakke og dens historiske journal er bevaret.

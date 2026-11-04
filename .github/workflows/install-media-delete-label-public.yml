@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   install:
-    # Explicit owner approval: "installer", photo deletion button label.
-    if: ${{ github.repository == 'alexhertzladiges-lab/LexGalleri' && github.event.head_commit.message == 'Install approved LexGalleri button label package (2026-11-04)' }}
+    # Approval consumed: successful installation run 41812499715, job 126514963809.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -164,3 +164,4 @@ jobs:
           path: ${{ runner.temp }}/public-installation-evidence.json
           if-no-files-found: error
           retention-days: 30
+
