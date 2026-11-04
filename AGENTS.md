@@ -75,3 +75,21 @@ Journal: installation/timeline-dates/public-installed.json. Rapport:
 docs/TIMELINE_DATE_GROUPS_KONTROL.md. Godkendelsen er forbrugt; engangsworkflowet
 er lukket og må ikke genkøres. Det efterfølgende ønske om admin-masseredigering
 udvikles separat fra denne allerede installerede, uforanderlige pakke.
+
+## Næste funktion: admin-masseredigering af metadata
+
+Branch feature/lexgalleri-gallery-bulk-metadata-v1, testet kilde
+ d64d46ab61a36601f49c0547e6a1541cdeec6770. Grøn CI41818566701:
+1.340 PHP-/MySQL-kontroller og223 Node-/browserprøver. Artifact13315519372,
+SHA256 4a319da2e96b9dde1d2173ef0df8a690f2da492a50e9832bbf7d252357e6dd12.
+Pakken er kodet/testet og selvstændigt hashkontrolleret, men IKKE installeret.
+Ejeren skal først lægge den konkrete private/app.php på
+/home/lexandkk/lexgalleri-private/app.php med0600. Privat filhash:
+24d74be63d625b6799f88d58fc46c67ed7391c5f884fac79666919cb472fd2f8.
+Ingen SQL eller ændring af security.php/config/medier. Offentlig FTPS har ikke
+adgang til privatmappen. Forberedte install-gallery-bulk-metadata-public.yml er
+deaktiveret, pin-låst og kræver gallery_bulk_metadata=true før offentlig upload.
+Fortsæt efter ejeren bekræfter upload af den konkrete fil; ingen genkørsel af
+historiske installationsjobs. Rapport/pins: docs/GALLERY_BULK_METADATA_KONTROL.md
+og installation/gallery-bulk-metadata/release.json. Ingen produktions-bulkprøve
+uden aftale om de præcise værdier og berørte gallerier.

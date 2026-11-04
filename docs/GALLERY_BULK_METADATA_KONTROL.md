@@ -29,3 +29,17 @@ python3 scripts/package-telefon-mp4.py --gallery-bulk-metadata
 Vejledning til den nødvendige private app.php-upload med0600 og efterfølgende offentlig installation: `installation/gallery-bulk-metadata/INSTALLER.md`. Ingen ny SQL. Ingen merge og ingen masseredigering af rigtige gallerier som installationstest.
 
 Fund og rettelse: En bekræftet metadata-gemning efterfulgt af en fejlet læsning af galleriet kunne skjule resultatet. Brugerfladen bekræfter nu, at oplysningerne er gemt, og beder om genindlæsning uden at gentage skriveriet. En browserregression dækker forløbet.
+
+## Afsluttende grøn CI og konkret pakke
+
+Testet kilde: `d64d46ab61a36601f49c0547e6a1541cdeec6770`. [GitHub Actions41818566701](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41818566701), job126535571210: **SUCCESS**. **1.340 PHP-/MySQL8.4-kontroller og223 Node-/browserprøver**, ingen fejl eller oversprungne prøver. Den endelige lokale brugerfladeprøve bestod7 kontroller; de170 lokale databasekontroller og91 gallerisletningsregressioner er ligeledes bestået.
+
+[Download den testede bulk-pakke](https://github.com/alexhertzladiges-lab/LexGalleri/actions/runs/41818566701/artifacts/13315519372), artifact13315519372,110.510 bytes. ZIP-SHA256: `4a319da2e96b9dde1d2173ef0df8a690f2da492a50e9832bbf7d252357e6dd12`. Pakken er uafhængigt genhentet: ZIP-digest/CRC, præcis allowlist, alle14 manifestposter og byte-sammenligning med de lokalt testede programfiler bestod. Pins: `installation/gallery-bulk-metadata/release.json`.
+
+### Hvad der mangler før denne funktion installeres
+
+Ejeren skal først uploade pakkens **private/app.php** til **/home/lexandkk/lexgalleri-private/app.php** med rettighed **0600**. Privat fil-SHA256: `24d74be63d625b6799f88d58fc46c67ed7391c5f884fac79666919cb472fd2f8`. FTPS-kontoen har kun offentlig adgang og må ikke tilgå privatmappen. Bevar config, security.php, sessions, originaler, miniaturefiler og importmodulet; ingen ny SQL.
+
+Det efterfølgende offentlige installationsworkflow er færdiggjort, syntakskontrolleret og **deaktiveret** i `.github/workflows/install-gallery-bulk-metadata-public.yml`. Det låser præcis grøn kilde/pakke og kræver `gallery_bulk_metadata=true` over den lille HTTPS-adresse før offentlig upload. Det genbruger eksisterende mål-/bootstrapkontrol, obligatorisk verificeret TLS,12-fil-allowlist og hashgenlæsning. Aktivér kun efter ejerens bekræftelse af den konkrete private upload; markér forløbet afsluttet efter verificeret installation. Den nye bulk-funktion er endnu ikke installeret.
+
+Den tidligere godkendte kompakte tidslinje er allerede installeret og verificeret i kørsel41815491054. Ingen bulk-skrivning af rigtige medlems-/gallerioplysninger, ingen ændring af Fiskerhyttens LexApp og ingen merge er udført. Den lokale MariaDB er stoppet, og SHOW DATABASES bekræftede, at alle engangsdatabaser var fjernet. Hver test ryddede sine PHP-servere, private fixtures og browserprofiler op.
