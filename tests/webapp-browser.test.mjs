@@ -31,8 +31,9 @@ async function screenshot(call,name){
   await writeFile(join(process.env.LEXGALLERI_VIEWER_SCREENSHOTS,name),Buffer.from(capture.data,'base64'));
 }
 
-async function fixture({timeline=false,wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
+async function fixture({bulkMetadata=false,timeline=false,wholeGallery=false,wholeRequestPending=false,wholeFailure=false,wholeOwner=true,permissions=false,member=false,mediaDelete=false,themePackages=false,galleryCreate=false,longPhotoTitles=false,deletionRequests=false,memberDelete=false,multiInvites=false,galleryEditing=false,editMember=false,adminDirectory=false,authenticator=false,guestVideo=false}={}){
   const requests=[];let denied=false, disconnected=false;
+  const bulkPreviews=[],bulkApplies=[],pendingBulk=[];let bulkPlan=null,holdBulk=false,failBulk=false;
   const wholeRequests=[],pendingWhole=[];let wholePending=wholeRequestPending,wholeGone=false,wholeStep=0,holdWhole=false,failWhole=wholeFailure;
   const videoRequests=[],pendingVideoHeads=[];let videoStatus=200,holdVideoHeads=false,videoFlag;
   let directoryUnavailable=false,holdDirectory=false;const pendingDirectories=[];
@@ -109,7 +110,7 @@ async function fixture({timeline=false,wholeGallery=false,wholeRequestPending=fa
       let raw='';for await(const part of req)raw+=part;wholeRequests.push({method:req.method,path:'reject',fields:JSON.parse(raw)});wholePending=false;json({ok:true});return;
     }
     if(url.pathname===base+'/api/status'){
-      const capabilities={...(wholeGallery?{gallery_delete:true,gallery_delete_requests:true}:{}),...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
+      const capabilities={...(wholeGallery?{gallery_delete:true,gallery_delete_requests:true}:{}),...(multiInviteCapability?{multi_gallery_invitations:true}:{}),...(bulkMetadata?{gallery_bulk_metadata:true}:{}),...(galleryEditing?{gallery_edit:true}:{}),...(memberDeleteCapability?{member_delete:true}:{}),...(mediaDeleteCapability?{media_delete:true}:{}),...(themeDeleteCapability?{theme_delete:true}:{}),...(galleryCreateCapability?{gallery_create:true}:{}),...(deletionRequests?{media_delete_requests:true}:{})};
       json({setup:false,account_security_version:1,account_security_ready:true,...(Object.keys(capabilities).length?{capabilities}:{})});return;
     }
     if(url.pathname===base+'/api/me'){if(authenticator){json({detail:'Bekræft login'},401);return;}json(member?{id:memberId,admin:0,name:'Syntetisk medlem'}:{id:'f'.repeat(32),admin:1,name:'Testkonto'});return;}
@@ -156,6 +157,16 @@ async function fixture({timeline=false,wholeGallery=false,wholeRequestPending=fa
       if(member&&!galleryCreateCapability){json({detail:'Kun administrator'},403);return;}
       const finish=error=>{if(error){json({detail:error},503);return;}createdGalleries.push({id:createdGalleryId,name:fields.name,description:fields.description,count:0,cover:null});json({id:createdGalleryId});};
       if(holdGalleryCreates)pendingGalleryCreates.push(finish);else finish();return;
+    }
+    if(bulkMetadata&&url.pathname===base+'/api/galleries/'+galleryId+'/metadata-preview'&&req.method==='POST'){
+      let text='';for await(const part of req)text+=part;const body=JSON.parse(text);bulkPreviews.push(body);
+      if(member){json({detail:'Kun administrator'},403);return;}
+      bulkPlan={token:'8'.repeat(32),gallery_id:galleryId,name:galleryName,changes:body.changes,count:photos.length,expires:Math.floor(Date.now()/1000)+600};json(bulkPlan);return;
+    }
+    if(bulkMetadata&&url.pathname===base+'/api/galleries/'+galleryId+'/metadata-apply'&&req.method==='POST'){
+      let text='';for await(const part of req)text+=part;const body=JSON.parse(text);bulkApplies.push(body);
+      const finish=()=>{if(failBulk){failBulk=false;json({detail:'Galleriet er ændret siden gennemgangen.'},409);return;}if(member||!bulkPlan||body.token!==bulkPlan.token||body.confirm_name!==bulkPlan.name){json({detail:'Bekræft gennemgangen igen'},403);return;}for(const photo of photos)Object.assign(photo,bulkPlan.changes);json({ok:true,gallery_id:galleryId,count:photos.length,changed:photos.length});bulkPlan=null;};
+      if(holdBulk)pendingBulk.push(finish);else finish();return;
     }
     if(url.pathname===base+'/api/galleries'&&req.method==='GET'){
       if(wholeGone){json([]);return;}
@@ -245,7 +256,7 @@ async function fixture({timeline=false,wholeGallery=false,wholeRequestPending=fa
     json({detail:'Ikke fundet'},404);
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-  return {wholeRequests,holdWhole:()=>{holdWhole=true;},releaseWhole:()=>{holdWhole=false;assert(pendingWhole.length);pendingWhole.shift()();},origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
+  return {bulkPreviews,bulkApplies,holdBulk:()=>{holdBulk=true;},releaseBulk:()=>{holdBulk=false;assert(pendingBulk.length);pendingBulk.shift()();},failNextBulk:()=>{failBulk=true;},wholeRequests,holdWhole:()=>{holdWhole=true;},releaseWhole:()=>{holdWhole=false;assert(pendingWhole.length);pendingWhole.shift()();},origin:'http://127.0.0.1:'+server.address().port,requests,galleryId,otherGalleryId,memberId,photoId:photos[0].id,stillPhotoId:photos[1].id,otherPhotoId:otherPhotos[0].id,grantWrites,deleteRequests,activeThemeId,inactiveThemeId,themeDeleteRequests,createdGalleryId,galleryCreates,
     videoRequests,setVideoStatus:status=>{videoStatus=status;},setVideoFlag:flag=>{videoFlag=flag;},holdVideoHeads:()=>{holdVideoHeads=true;},releaseVideoHead:()=>{assert(pendingVideoHeads.length);pendingVideoHeads.shift()();},
     invitationCreates,galleryEdits,photoEdits,holdInvites:()=>{holdInvites=true;},releaseInvite:error=>{assert(pendingInvites.length,'an invitation must be pending');pendingInvites.shift()(error);},holdGalleryEdits:()=>{holdGalleryEdits=true;},releaseGalleryEdit:error=>{assert(pendingGalleryEdits.length,'a gallery update must be pending');pendingGalleryEdits.shift()(error);},disableMultiInvites:()=>{multiInviteCapability=false;},
     memberDeletes,holdMemberDeletes:()=>{holdMemberDeletes=true;},releaseMemberDelete:error=>{assert(pendingMemberDeletes.length,'a member deletion must be pending');pendingMemberDeletes.shift()(error);},disableMemberDelete:()=>{memberDeleteCapability=false;},
@@ -1558,4 +1569,55 @@ test('real Chromium: editing a capture date moves the existing timeline card to 
     assert(await run('__datedCard.isConnected&&__datedImage===__datedCard.querySelector("img")&&__datedCard.closest(".timeline-day").dataset.timelineDate==="2026-10-28"'));
     assert.equal(site.photoEdits.length,1);
   }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: admin reviews only selected gallery metadata fields and submits once',{
+  skip:binary?false:'Chromium required',timeout:60000,
+},async t=>{
+  const site=await fixture({bulkMetadata:true});let browser;
+  try{
+    browser=await chrome();const {evaluate:run,wait,call}=browser;
+    await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#bulk-gallery-metadata")','bulk action');
+    await run('document.querySelector("#bulk-gallery-metadata").click()');await wait('!!document.querySelector("#gallery-bulk-form")','bulk form');
+    await t.test('empty selection never leaves the browser and preview contains only chosen fields',async()=>{
+      assert(await run('![...document.querySelectorAll("[data-bulk-field]")].some(c=>c.checked)&&[...document.querySelectorAll("[data-bulk-controls] input,[data-bulk-controls] select")].every(c=>c.disabled)'));
+      await run('document.querySelector("#gallery-bulk-form").requestSubmit()');assert.equal(site.bulkPreviews.length,0);
+      await run(`document.querySelector('[data-bulk-field="date"]').click();document.querySelector('[data-bulk-field="place"]').click();document.querySelector('#gallery-bulk-form [name=taken]').value='2026-11-01';document.querySelector('#gallery-bulk-form [name=place]').value='Havnen';document.querySelector('#gallery-bulk-form').requestSubmit()`);
+      await wait('!document.querySelector("#bulk-review").hidden&&!document.querySelector("#bulk-preview").disabled','review');
+      assert.deepEqual(site.bulkPreviews[0],{changes:{taken:'2026-11-01',precision:'day',place:'Havnen'}});assert.equal(site.bulkApplies.length,0);
+      assert(await run('document.querySelector("#bulk-review-count").textContent.includes("60")&&document.querySelector("#bulk-status").textContent.includes("Intet er gemt")'));
+      await run('document.querySelector("#bulk-apply").click()');assert.equal(site.bulkApplies.length,0);
+    });
+    await t.test('edited field values invalidate the old review',async()=>{
+      await run(`const input=document.querySelector('#gallery-bulk-form [name=place]');input.value='Et andet sted';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#bulk-apply').click()`);
+      assert(await run('document.querySelector("#bulk-review").hidden'));assert.equal(site.bulkApplies.length,0);
+      await run('document.querySelector("#gallery-bulk-form").requestSubmit()');await wait('!document.querySelector("#bulk-review").hidden','fresh review');
+    });
+    await t.test('one explicit commit blocks duplicate clicks and closing while pending',async()=>{
+      site.holdBulk();await run(`document.querySelector('#bulk-confirm-name').value='Syntetisk galleri';document.querySelector('#bulk-apply').click();document.querySelector('#bulk-apply').click();document.querySelector('#close-modal').click();document.querySelector('#modal').dispatchEvent(new Event('cancel',{cancelable:true}))`);
+      await wait('document.querySelector("#bulk-fields").disabled','pending write');assert.equal(site.bulkApplies.length,1);assert(await run('document.querySelector("#modal").open&&document.querySelector("#close-modal").disabled'));
+      assert.deepEqual(site.bulkApplies[0],{token:'8'.repeat(32),confirm_name:'Syntetisk galleri'});
+      site.releaseBulk();await wait('!document.querySelector("#modal").open&&!!document.querySelector("#bulk-gallery-metadata")','refreshed gallery');assert.equal(site.bulkApplies.length,1);
+    });
+    await t.test('a stale review never automatically repeats a write',async()=>{
+      await run('document.querySelector("#bulk-gallery-metadata").click()');
+      await run(`document.querySelector('[data-bulk-field="place"]').click();document.querySelector('#gallery-bulk-form [name=place]').value='Sted';document.querySelector('#gallery-bulk-form').requestSubmit()`);await wait('!document.querySelector("#bulk-review").hidden','next review');site.failNextBulk();
+      await run(`document.querySelector('#bulk-confirm-name').value='Syntetisk galleri';document.querySelector('#bulk-apply').click()`);
+      await wait('document.querySelector("#gallery-bulk-form .error").textContent.includes("ændret")','stale review error');assert(await run('document.querySelector("#bulk-review").hidden'));
+      const count=site.bulkApplies.length;await run('document.querySelector("#bulk-apply").click()');assert.equal(site.bulkApplies.length,count);
+    });
+  }finally{if(browser)await browser.close();await site.close();}
+});
+
+test('real Chromium: members and an older private backend do not expose gallery bulk editing',{
+  skip:binary?false:'Chromium required',timeout:45000,
+},async()=>{
+  for(const options of [{bulkMetadata:true,member:true},{bulkMetadata:false}]){
+    const site=await fixture(options);let browser;
+    try{
+      browser=await chrome();const {evaluate:run,wait,call}=browser;
+      await call('Page.navigate',{url:site.origin+base+'/'});await wait('!!document.querySelector("[data-gallery]")','gallery overview');await run('document.querySelector("[data-gallery]").click()');await wait('!!document.querySelector("#photo-grid [data-photo]")','gallery photos');
+      assert(await run('!document.querySelector("#bulk-gallery-metadata")'));assert.equal(site.bulkPreviews.length,0);assert.equal(site.bulkApplies.length,0);
+    }finally{if(browser)await browser.close();await site.close();}
+  }
 });

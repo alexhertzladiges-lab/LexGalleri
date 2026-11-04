@@ -28,7 +28,7 @@ try{
     $pdo->exec('CREATE DATABASE `'.$database.'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$pdo->exec('USE `'.$database.'`');
     $config=['db_host'=>$host,'db_port'=>$port,'db_name'=>$database,'db_user'=>$dbuser,'db_password'=>$password,'base_path'=>'/lexgalleri','secure_cookies'=>false,'setup_token'=>str_repeat('create-test-',4)];
     file_put_contents($privateRoot.'/config/config.php','<?php return '.var_export($config,true).';');
-    foreach(['app.php','security.php','schema.sql'] as $file)copy($root.'/private/'.$file,$privateRoot.'/'.$file);
+    foreach(['app.php','security.php','schema.sql','lychee-import.php'] as $file)copy($root.'/private/'.$file,$privateRoot.'/'.$file);
     $env=getenv();$env['LEXGALLERI_PRIVATE']=$privateRoot;
     $server=proc_open([PHP_BINARY,'-d','opcache.enable=0','-d','display_errors=0','-S','127.0.0.1:'.parse_url($origin,PHP_URL_PORT),$root.'/tests/router.php'],[0=>['pipe','r'],1=>['file',$temp.'/server.log','a'],2=>['file',$temp.'/server.log','a']],$pipes,$root,$env);
     if(!is_resource($server))throw new RuntimeException('Cannot start isolated gallery creation test server');
@@ -157,6 +157,83 @@ try{
     $pdo->exec('DROP TRIGGER synthetic_create_grant_failure');
     $retry=gc_ok(gc_request($creator,'POST','/galleries',['name'=>'After failure']),'A member can retry after a database problem is resolved');
     gc_assert(gc_count('SELECT COUNT(*) FROM grants WHERE gallery_id=? AND user_id=?',[$retry['id'],$member['id']])===1,'Successful retry creates the matching creator grant');
+    // Real HTTP + SQL coverage for the admin-only, reviewed metadata batch.
+    gc_assert(gc_request($admin,'GET','/status')[1]['capabilities']['gallery_bulk_metadata']===true,'Bulk metadata is advertised by the private backend');
+    $bulkGallery=gc_ok(gc_request($admin,'POST','/galleries',['name'=>'Samlet metadata']),'Create isolated metadata gallery')['id'];
+    $bulkPath='/galleries/'.$bulkGallery;
+    $bulkPhotos=[];
+    for($n=0;$n<2;$n++){
+        $im=imagecreatetruecolor(16,12);imagefill($im,0,0,imagecolorallocate($im,40+$n*80,100,60));imagejpeg($im,$temp.'/bulk-'.$n.'.jpg');imagedestroy($im);
+        $bulkPhotos[]=gc_ok(gc_request($admin,'POST',$bulkPath.'/photos',['file'=>new CURLFile($temp.'/bulk-'.$n.'.jpg','image/jpeg','bulk-'.$n.'.jpg')],null,true),'Upload distinct synthetic bulk image')['id'];
+    }
+    file_put_contents($temp.'/bulk.mp4',base64_decode(preg_replace('/\s/','',file_get_contents(__DIR__.'/fixtures/tiny.mp4.b64')),true));
+    $bulkPhotos[]=gc_ok(gc_request($admin,'POST',$bulkPath.'/photos',['file'=>new CURLFile($temp.'/bulk.mp4','video/mp4','bulk.mp4')],null,true),'Upload synthetic bulk video')['id'];
+    $bulkState=function()use($pdo,$bulkGallery):array{$q=$pdo->prepare('SELECT * FROM photos WHERE gallery_id=? ORDER BY id');$q->execute([$bulkGallery]);return $q->fetchAll();};
+    $beforeBulk=$bulkState();$outsideBefore=gc_request($creator,'GET','/galleries/'.$id.'/photos')[1]['photos'];
+    $changes=['taken'=>'2026-11-01','precision'=>'day','place'=>'Havnen'];$request=['changes'=>$changes];
+    gc_assert(gc_request($anonymous,'POST',$bulkPath.'/metadata-preview',$request)[0]===401,'Anonymous cannot preview bulk changes');
+    gc_assert(gc_request($pending,'POST',$bulkPath.'/metadata-preview',$request)[0]===401,'Pending MFA cannot preview bulk changes');
+    gc_assert(gc_request($creator,'POST',$bulkPath.'/metadata-preview',$request)[0]===403,'An ordinary member cannot preview another gallery');
+    gc_assert(gc_request($creator,'POST','/galleries/'.$id.'/metadata-preview',$request)[0]===403,'Even the gallery owner cannot use admin bulk editing');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$request,'https://evil.example')[0]===403,'Bulk preview rejects forged Origin');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$request,'')[0]===403,'Bulk preview requires Origin');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$request,null,false,['Sec-Fetch-Site: cross-site'])[0]===403,'Bulk preview rejects cross-site requests');
+    foreach([[],['changes'=>[]],['changes'=>['filename'=>'evil']],['changes'=>['gallery_id'=>$id]],['changes'=>['taken'=>'2026-02-30','precision'=>'day']],['changes'=>['taken'=>'2026-11-01']],['changes'=>['title'=>' ']],['changes'=>['title'=>str_repeat('x',201)]],['changes'=>['lat'=>91,'lon'=>12]],['changes'=>['lat'=>55,'lon'=>null]],['changes'=>['lat'=>55]],['changes'=>['place'=>['bad']]],['changes'=>$changes,'admin'=>true]] as $bad)
+        gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$bad)[0]===400,'Bulk preview rejects malformed fields or dates');
+    $plan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$request),'Admin reviews selected metadata');
+    gc_assert($plan['count']===3&&$plan['gallery_id']===$bulkGallery&&$plan['changes']===$changes&&preg_match('/^[a-f0-9]{32}$/D',$plan['token'])===1,'Review binds the gallery, selected fields and all image/video rows');
+    gc_assert($bulkState()===$beforeBulk,'Preview never changes stored metadata');
+    $apply=['token'=>$plan['token'],'confirm_name'=>$plan['name']];
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$plan['token'],'confirm_name'=>'forkert'])[0]===400,'Bulk apply requires the exact gallery name');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>str_repeat('0',32),'confirm_name'=>$plan['name']])[0]===409,'A forged review token is rejected');
+    gc_assert(gc_request($admin,'POST','/galleries/'.$id.'/metadata-apply',$apply)[0]===409,'A review token cannot target another gallery');
+    gc_assert(gc_request($creator,'POST',$bulkPath.'/metadata-apply',$apply)[0]===403,'A member cannot reuse an admin review');
+    gc_assert(gc_request($pending,'POST',$bulkPath.'/metadata-apply',$apply)[0]===401,'Pending MFA cannot apply a review');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',$apply,'https://evil.example')[0]===403,'Bulk apply rejects forged Origin');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',$apply,'')[0]===403,'Bulk apply requires Origin');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',$apply+['changes'=>['title'=>'tampered']])[0]===400,'Apply cannot alter the reviewed field values');
+    $applied=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-apply',$apply),'Admin commits the reviewed metadata in one transaction');
+    gc_assert($applied['count']===3&&$applied['changed']===3&&$applied['gallery_id']===$bulkGallery,'Bulk result confirms all three stored files');
+    $afterBulk=$bulkState();
+    foreach($afterBulk as $index=>$row){$expected=$beforeBulk[$index];$expected['taken']='2026-11-01';$expected['precision']='day';$expected['place']='Havnen';gc_assert($row===$expected,'Unselected titles, GPS, uploader, file names and timestamps remain unchanged');}
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',$apply)[0]===409,'A successful review is single use');
+    gc_assert(gc_request($creator,'GET','/galleries/'.$id.'/photos')[1]['photos']===$outsideBefore,'Bulk changes preserve all metadata in other galleries');
+    gc_assert(gc_request($admin,'GET','/photos/'.$bulkPhotos[0].'/image?size=original')[1]===file_get_contents($temp.'/bulk-0.jpg'),'Bulk metadata preserves original image bytes');
+    gc_assert(gc_request($admin,'GET','/photos/'.$bulkPhotos[2].'/video')[1]===file_get_contents($temp.'/bulk.mp4'),'Bulk metadata preserves original video bytes');
+    $stale=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'Nyt sted']]),'Review before concurrent metadata change');
+    $pdo->prepare('UPDATE photos SET title=? WHERE id=?')->execute(['Concurrent title',$bulkPhotos[0]]);$concurrent=$bulkState();
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$stale['token'],'confirm_name'=>$stale['name']])[0]===409&&$bulkState()===$concurrent,'Changed metadata invalidates the entire review without partial writes');
+    $oldPlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'Første']]),'First bounded session review');
+    $newPlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'Andet']]),'A new review supersedes the previous review');
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$oldPlan['token'],'confirm_name'=>$oldPlan['name']])[0]===409,'Superseded review tokens cannot be applied');
+    $pdo->exec("CREATE TRIGGER synthetic_bulk_update_failure BEFORE UPDATE ON photos FOR EACH ROW BEGIN IF OLD.id='".$bulkPhotos[1]."' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic bulk failure'; END IF; END");
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$newPlan['token'],'confirm_name'=>$newPlan['name']])[0]>=500&&$bulkState()===$concurrent,'An SQL failure rolls back the entire gallery metadata batch');
+    $pdo->exec('DROP TRIGGER synthetic_bulk_update_failure');
+    $retryPlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'','taken'=>'','precision'=>'unknown','lat'=>null,'lon'=>null]]),'Explicit clearing can be reviewed');
+    gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$retryPlan['token'],'confirm_name'=>$retryPlan['name']]),'Retry after rollback succeeds with a fresh review');
+    gc_assert(count(array_filter($bulkState(),fn($row)=>$row['taken']===''&&$row['precision']==='unknown'&&$row['place']===''&&$row['lat']===null&&$row['lon']===null))===3,'Selected fields can explicitly be cleared without clearing titles');
+    $busy=['id'=>str_repeat('7',32),'gallery_id'=>$bulkGallery,'status'=>'deleting'];$pdo->prepare('INSERT INTO settings(`key`,value) VALUES(?,?)')->execute(['gallery_delete_'.$bulkGallery,json_encode($busy)]);
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-preview',$request)[0]===409,'A gallery being deleted cannot be bulk edited');
+    $pdo->prepare('DELETE FROM settings WHERE `key`=?')->execute(['gallery_delete_'.$bulkGallery]);
+
+    $renamePlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'Renamed']]),'Review before a gallery rename');
+    $pdo->prepare('UPDATE galleries SET name=? WHERE id=?')->execute(['Renamed metadata gallery',$bulkGallery]);
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$renamePlan['token'],'confirm_name'=>$renamePlan['name']])[0]===409,'Renaming a gallery invalidates an older name confirmation');
+    $pdo->prepare('UPDATE galleries SET name=? WHERE id=?')->execute(['Samlet metadata',$bulkGallery]);
+    $uploadPlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['place'=>'Concurrent upload']]),'Review before a new upload');
+    $extra=imagecreatetruecolor(16,12);imagefill($extra,0,0,imagecolorallocate($extra,20,210,110));imagejpeg($extra,$temp.'/extra-bulk.jpg');imagedestroy($extra);
+    gc_ok(gc_request($admin,'POST',$bulkPath.'/photos',['file'=>new CURLFile($temp.'/extra-bulk.jpg','image/jpeg','extra-bulk.jpg')],null,true),'Add a new image after review');
+    $afterUpload=$bulkState();gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$uploadPlan['token'],'confirm_name'=>$uploadPlan['name']])[0]===409&&$bulkState()===$afterUpload,'A new image invalidates the entire earlier review');
+    $secondId=bin2hex(random_bytes(16));$pdo->prepare('INSERT INTO users(id,email,name,password,admin) VALUES(?,?,?,?,1)')->execute([$secondId,'second-admin@example.test','Second admin',password_hash('second-admin-password',PASSWORD_DEFAULT)]);
+    $secondAdmin=gc_client();gc_ok(security_test_complete_admin($secondAdmin,gc_request($secondAdmin,'POST','/login',['email'=>'second-admin@example.test','password'=>'second-admin-password']),'gc_request'),'Second synthetic admin has an independent confirmed MFA session');
+    $boundPlan=gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-preview',['changes'=>['title'=>'Fælles titel','lat'=>55.6,'lon'=>12.3]]),'Review a common title and GPS');
+    gc_assert(gc_request($secondAdmin,'POST',$bulkPath.'/metadata-apply',['token'=>$boundPlan['token'],'confirm_name'=>$boundPlan['name']])[0]===409,'Even another fully authenticated admin cannot reuse this session review');
+    $pdo->prepare('UPDATE users SET admin=0 WHERE id=?')->execute([$owner['id']]);
+    gc_assert(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$boundPlan['token'],'confirm_name'=>$boundPlan['name']])[0]===403,'Admin privilege removal after preview prevents applying metadata');
+    $pdo->prepare('UPDATE users SET admin=1 WHERE id=?')->execute([$owner['id']]);
+    gc_ok(gc_request($admin,'POST',$bulkPath.'/metadata-apply',['token'=>$boundPlan['token'],'confirm_name'=>$boundPlan['name']]),'Original admin can commit the reviewed title and GPS after rights are restored');
+    gc_assert(count(array_filter($bulkState(),fn($row)=>$row['title']==='Fælles titel'&&(float)$row['lat']===55.6&&(float)$row['lon']===12.3))===4,'Common title and both coordinates update all four files');
+
     echo "\n$checks checks, $failures failures\n";
 }catch(Throwable $error){$failures++;fwrite(STDERR,$error->getMessage()."\n");if(is_file($temp.'/server.log'))fwrite(STDERR,file_get_contents($temp.'/server.log'));}
 finally{if(is_resource($server)){proc_terminate($server);proc_close($server);}$pdo->exec('DROP DATABASE IF EXISTS `'.$database.'`');gc_remove($temp);}

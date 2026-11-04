@@ -5,7 +5,7 @@ import shutil
 import sys
 
 root = Path(__file__).resolve().parents[1]
-if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing'], ['--member-sharing'], ['--gallery-delete']):
+if sys.argv[1:] not in ([], ['--video-thumbnails'], ['--storage-overview'], ['--design-news'], ['--signal-sharing'], ['--member-sharing'], ['--gallery-delete'], ['--gallery-bulk-metadata']):
     raise SystemExit('Unknown package option')
 thumbnails = sys.argv[1:] == ['--video-thumbnails']
 storage = sys.argv[1:] == ['--storage-overview']
@@ -13,8 +13,9 @@ design = sys.argv[1:] == ['--design-news']
 sharing = sys.argv[1:] == ['--signal-sharing']
 members = sys.argv[1:] == ['--member-sharing']
 gallery_delete = sys.argv[1:] == ['--gallery-delete']
-thin = thumbnails or storage or sharing or members or gallery_delete
-out = root / 'dist' / ('lexgalleri-gallery-delete' if gallery_delete else 'lexgalleri-member-sharing' if members else 'lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
+bulk_metadata = sys.argv[1:] == ['--gallery-bulk-metadata']
+thin = thumbnails or storage or sharing or members or gallery_delete or bulk_metadata
+out = root / 'dist' / ('lexgalleri-gallery-bulk-metadata' if bulk_metadata else 'lexgalleri-gallery-delete' if gallery_delete else 'lexgalleri-member-sharing' if members else 'lexgalleri-signal-sharing' if sharing else 'lexgalleri-design-news' if design else 'lexgalleri-storage-overview' if storage else 'lexgalleri-video-thumbnails' if thumbnails else 'lexgalleri-telefon-mp4')
 if out.exists():
     shutil.rmtree(out)
 files = {str(p.relative_to(root)): str(p.relative_to(root))
@@ -31,7 +32,7 @@ if design:
     files['sql/008_gallery_news_activity.sql'] = 'private/migrations/008_gallery_news_activity.sql'
 elif not thin:
     files['sql/007_reusable_phone_invitations.sql'] = 'private/migrations/007_reusable_phone_invitations.sql'
-files['INSTALLER.md'] = ('installation/gallery-delete/INSTALLER.md' if gallery_delete else 'installation/member-sharing/INSTALLER.md' if members else 'installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
+files['INSTALLER.md'] = ('installation/gallery-bulk-metadata/INSTALLER.md' if bulk_metadata else 'installation/gallery-delete/INSTALLER.md' if gallery_delete else 'installation/member-sharing/INSTALLER.md' if members else 'installation/signal-sharing/INSTALLER.md' if sharing else 'installation/design-news/INSTALLER.md' if design else 'installation/storage-overview/INSTALLER.md' if storage else 'installation/video-thumbnails/INSTALLER.md' if thumbnails else 'installation/telefon-mp4/INSTALLER.md')
 sums = []
 for target, source in sorted(files.items()):
     src, dst = root / source, out / target

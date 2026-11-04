@@ -828,11 +828,71 @@ function throttle(string $bucket,int $max=10): void {
     if ((int)one('SELECT attempts FROM login_limits WHERE bucket=?',[$key])['attempts']>$max) fail(429,'For mange forsøg. Vent 15 minutter');
     query('DELETE FROM login_limits WHERE expires<?',[time()]);
 }
+// One bounded, session-bound review at a time. Only fully authenticated admins
+// can preview or apply, and the apply transaction checks the reviewed metadata.
+function gallery_metadata_changes(array $body): array {
+    if(array_keys($body)!==['changes']||!is_array($body['changes'])||!$body['changes']||array_is_list($body['changes']))fail(400,'Vælg de felter, der skal ændres.');
+    $b=$body['changes'];$allowed=['title','taken','precision','place','lat','lon'];
+    if(array_diff(array_keys($b),$allowed))fail(400,'Et felt kan ikke ændres samlet.');
+    $changes=[];
+    if(array_key_exists('title',$b))$changes['title']=text($b,'title',200,true);
+    if(array_key_exists('taken',$b)||array_key_exists('precision',$b)){
+        if(!array_key_exists('taken',$b)||!array_key_exists('precision',$b))fail(400,'Angiv både dato og datopræcision.');
+        $changes['taken']=text($b,'taken',32);$changes['precision']=text($b,'precision',16,true);validate_date($changes['taken'],$changes['precision']);
+    }
+    if(array_key_exists('place',$b))$changes['place']=text($b,'place',200);
+    if(array_key_exists('lat',$b)||array_key_exists('lon',$b)){
+        if(!array_key_exists('lat',$b)||!array_key_exists('lon',$b))fail(400,'Angiv begge koordinater.');
+        $lat=$b['lat'];$lon=$b['lon'];
+        if(($lat===null)!==($lon===null)||$lat!==null&&(!is_numeric($lat)||!is_numeric($lon)||!is_finite((float)$lat)||!is_finite((float)$lon)||abs((float)$lat)>90||abs((float)$lon)>180))fail(400,'Ugyldige koordinater.');
+        $changes['lat']=$lat===null?null:(float)$lat;$changes['lon']=$lon===null?null:(float)$lon;
+    }
+    return $changes;
+}
+function gallery_metadata_snapshot(array $gallery,bool $lock=false): array {
+    $hash=hash_init('sha256');hash_update($hash,json_encode([$gallery['id'],$gallery['name']],JSON_THROW_ON_ERROR));$count=0;
+    $statement=query('SELECT id,title,taken,`precision`,place,lat,lon,mime FROM photos WHERE gallery_id=? ORDER BY id'.($lock?' FOR UPDATE':''),[$gallery['id']]);
+    while($photo=$statement->fetch()){hash_update($hash,json_encode($photo,JSON_THROW_ON_ERROR)."\n");$count++;}
+    return ['version'=>hash_final($hash),'count'=>$count];
+}
+function gallery_metadata_preview(string $g,array $body): array {
+    $admin=user(true);$changes=gallery_metadata_changes($body);
+    return gallery_delete_lock($g,function()use($g,$admin,$changes){
+        access($g);$gallery=one('SELECT id,name FROM galleries WHERE id=?',[$g]);$snapshot=gallery_metadata_snapshot($gallery);
+        if(!$snapshot['count'])fail(400,'Galleriet indeholder ingen billeder eller videoer.');
+        $plan=['token'=>uid(),'gallery_id'=>$g,'admin_id'=>$admin['id'],'name'=>$gallery['name'],'changes'=>$changes,'version'=>$snapshot['version'],'count'=>$snapshot['count'],'expires'=>time()+600];
+        $_SESSION['gallery_metadata_preview']=$plan;
+        return array_intersect_key($plan,array_flip(['token','gallery_id','name','changes','count','expires']));
+    });
+}
+function gallery_metadata_apply(string $g,array $body): array {
+    global $db;
+    $admin=user(true);
+    if(array_diff(array_keys($body),['token','confirm_name'])||!is_string($body['token']??null)||!is_string($body['confirm_name']??null))fail(400,'Bekræft gennemgangen med galleriets navn.');
+    $plan=$_SESSION['gallery_metadata_preview']??null;
+    if(!is_array($plan)||$plan['gallery_id']!==$g||$plan['admin_id']!==$admin['id']||!hash_equals($plan['token'],$body['token'])||$plan['expires']<time())fail(409,'Gennemgangen er udløbet eller ændret. Gennemgå ændringerne igen.');
+    if($body['confirm_name']!==$plan['name'])fail(400,'Skriv galleriets navn præcist for at bekræfte.');
+    return gallery_delete_lock($g,function()use($g,$plan,$db){
+        $db->beginTransaction();
+        try{
+            one('SELECT id FROM users WHERE id=? FOR UPDATE',[$plan['admin_id']]);user(true);
+            $gallery=one('SELECT id,name FROM galleries WHERE id=? FOR UPDATE',[$g]);
+            if(!$gallery)fail(404,'Galleriet findes ikke.');
+            access($g);$snapshot=gallery_metadata_snapshot($gallery,true);
+            if(!hash_equals($plan['version'],$snapshot['version'])||$plan['count']!==$snapshot['count'])fail(409,'Galleriet er ændret siden gennemgangen. Gennemgå ændringerne igen.');
+            $set=[];$args=[];
+            foreach($plan['changes'] as $field=>$value){$set[]='`'.$field.'`=?';$args[]=$value;}
+            $args[]=$g;$changed=query('UPDATE photos SET '.implode(',',$set).' WHERE gallery_id=?',$args)->rowCount();
+            $db->commit();unset($_SESSION['gallery_metadata_preview']);
+            return ['ok'=>true,'gallery_id'=>$g,'count'=>$snapshot['count'],'changed'=>$changed];
+        }catch(Throwable $error){if($db->inTransaction())$db->rollBack();throw $error;}
+    });
+}
 function route(string $method,string $path): never {
     global $db,$config,$private,$base;
     if ($method==='GET' && $path==='/status') {
         $installed=one("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='users'");
-        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'gallery_delete'=>true,'gallery_delete_requests'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'member_gallery_sharing'=>gallery_permissions_ready(),'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
+        send(['setup'=>!$installed || !one('SELECT id FROM users LIMIT 1'),'account_security_version'=>1,'account_security_ready'=>lg_security_ready(),'capabilities'=>['multi_gallery_invitations'=>gallery_permissions_ready(),'gallery_edit'=>true,'gallery_bulk_metadata'=>true,'gallery_delete'=>true,'gallery_delete_requests'=>true,'member_delete'=>function_exists('lg_security_delete_member'),'media_delete'=>true,'media_delete_requests'=>media_delete_requests_ready(),'theme_delete'=>true,'gallery_create'=>true,'reusable_phone_invitations'=>reusable_invitations_ready(),'direct_mp4_upload'=>is_file($private.'/lychee-import.php'),'video_thumbnails'=>true,'storage_overview'=>true,'member_gallery_sharing'=>gallery_permissions_ready(),'gallery_news'=>activity_ready(),'member_activity'=>activity_ready(),'compact_gallery'=>true]]);
     }
     if ($method==='POST' && $path==='/setup') {
         $b=body();$key=$config['setup_token']??'';
@@ -932,6 +992,9 @@ function route(string $method,string $path): never {
         if($method==='POST')send(gallery_share_members($m[1],body()));
     }
     if($method==='PUT'&&preg_match('~^/admin/galleries/([a-f0-9]{32})/owner$~D',$path,$m))send(gallery_assign_owner($m[1],body()));
+    if($method==='POST'&&preg_match('~^/galleries/([a-f0-9]{32})/metadata-(preview|apply)$~D',$path,$m)){
+        user(true);send($m[2]==='preview'?gallery_metadata_preview($m[1],body()):gallery_metadata_apply($m[1],body()));
+    }
     if ($method==='GET' && $path==='/galleries') send(activity_galleries($u));
     if($method==='GET'&&$path==='/news'){
         activity_require();$list=activity_galleries($u);$g=$_GET['gallery_id']??'';

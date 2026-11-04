@@ -408,8 +408,9 @@ async function galleryView(){
   }
   if(!galleryRequestActive(generation,account,requestView,requestGallery))return;
   photos=result.photos;permissions=result.permissions;
-  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${memberSharingAvailable()?'<button class="secondary" id="member-sharing" type="button">Del med medlemmer</button>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${wholeGalleryButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
+  content.innerHTML=`<button class="secondary" id="back">← Alle gallerier</button><div class="heading" style="margin-top:26px"><div><div class="eyebrow">🔒 Privat galleri</div><h1 id="gallery-title" style="margin:12px 0">${esc(requestGallery.name)}</h1><p class="muted"><span id="gallery-description">${esc(requestGallery.description)}</span> · <span id="gallery-media-count">${photos.length} billeder</span></p></div><div class="gallery-actions">${permissions.upload?'<button id="upload">＋ Tilføj billeder / video</button><input id="files" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,.mp4" hidden>':''}${memberSharingAvailable()?'<button class="secondary" id="member-sharing" type="button">Del med medlemmer</button>':''}<button class="secondary" id="share-gallery" type="button">Del via Signal</button><button class="secondary" id="copy-gallery-link" type="button">Kopiér link</button>${galleryEditButtonMarkup()}${galleryBulkMetadataButtonMarkup()}${wholeGalleryButtonMarkup()}${galleryDeletionToggleMarkup()}</div></div><div id="gallery-live-news" hidden></div><div class="tools"><input id="search-photo" placeholder="Søg efter titel, sted eller uploader…" aria-label="Søg i billeder"><select id="sort" aria-label="Sortering"><option value="taken">Optaget · nyeste først</option><option value="uploaded">Senest uploadet</option></select></div><p class="muted">Billeder: højst 25 MB. MP4-video: højst 100 MB pr. fil. Videoers afspilning afhænger af browserens understøttelse.</p><div id="upload-status" role="status"></div>${galleryDeletionToolsMarkup()}<div id="photo-grid" class="photo-grid"></div>`;
   $('#back').onclick=()=>refreshGalleryView('galleries');drawPhotos(photos);
+  if($('#bulk-gallery-metadata'))$('#bulk-gallery-metadata').onclick=bulkGalleryMetadata;
   const wholeDelete=$('#whole-gallery-delete')||$('#whole-gallery-request');if(wholeDelete)wholeDelete.onclick=()=>wholeGalleryDialog(requestGallery);
   $('#share-gallery').onclick=()=>shareGallery(requestGallery);
   if($('#member-sharing'))$('#member-sharing').onclick=()=>memberSharingDialog(requestGallery);
@@ -489,6 +490,52 @@ async function deletionRequestsView(){
       };
     };
   }
+}
+function galleryBulkMetadataButtonMarkup(){
+  return me?.admin&&serverCapabilities.gallery_bulk_metadata===true?'<button class="secondary" id="bulk-gallery-metadata" type="button">Redigér alle billeder</button>':'';
+}
+function bulkGalleryMetadata(){
+  if(!me?.admin||serverCapabilities.gallery_bulk_metadata!==true||!current)return;
+  const account=accountGeneration,gallery=current;
+  modal('Redigér oplysninger for hele galleriet',`<div class="dialog-content"><form id="gallery-bulk-form"><p>Vælg de oplysninger, der skal være ens på alle billeder og videoer i <strong>${esc(gallery.name)}</strong>. Felter uden flueben bevares.</p><fieldset id="bulk-fields"><label><input type="checkbox" data-bulk-field="date"> Dato og datopræcision</label><div data-bulk-controls="date"><label>Datopræcision<select name="precision" disabled>${[['day','Dag'],['exact','Dato og klokkeslæt'],['month','Måned'],['year','År'],['circa','Cirka år'],['unknown','Ukendt']].map(([v,label])=>`<option value="${v}">${label}</option>`).join('')}</select></label><label>Dato<input name="taken" placeholder="2026-11-01" disabled></label><p class="muted">Dag: 2026-11-01 · Tid: 2026-11-01T12:30 · Måned: 2026-11 · År: 2026. Tom ved ukendt dato.</p></div><label><input type="checkbox" data-bulk-field="place"> Sted</label><div data-bulk-controls="place"><label>Fælles sted<input name="place" maxlength="200" disabled></label></div><label><input type="checkbox" data-bulk-field="title"> Titel</label><div data-bulk-controls="title"><label>Fælles titel<input name="title" maxlength="200" required disabled></label><p class="muted">Den samme titel erstatter de nuværende titler.</p></div><label><input type="checkbox" data-bulk-field="gps"> GPS-koordinater</label><div data-bulk-controls="gps" class="row"><label>Breddegrad<input name="lat" type="number" step="any" min="-90" max="90" disabled></label><label>Længdegrad<input name="lon" type="number" step="any" min="-180" max="180" disabled></label></div><p class="muted">Et valgt tomt sted eller to tomme koordinater fjerner de pågældende oplysninger.</p></fieldset><p class="error" role="alert"></p><button type="submit" id="bulk-preview">Gennemgå ændringer</button><section id="bulk-review" class="panel" hidden><h3>Kontrollér ændringerne</h3><p id="bulk-review-count"></p><ul id="bulk-review-values"></ul><label>Skriv galleriets navn for at bekræfte<input id="bulk-confirm-name" autocomplete="off"></label><button type="button" id="bulk-apply">Gem på alle billeder og videoer</button></section><p id="bulk-status" role="status" aria-live="polite"></p></form></div>`);
+  const generation=photoViewerGeneration,form=$('#gallery-bulk-form'),fields=$('#bulk-fields'),review=$('#bulk-review'),status=$('#bulk-status');let plan=null,pending=false;
+  const active=()=>account===accountGeneration&&generation===photoViewerGeneration&&current?.id===gallery.id&&me?.admin&&form.isConnected&&M.open;
+  const invalidate=()=>{plan=null;review.hidden=true;$('#bulk-confirm-name').value='';};
+  const busy=value=>{pending=value;fields.disabled=value;$('#bulk-preview').disabled=value;$('#bulk-apply').disabled=value;$('#close-modal').disabled=value;};
+  const blockClose=event=>{if(active()&&pending){event.preventDefault();event.stopImmediatePropagation();}};
+  M.addEventListener('cancel',blockClose,true);M.addEventListener('close',()=>M.removeEventListener('cancel',blockClose,true),{once:true});
+  for(const checkbox of form.querySelectorAll('[data-bulk-field]'))checkbox.onchange=()=>{invalidate();for(const input of form.querySelectorAll('[data-bulk-controls="'+checkbox.dataset.bulkField+'"] input,[data-bulk-controls="'+checkbox.dataset.bulkField+'"] select'))input.disabled=!checkbox.checked;};
+  fields.addEventListener('input',invalidate);
+  form.onsubmit=async event=>{
+    event.preventDefault();if(pending||!active())return;invalidate();form.querySelector('.error').textContent='';
+    const data=new FormData(form),changes={};
+    for(const checkbox of form.querySelectorAll('[data-bulk-field]:checked')){
+      const key=checkbox.dataset.bulkField;
+      if(key==='date'){changes.taken=String(data.get('taken')||'');changes.precision=String(data.get('precision')||'');}
+      else if(key==='gps'){changes.lat=data.get('lat')===''?null:Number(data.get('lat'));changes.lon=data.get('lon')===''?null:Number(data.get('lon'));}
+      else changes[key]=String(data.get(key)||'');
+    }
+    if(!Object.keys(changes).length){form.querySelector('.error').textContent='Vælg mindst ét felt med flueben.';return;}
+    busy(true);status.textContent='Henter gennemgang…';
+    try{
+      const reply=await api('/galleries/'+gallery.id+'/metadata-preview','POST',{changes});if(!active())return;
+      if(!reply||typeof reply.token!=='string'||!Number.isInteger(reply.count)||reply.count<1||reply.gallery_id!==gallery.id||typeof reply.name!=='string'||!reply.changes)throw Error('Serveren kunne ikke bekræfte gennemgangen.');
+      plan=reply;$('#bulk-review-count').textContent=reply.count+' billeder og videoer i '+reply.name+' omfattes af ændringen.';
+      const labels={title:'Titel',taken:'Dato',precision:'Datopræcision',place:'Sted',lat:'Breddegrad',lon:'Længdegrad'};
+      $('#bulk-review-values').innerHTML=Object.entries(reply.changes).map(([key,value])=>'<li><strong>'+esc(labels[key]||key)+':</strong> '+esc(value===null||value===''?'Fjernes / ukendt':String(value))+'</li>').join('');
+      review.hidden=false;status.textContent='Intet er gemt endnu.';
+    }catch(error){if(active()){form.querySelector('.error').textContent=error.message;status.textContent='';}}finally{if(active())busy(false);}
+  };
+  $('#bulk-apply').onclick=async()=>{
+    if(pending||!active()||!plan)return;
+    if($('#bulk-confirm-name').value!==plan.name){form.querySelector('.error').textContent='Skriv galleriets navn præcist for at bekræfte.';return;}
+    const reviewed=plan;busy(true);form.querySelector('.error').textContent='';status.textContent='Gemmer de gennemgåede ændringer…';
+    try{
+      const reply=await api('/galleries/'+gallery.id+'/metadata-apply','POST',{token:reviewed.token,confirm_name:reviewed.name});if(!active())return;
+      if(reply?.ok!==true||reply.gallery_id!==gallery.id||reply.count!==reviewed.count||!Number.isInteger(reply.changed))throw Error('Serveren kunne ikke bekræfte ændringen. Opdatér galleriet og kontrollér oplysningerne.');
+      plan=null;closeModal();await galleryView();toast(reply.count+' billeder og videoer gennemgået; '+reply.changed+' ændret.');
+    }catch(error){if(active()){invalidate();form.querySelector('.error').textContent=error.message;status.textContent='Opdatér galleriet ved tvivl. En ny gennemgang er påkrævet før et nyt forsøg.';}}finally{if(active())busy(false);}
+  };
 }
 function galleryEditButtonMarkup(){
   if(!me?.admin&&permissions.edit!==true)return '';
